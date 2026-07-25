@@ -1,0 +1,46 @@
+sequenceDiagram
+    participant U as User (Telegram)
+    participant P as TaskIntentParser
+    participant I as IdempotencyManager
+    participant E as Domain Engine<br/>(Task/Project/Workflow/...)
+    participant B as EventBus
+    participant PR as ProjectionEngine
+    participant RM as Read Models<br/>(Tasks / LIFE_*)
+    participant TL as LIFE_TIMELINE
+    participant EX as Life Execution OS<br/>(future, reads only)
+
+    U->>P: "帮我建一个续签保险的任务，下周三前完成"
+    P->>I: parsed intent + params
+    I->>E: createTask / createProject / ...
+    E->>B: publish(TASK_CREATED / PROJECT_CREATED / ...)
+    B->>PR: dispatch(event)
+    PR->>RM: upsert row (single source of truth: Events)
+    PR->>TL: append timeline entry (always, regardless of entity type)
+    Note over EX: Execution subscribes to Events independently.<br/>Domain never calls Execution directly.
+    EX-->>B: (reads) TASK_CREATED, TASK_COMPLETED, ...
+    EX->>EX: place Reference in EXEC_VIEWS.Today (no data copy)
+
+    U->>E: completeTask(task_id)
+    E->>B: publish(TASK_COMPLETED)
+    B->>PR: dispatch(event)
+    PR->>RM: Tasks.status=DONE, remove from ActiveTasks
+    PR->>TL: append timeline entry
+    EX-->>B: (reads) TASK_COMPLETED
+    EX->>EX: update its own Today View display
+
+    Note over E,B: Conversion example — Task to Project
+    U->>E: convertTaskToProject(task_id, projectMeta)
+    E->>B: publish(TASK_CONVERTED_TO_PROJECT)
+    B->>PR: dispatch(event)
+    PR->>RM: Tasks.status=CONVERTED (source Task)
+    PR->>RM: LIFE_PROJECTS insert (new Project, source_task_id set)
+    PR->>TL: append 2 entries (closes Task lineage, opens Project lineage)
+
+    Note over E,B: v5.1 — reverse direction, Project to Task
+    U->>E: convertProjectToTask(project_id, taskMeta)
+    Note over E: precondition: no sub-projects,<br/>no non-terminal child Tasks
+    E->>B: publish(PROJECT_CONVERTED_TO_TASK)
+    B->>PR: dispatch(event)
+    PR->>RM: LIFE_PROJECTS.status=CONVERTED_TO_TASK (source Project)
+    PR->>RM: Tasks insert (new Task, source_project_id set)
+    PR->>TL: append 2 entries (mirror image of the Task-to-Project case)

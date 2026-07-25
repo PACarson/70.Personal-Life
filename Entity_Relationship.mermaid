@@ -1,0 +1,93 @@
+erDiagram
+    PROJECT ||--o{ TASK : "contains (project_id, optional)"
+    PROJECT ||--o{ PROJECT : "parent_project_id (sub-project)"
+    PROJECT }o--o{ PROJECT : "depends_on_project_ids"
+    PROJECT ||--o{ WORKFLOW : "project_id (optional)"
+    WORKFLOW ||--o{ TASK : "workflow_id + sequence_index"
+    TASK ||--o{ TASK : "parent_task_id (subtask)"
+    TASK }o--o{ TASK : "depends_on_task_ids"
+    NOTE |o--o| TASK : "converted_to (0..1)"
+    NOTE |o--o| PROJECT : "converted_to (0..1)"
+    TASK |o--o| PROJECT : "converted_to_project_id (Task to Project)"
+    PROJECT |o--o| TASK : "converted_to_task_id (Project to Task, v5.1)"
+    BUSINESS_RULE ||--o{ WORKFLOW_TEMPLATE : "business_rule_id"
+    WORKFLOW_TEMPLATE |o--o| PROJECT : "captured_from_project_id"
+    WORKFLOW_TEMPLATE ||--o{ WORKFLOW : "instantiated_from_template_id"
+    TIMELINE_ENTRY }o--|| PROJECT : "entity_type=PROJECT"
+    TIMELINE_ENTRY }o--|| TASK : "entity_type=TASK"
+    TIMELINE_ENTRY }o--|| WORKFLOW : "entity_type=WORKFLOW"
+    TIMELINE_ENTRY }o--|| NOTE : "entity_type=NOTE"
+    TIMELINE_ENTRY }o--|| WORKFLOW_TEMPLATE : "entity_type=WORKFLOW_TEMPLATE"
+
+    PROJECT {
+        string project_id PK
+        string parent_project_id FK
+        string execution_mode "SEQUENTIAL/PARALLEL/BRANCH"
+        string status "incl. CONVERTED_TO_TASK (v5.1)"
+        string source_task_id FK "if converted from a Task"
+        string converted_to_task_id FK "v5.1: if demoted to a Task"
+        string instantiated_from_template_id FK "v5.1: moved here from BusinessRule"
+        string decision_owner "v5.1"
+        string approval_status "v5.1: APPROVED/PENDING/REJECTED"
+    }
+    TASK {
+        string task_id PK
+        string project_id FK
+        string workflow_id FK
+        int sequence_index
+        string parent_task_id FK
+        string depends_on_task_ids
+        string status "incl. WAITING, CONVERTED, NOT_SELECTED (v5.1)"
+        string branch_group
+        string branch_resolution_policy "v5.1"
+        string priority_user
+        string priority_ai_recommended
+        string converted_to_project_id FK
+        string source_project_id FK "v5.1: if created by demoting a Project"
+    }
+    WORKFLOW {
+        string workflow_id PK
+        string project_id FK
+        string workflow_type "SEQUENTIAL/PARALLEL/BRANCH/LOOP/RECURRING"
+        string recurrence_rule
+        string status
+        string instantiated_from_template_id FK "v5.1"
+        string template_version_at_instantiation "v5.1, snapshot"
+    }
+    NOTE {
+        string note_id PK
+        string category
+        string converted_to_type
+        string converted_to_id FK
+        string status
+    }
+    REVIEW {
+        string review_id PK
+        string review_type "DAILY/WEEKLY/MONTHLY"
+        string period_start
+        string period_end
+    }
+    BUSINESS_RULE {
+        string rule_id PK
+        string name
+        string tags
+        string status "ACTIVE/DEPRECATED"
+    }
+    WORKFLOW_TEMPLATE {
+        string template_id PK
+        string business_rule_id FK "v5.1"
+        int version "v5.1"
+        string status "ACTIVE/FROZEN/DEPRECATED (v5.1)"
+        string workflow_shape
+        string captured_from_project_id FK
+        int usage_count
+        string last_used_at
+    }
+    TIMELINE_ENTRY {
+        string timeline_id PK
+        string entity_type
+        string entity_id FK
+        string event_type
+        string timestamp
+        string source_event_id FK
+    }
