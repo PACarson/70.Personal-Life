@@ -1,6 +1,14 @@
 /**
  * 00_ADR.gs
- * Personal Life OS v5.1（Design Phase）— Architecture Decision Records
+ * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Architecture Decision Records
+ *
+ * Changelog: v5.1 → v5.2（第三轮外部评审，"Architecture Freeze"
+ * 定位——不改功能，锁定未来 5-10 年的原则）——新增 ADR-016
+ * （Canonical Identity）、ADR-017（Canonical Entity Lifecycle）、
+ * ADR-018（项目正式定名 Personal Life OS）。v5.0/v5.1 的 15 条不变。
+ * 评审同时给 v5.1 的 ADR-012/014/015/007/008 五星评价，无需修改，
+ * 不重复记录评分本身（评分不是架构决定，不适合放进 ADR）。
  *
  * Changelog: v5.0 → v5.1（2026-07-24，综合两轮独立外部评审后）——
  * ADR-007 由 Proposed 转 Accepted；ADR-008 由 Proposed 转 Accepted
@@ -500,4 +508,230 @@
  *   ADR-006 的 Status 已更新为 Superseded，其原始 Context/Decision
  *   完整保留在该条目下，不删除、不覆写，供未来查阅"为什么最初只做
  *   了单向"这段历史。
+ */
+
+// ============================================================
+// ADR-2026-07-24-016：Canonical Identity（Domain + EntityType +
+//                      EntityID + Version）（v5.2 新增，Architecture
+//                      Freeze 第一条）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-016
+ * Status          : Accepted
+ * Decision Date   : 2026-07-24
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 新增 45_CanonicalRepresentation.gs；概念上影响
+ *                   全部实体
+ * Related ADR      : ADR-2026-07-24-012
+ *
+ * Context
+ *   第三轮评审提出：所有 Entity 必须永远携带
+ *   EntityID/Domain/EntityType/Version 四个部分组成的规范身份（例如
+ *   PROPERTY/TASK/000123/V1），使 Execution 的 Reference 和未来的
+ *   AI 消费方不会认错实体。这实际上是把 ADR-012 里 Execution
+ *   Reference 结构（ReferenceID/SourceOS/EntityType/EntityID/
+ *   Snapshot/LastSyncTime）里的核心四个字段，从"只给 Execution 用"
+ *   泛化成"所有实体、所有消费方都应该遵守的通用身份形状"。
+ *
+ * Decision
+ *   采纳这个四段式身份作为整个生态的规范身份（Canonical Identity）
+ *   概念，但不改变现有 EntityID 的生成机制——评审给的"000123"是
+ *   "唯一标识符"这个概念的示意，不是要求切换成连续数字计数器；沿用
+ *   既有日期+哈希方案（如"PRJ-20260724-B7C2D1"）作为 entity_id
+ *   部分，因为连续计数器需要一个集中式计数器，会重新引入既有
+ *   Soft Lock 设计本来就是为了避免的并发争用风险。version 部分对
+ *   没有真正版本概念的实体（Task/Project/Workflow/Note/Timeline/
+ *   Review/BusinessRule 顶层）固定取值 'V1'；WorkflowTemplate 用它
+ *   真实的 version 号。规范身份由新文件
+ *   45_CanonicalRepresentation.gs 里的纯函数
+ *   composeCanonicalIdentity_(domain, entityType, entityId, version)
+ *   按需现算，不作为冗余列存进每张表（除非四个部分里有哪个本来就是
+ *   该表已有的真实列）。
+ *
+ * Consequences
+ *   正面：ADR-012 的 Reference 结构本质上就是这个形状，不需要新增
+ *   任何机制，只是给它一个正式名字和一个共享的纯函数；未来 AI 消费
+ *   任何实体时，都能预期同一种四段式身份，不需要为每种实体类型分别
+ *   处理。
+ *   需要接受的代价：对大多数实体而言 version='V1' 是一个恒定的
+ *   空操作字段——这是刻意接受的代价，"所有实体统一同一种形状"比
+ *   "只在真正需要的地方加字段"更重要，这是评审明确要的一致性。
+ */
+
+// ============================================================
+// ADR-2026-07-24-017：Canonical Entity Lifecycle——新实体原生采用，
+//                      Task 保留原生状态并新增映射（v5.2 新增，
+//                      Architecture Freeze 第二条）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-017
+ * Status          : Accepted
+ * Decision Date   : 2026-07-24
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 27_ProjectEngine.gs, 28_WorkflowEngine.gs,
+ *                   45_CanonicalRepresentation.gs（新增）
+ * Related ADR      : ADR-2026-07-24-003（同一类"不动既有生产状态"的
+ *                   判断标准）
+ *
+ * Context
+ *   第三轮评审提出统一全平台的生命周期状态词汇（DRAFT → READY →
+ *   IN_PROGRESS → WAITING → BLOCKED → COMPLETED → ARCHIVED），
+ *   理由是让 Execution 不用为每个 Domain 各写一套 Status Mapping。
+ *   但 Task.status 的既有词汇（PENDING/DONE/CANCELLED/BLOCKED/
+ *   WAITING/CONVERTED/NOT_SELECTED）已经在生产环境的
+ *   20_TaskEngine.gs/12_TaskQueryEngine.gs/13_ActiveTasksEngine.gs
+ *   及 Telegram 输出里被使用，字面重命名（如 DONE→COMPLETED）会
+ *   破坏既有正常工作的代码，却拿不到对应的功能收益——跟
+ *   ADR-2026-07-24-003 判断 Sheet 是否该改名时是完全同一类权衡。
+ *
+ * Decision
+ *   两层处理：
+ *     (a) LIFE_PROJECTS.status / LIFE_WORKFLOWS.status（v5.2 之前
+ *         这两张表都还没有写过任何生产数据，改动零成本）直接原生
+ *         采用规范词汇，取代 v5.0/v5.1 临时选用的 PENDING/ACTIVE/
+ *         ON_HOLD/FINISHED 等值：
+ *         Project.status = DRAFT/READY/IN_PROGRESS/WAITING/
+ *         BLOCKED/COMPLETED/ARCHIVED/CANCELLED（+ Project 专属的
+ *         CONVERTED_TO_TASK）；Workflow.status = DRAFT/READY/
+ *         IN_PROGRESS/COMPLETED/CANCELLED（Workflow 本身不原生使用
+ *         WAITING/BLOCKED——那是它下面具体 Task/Step 的事，不是
+ *         整个 Workflow 的事）。
+ *     (b) Task.status 保留既有原生值不变（不做破坏性重命名），新增
+ *         永久性映射函数 mapTaskStatusToCanonical_(nativeStatus)
+ *         （45_CanonicalRepresentation.gs），供跨 Domain/Execution/
+ *         规范化报告场景使用：PENDING→READY, DONE→COMPLETED,
+ *         CANCELLED→CANCELLED, BLOCKED→BLOCKED, WAITING→WAITING,
+ *         CONVERTED→ARCHIVED, NOT_SELECTED→CANCELLED。
+ *
+ * Consequences
+ *   正面：从零开始的未来 Domain OS（Property OS 等）直接原生使用
+ *   规范词汇，没有任何历史包袱；Execution 不管数据来自 Task 的原生
+ *   词汇还是 Project/Workflow 的规范词汇，最终看到的都是统一的
+ *   规范状态。
+ *   需要接受的代价：Personal Life OS 内部并不 100% 统一——Task 用
+ *   自己的原生词汇，Project/Workflow 直接用规范词汇——这个不对称
+ *   是刻意且永久的（除非未来某天重写 Task Engine），本 ADR 把它
+ *   明确记录下来，避免被誤读成疏漏。
+ */
+
+// ============================================================
+// ADR-2026-07-24-018：项目正式定名 Personal Life OS，Library
+//                      Identifier 同步改名（v5.2 新增）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-018
+ * Status          : Accepted
+ * Decision Date   : 2026-07-24
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: Core 项目的 04_Main.gs（Library 调用方）
+ * Related ADR      : ADR-2026-07-24-001, ADR-2026-07-24-014
+ *
+ * Context
+ *   ADR-001 把"演进而非新建"定为决定，但把"Library Identifier 是否
+ *   同步改名"明确列为待 Carson 决定的问题，未预设答案。Carson 现已
+ *   确认沿用整个设计过程中一直使用的名字。
+ *
+ * Decision
+ *   显示名称：Personal Life OS。GAS Library Identifier：由
+ *   "ProductivityOS" 改为 "PersonalLifeOS"（PascalCase，Apps
+ *   Script Identifier 命名惯例）。Apps Script 项目在 Drive 里的
+ *   标题同步改为 "Personal Life OS"。实现阶段开始时需要的一次性
+ *   配套动作：Core 项目 04_Main.gs 里全部 ProductivityOS.xxx() 调用
+ *   改写为 PersonalLifeOS.xxx()，并在 Core 的 Resources/Libraries
+ *   设置里把 Library 引用重新指向改名后的 Identifier——这一步须与
+ *   Sprint 1 同一批完成，不能延后（否则 Library 引用会静默失效，
+ *   Core 报错）。
+ *
+ * Consequences
+ *   正面：名字终于匹配实际范围——一个横跨 Project/Task/Workflow/
+ *   Timeline 等多实体的 Domain 参考实现，继续叫"Productivity OS"
+ *   会持续制造误解。
+ *   需要接受的代价：一次机械但必须跟实现同批完成的跨项目改动
+ *   （Core 侧的调用点更新），风险低但不能省略。
+ */
+
+// ============================================================
+// ADR-2026-07-24-019：Sprint Acceptance Gate + Reference Domain
+//                      Certification（v5.2 冻结后追加，Sprint 1
+//                      实现阶段）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-019
+ * Status          : Accepted
+ * Decision Date   : 2026-07-24
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 全部（流程级决定，不是某个 Engine 的决定）
+ * Related ADR      : ADR-2026-07-24-014（Canonical Reference
+ *                   Implementation）
+ *
+ * Context
+ *   Sprint 1 代码交付后，评审明确反对"不做验收直接进 Sprint 2"，理由
+ *   是这条纪律本来就是本项目从设计阶段就一直坚持的"先验证、再固化"
+ *   （UEF Evidence-first、每个 ADR 都要求 Context/Decision/
+ *   Consequences 完整论证）在实现阶段的自然延伸——如果代码层面反而
+ *   不要求验证就能往下一层继续叠加，前面几轮评审建立的严谨性会在
+ *   实现阶段打折扣。
+ *
+ *   评审同时给出的四个验证场景和七项正式验收测试清单里，有两处
+ *   （"Business Rule → Workflow Template → Workflow Instance"场景、
+ *   "Task ⇄ Project Test"）实际引用的是 42_ConversionEngine.gs /
+ *   41_BusinessRuleEngine.gs——这两个模块按 Sprint 1-4 的既定范围
+ *   （评审自己在同一条消息里重申的"Sprint 1 范围：Identity/Task/
+ *   Project/Workflow/Query/Projection"）属于 Sprint 3，Sprint 1 的
+ *   代码交付里没有、也不应该有这两个模块的任何实现。这是评审消息
+ *   内部的一处范围不一致，本 ADR 明确指出并按"验收范围跟着 Sprint
+ *   范围走"的原则解决，不是忽略评审意见——具体处理见 Decision (c)。
+ *
+ * Decision
+ *   (a) 正式采用 Sprint → Acceptance Gate → Sprint 的开发节奏：一个
+ *       Sprint 的交付物在它自己的 Acceptance Gate 通过之前，不能被
+ *       视为"稳定到可以在其上继续叠加"。
+ *   (b) Reference Domain Certification 按已完成 Sprint 的 Gate
+ *       逐步授予，不是整个项目做完才一次性授予。Sprint 1 Gate 通过
+ *       后，Foundation 层模式（Identity/Task/Project/Workflow/
+ *       Timeline/Query/Projection）即被认证为 Canonical——未来
+ *       Property OS 等 Domain OS 可以直接在这层 Foundation 之上开始
+ *       建自己的 Foundation，不需要等 Personal Life OS 的 Sprint 3/4
+ *       也做完。
+ *   (c) Sprint 1 Acceptance Gate 范围严格对应 Sprint 1 实际交付的
+ *       模块：Migration Test / Existing Data Compatibility Test /
+ *       Workflow Test（洗衣流程场景）/ Timeline Integrity Test /
+ *       Metadata Traceability Test / Reference Contract Mock Test
+ *       六项。评审提出的 Business Rule/Workflow Template 场景、
+ *       Task⇄Project Test 移入 Sprint 3 自己的 Acceptance Gate（那两个
+ *       模块落地的时候），不在 Sprint 1 Gate 里空跑一个不存在的功能。
+ *   (d) Reference Contract Mock Test（评审唯一明确要求新增的一项）
+ *       落地为 35_Tests_Sprint1Acceptance.gs 里的
+ *       testReferenceContractMock_()——不依赖 Life Execution OS 真实
+ *       存在，用本项目已有的 CanonicalRepresentation.
+ *       composeCanonicalIdentity_ + TaskQueryEngine 模拟"Execution
+ *       构造 Reference → resolve → Domain 侧数据变化 → 重新 resolve
+ *       看到最新值"这条契约，提前暴露 Reference 结构本身是否够用，
+ *       不需要等 Execution 真正开始实现才发现契约有问题。
+ *   (e) 全部六项测试落地为单一入口 runSprint1AcceptanceGate()，
+ *       Logger.log 输出清晰的 PASS/FAIL 摘要。
+ *
+ * Consequences
+ *   正面：在问题影响范围还只有 Sprint 1（Foundation 层）时就发现
+ *   Migration 安全性、Timeline 完整性、Metadata 覆盖率等问题，比等到
+ *   Sprint 3/4 叠加更多模块之后再发现，修复成本低得多；"是否可以进
+ *   下一个 Sprint"从主观判断变成可复现、可验证的标准；Reference
+ *   Domain Certification 给未来实现 Property OS 等项目的人（包括
+ *   Carson 自己）一条清楚的信任边界——建立在已认证的 Foundation 之上，
+ *   不需要重新论证 Task/Workflow/Lifecycle 这些基础设计。
+ *   需要接受的代价：这些测试函数需要在真实 Apps Script 环境里手动执行
+ *   才有意义——本设计/实现过程本身不具备直接跑 Carson 真实 Spreadsheet
+ *   的能力，Gate 是否通过需要 Carson 实际运行
+ *   runSprint1AcceptanceGate() 后回报结果，不是本次交付就能自称"已经
+ *   通过"的状态；Sprint 2 目前不属于本项目范围（属于 Life Execution
+ *   OS），所以"Sprint 1 Gate 通过后才能进 Sprint 2"这条对本项目而言
+ *   实际约束的是"Sprint 1 Gate 通过后才能进 Sprint 3"。
  */

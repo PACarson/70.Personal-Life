@@ -1,6 +1,13 @@
 /**
  * 00_Module_Responsibility.gs
- * Personal Life OS v5.1（Design Phase）— Module Responsibility
+ * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Module Responsibility
+ *
+ * Changelog: v5.1 → v5.2——新增 45_CanonicalRepresentation.gs（见
+ * 本文件末尾「十」），承载 Canonical Identity 组装 + Task 状态到
+ * Canonical Lifecycle 的映射（ADR-016/017）。27_ProjectEngine.gs /
+ * 28_WorkflowEngine.gs 的 status 枚举同步更新为 Canonical Lifecycle
+ * 词汇，Engine Contract 本身职责不变，不重复列出。
  *
  * Changelog: v5.0 → v5.1（两轮外部评审后）——TaskEngine/ProjectEngine
  * 新增双向转换相关函数；WorkflowEngine 的 Branch 处理改为可配置策略；
@@ -308,4 +315,47 @@
  *                           恰好只有一行是 ACTIVE，若查询到多于一行，
  *                           属于数据不一致，应该记录告警而不是随便
  *                           返回其中一个）
+ */
+
+// ============================================================
+// 十、45_CanonicalRepresentation.gs（v5.2 新增）
+// ============================================================
+
+/**
+ * ── Engine Contract ──────────────────────────────────────────────────
+ *   Responsibilities      : 两件事，都是纯函数、都不碰任何 Sheet——
+ *                           (a) 组装 Canonical Identity（Domain+
+ *                           EntityType+EntityID+Version 四段式，见
+ *                           00_ADR.gs ADR-2026-07-24-016）；(b) 把
+ *                           Task 的原生 status 映射成 Canonical
+ *                           Entity Lifecycle 词汇（见
+ *                           00_ADR.gs ADR-2026-07-24-017）
+ *   Owns                  : Task 状态映射表本身（PENDING→READY 等
+ *                           七条对应关系，完整列表见
+ *                           00_Business_Rules.gs「十」）
+ *   Reads                 : 无（接收调用方已经准备好的字段，不查询
+ *                           任何表）
+ *   Writes                : 无
+ *   Public API            : composeCanonicalIdentity_(domain,
+ *                           entityType, entityId, version) /
+ *                           mapTaskStatusToCanonical_(nativeStatus)
+ *                           （Project/Workflow 不需要映射函数——
+ *                           它们的原生 status 本来就是 Canonical
+ *                           词汇，见 00_Sheets_Structure.gs「三」
+ *                           「四」）
+ *   Dependencies           : 无
+ *   Forbidden Dependencies  : Sheet 读写、任何其它 Engine
+ *   Pure Function           : YES（全部函数）
+ *   Replay Events            : NO
+ *   Projection                : NO
+ *   Thread Safety              : 不需要（无共享可变状态）
+ *   Side Effects               : NO
+ *   Notes                      : 本文件是全项目里除
+ *                           07_IdentityEngine.gs 外唯一一个"完全没有
+ *                           副作用、不依赖任何其它文件"的模块——刻意
+ *                           保持这样，因为 Canonical Identity/
+ *                           Lifecycle 是要给 Execution、未来 AI、
+ *                           未来其它 Domain OS 都能安全调用的基础
+ *                           设施，依赖越少越不容易被其它模块的变化
+ *                           连累
  */

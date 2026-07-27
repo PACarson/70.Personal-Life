@@ -1,0 +1,213 @@
+/**
+ * 07_IdentityEngine.gs
+ * Personal Life OS v5.2 — 业务身份引擎
+ *
+ * 【Sprint 1 新增】generateProjectIdentity() / generateWorkflowIdentity()，
+ * 跟既有 generateTaskIdentity() 同一套确定性哈希设计，不改动原有函数的
+ * 签名或算法。完整设计见设计包 00_Architecture.gs「三」P4 落地映射。
+ *
+ * 职责：为每个业务对象生成确定性的 SHA-256 身份标识符（Identity）。
+ * Identity 是「这个业务对象是否已经存在」的判断依据，与存储 ID（task_id /
+ * project_id / workflow_id）无关。
+ *
+ * 架构铁律：
+ *  - 本模块不读写任何 Sheet，不调用 EventBus
+ *  - 纯函数：输入相同 → 输出必然相同
+ *  - 不依赖时间戳、随机数、UUID
+ *
+ * 依赖：无（最底层工具模块，零外部依赖）
+ */
+
+/**
+ * ── Engine Contract ──────────────────────────────────────────────────
+ *   Responsibilities      : 为业务对象生成确定性 SHA-256 身份标识（Identity）
+ *   Owns                  : Identity 哈希算法本身（字段拼接顺序 + SHA-256）
+ *   Reads                 : 若干原始字段（按调用方传入的参数）
+ *   Writes                : none
+ *   Public API            : generateTaskIdentity, resolveIdentityDueValue,
+ *                           generateProjectIdentity（Sprint 1 新增）,
+ *                           generateWorkflowIdentity（Sprint 1 新增）
+ *   Dependencies          : 无（GAS 内建 Utilities.computeDigest 除外）
+ *   Forbidden Dependencies: Sheet, Events, Telegram/Output，任何其他 Engine
+ *   Pure Function         : YES
+ *   Thread Safety         : 天然安全（纯函数，无共享可变状态）
+ *   Side Effects          : NO
+ */
+
+var IdentityEngine = (function () {
+
+  // ============ SHA-256 ============
+
+  function sha256_(input) {
+    var bytes = Utilities.computeDigest(
+      Utilities.DigestAlgorithm.SHA_256,
+      String(input),
+      Utilities.Charset.UTF_8
+    );
+    return bytes.map(function (b) {
+      return ('0' + (b & 0xFF).toString(16)).slice(-2);
+    }).join('');
+  }
+
+  // ============ 文本标准化 ============
+
+  function normalizeWhitespace(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function normalizeCase(text) {
+    return String(text || '').toLowerCase();
+  }
+
+  /**
+   * 全角 ASCII → 半角。GAS 不支持 String.prototype.normalize()，用简化替代。
+   */
+  function normalizeUnicode(text) {
+    return String(text || '').replace(/[\uFF01-\uFF5E]/g, function (ch) {
+      return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+    });
+  }
+
+  /**
+   * 标准化标题：全角转半角 → 转小写 → 移除标点（只保留中英文字母/数字/
+   * 空格）→ 折叠空白。
+   */
+  function normalizeTitle(title) {
+    var s = normalizeUnicode(title);
+    s = normalizeCase(s);
+    s = s.replace(/[^\w\u4e00-\u9fa5\u0020]/g, ' ');
+    s = normalizeWhitespace(s);
+    return s;
+  }
+
+  // ============ 业务 Identity 生成 ============
+
+  /**
+   * 任务 Identity。组合字段：
+   * chat_id | normalized_title | due_date | repeat_rule | priority | category
+   */
+  function generateTaskIdentity(chatId, title, dueDate, repeatRule, priority, category) {
+    var parts = [
+      String(chatId || ''),
+      normalizeTitle(title),
+      String(dueDate || ''),
+      String(repeatRule || ''),
+      String(priority || 'MEDIUM'),
+      String(category || 'GENERAL')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  /**
+   * 为 generateTaskIdentity() 的 dueDate 参数位解析出正确的传入值——有
+   * due_datetime 用 due_datetime，否则回退 due_date。
+   * @param {Object} task
+   * @returns {string}
+   */
+  function resolveIdentityDueValue(task) {
+    return ((task && task.due_datetime) || (task && task.due_date) || '');
+  }
+
+  /**
+   * 【Sprint 1 新增】Project Identity。组合字段：
+   * chat_id | normalized_title | parent_project_id
+   *
+   * 不把 status/execution_mode 纳入 identity——这些是会随时间自然变化
+   * 的字段（跟 Task 的 due_date/priority/category 属于"定义这个对象
+   * 是什么"不同，Project 的身份不应该因为它从 DRAFT 变成 IN_PROGRESS
+   * 就被判定成"另一个不同的 Project"）。
+   *
+   * parent_project_id 纳入 identity 是为了允许"同名 Sub-Project 挂在
+   * 不同父 Project 下"这种合理场景不被误判重复（比如"清洁"作为
+   * Sub-Project 同时出现在"厨房翻新"和"浴室翻新"两个不同父 Project
+   * 下，应该是两个不同的 Project，不是重复）。
+   */
+  function generateProjectIdentity(chatId, title, parentProjectId) {
+    var parts = [
+      String(chatId || ''),
+      normalizeTitle(title),
+      String(parentProjectId || '')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  /**
+   * 【Sprint 1 新增】Workflow Identity。组合字段：
+   * chat_id | normalized_title | project_id | workflow_type
+   *
+   * project_id 纳入 identity，理由同 Project 的 parent_project_id——
+   * 允许同名 Workflow 挂在不同 Project 下不被误判重复。workflow_type
+   * 纳入是因为"洗衣流程"设计成 SEQUENTIAL 和设计成 PARALLEL 是两个
+   * 不同的编排定义，不应该共享同一个去重 identity。
+   */
+  function generateWorkflowIdentity(chatId, title, projectId, workflowType) {
+    var parts = [
+      String(chatId || ''),
+      normalizeTitle(title),
+      String(projectId || ''),
+      String(workflowType || '')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  /**
+   * 库存物品 Identity（既有函数，原样保留，不属于本次 Sprint 1 改动——
+   * 移除它有静默破坏未知调用方的风险，见 05_SheetUtils.gs 同类保守
+   * 判断标准）。
+   */
+  function generateInventoryIdentity(chatId, itemName, unit) {
+    var parts = [
+      String(chatId || ''),
+      normalizeTitle(itemName),
+      String(unit || '')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  /**
+   * 提醒 Identity（既有函数，原样保留，理由同上）。
+   */
+  function generateReminderIdentity(chatId, taskId, scheduledAt) {
+    var parts = [
+      String(chatId || ''),
+      String(taskId || ''),
+      String(scheduledAt || '')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  // ============ 开发者测试 ============
+
+  function testIdentity() {
+    Logger.log('=== IdentityEngine Test ===');
+
+    var t1 = generateTaskIdentity('123', '提醒我去买菜', '2026-07-01', '', 'MEDIUM', 'SHOPPING');
+    var t2 = generateTaskIdentity('123', '去买菜！', '2026-07-01', '', 'MEDIUM', 'SHOPPING');
+    Logger.log('t1 === t2 (不同说法)? ' + (t1 === t2) + '  (expected: true)');
+
+    var p1 = generateProjectIdentity('123', '厨房翻新', '');
+    var p2 = generateProjectIdentity('123', '清洁', 'PRJ-A');
+    var p3 = generateProjectIdentity('123', '清洁', 'PRJ-B');
+    Logger.log('p2 === p3 (同名不同父级)? ' + (p2 === p3) + '  (expected: false)');
+    Logger.log('p1 是否生成成功? ' + (!!p1) + '  (expected: true)');
+
+    var w1 = generateWorkflowIdentity('123', '洗衣流程', 'PRJ-A', 'SEQUENTIAL');
+    var w2 = generateWorkflowIdentity('123', '洗衣流程', 'PRJ-A', 'PARALLEL');
+    Logger.log('w1 === w2 (同名不同编排类型)? ' + (w1 === w2) + '  (expected: false)');
+
+    Logger.log('=== IdentityEngine Test DONE ===');
+  }
+
+  return {
+    sha256: sha256_,
+    normalizeTitle: normalizeTitle,
+    normalizeWhitespace: normalizeWhitespace,
+    normalizeCase: normalizeCase,
+    normalizeUnicode: normalizeUnicode,
+    generateTaskIdentity: generateTaskIdentity,
+    resolveIdentityDueValue: resolveIdentityDueValue,
+    generateProjectIdentity: generateProjectIdentity,
+    generateWorkflowIdentity: generateWorkflowIdentity,
+    testIdentity: testIdentity
+  };
+})();

@@ -1,72 +1,101 @@
-# Personal Life OS v5.1 — Design Phase
+# Personal Life OS — 设计 v5.2 冻结，Sprint 1 代码已交付，Acceptance
+# Gate 待跑
 
-Personal Life OS 是 Productivity OS 的演进版本（见 `00_ADR.js`
-ADR-2026-07-24-001），是 Personal AI Core 平台下的 **Canonical
-Reference Implementation**（v5.1 起正式定稿，见 ADR-2026-07-24-014）。
-本目录仍是只有文档、没有代码的设计包。v5.1 综合了两轮独立外部评审的
-反馈，在 v5.0 基础上做了六处新增、三处修订。
+正式定名：**Personal Life OS**（GAS Library Identifier:
+`PersonalLifeOS`，取代 `ProductivityOS`，见 `00_ADR.js`
+ADR-2026-07-24-018）。
 
-## v5.1 变更摘要
+## 现在处于哪个阶段
 
-两轮评审都认可 v5.0 的整体方向和 ADR-003/005/009；针对 ADR-007
-（Dashboard）、ADR-008（Branch）给出了具体修改意见，并各自提出了一项
-新增建议。综合结果：
+```
+设计阶段 v5.0→v5.1→v5.2（完成）
+        │
+Sprint 1 代码交付（完成，见 personal-life-os-sprint1-code/）
+        │
+Sprint 1 Acceptance Gate（待跑——见下方，需要 Carson 在真实环境执行）
+        │
+Sprint 3（Integration：Reminder/BusinessRule/Conversion，未开始）
+```
 
-| 编号 | 变更 | 状态 |
-|---|---|---|
-| ADR-007 Dashboard | Proposed → **Accepted**：Ownership 由展示的数据决定，不由名称决定（Domain Dashboard vs Execution Dashboard） | 已定稿 |
-| ADR-008 Branch | Proposed → **Accepted**：新增 Branch Resolution Policy（AUTO/KEEP_OPEN/RETURN_TO_QUEUE/WAITING/MANUAL）+ 新状态 NOT_SELECTED，合并两轮评审的不同建议 | 已定稿 |
-| ADR-006 Task→Project | Accepted → **Superseded**，由 ADR-015 取代 | 见下 |
-| ADR-010（新增） | Business Rule / Workflow Template 必须 Versioning | Accepted |
-| ADR-011（新增） | BusinessRule 拆分三层：Business Rule → Workflow Template → Workflow Instance | Accepted |
-| ADR-012（新增） | Domain is Producer, Execution is Consumer — Reference Integrity | Accepted |
-| ADR-013（新增） | Metadata 新增 decision_owner / approval_status | Accepted |
-| ADR-014（新增） | Personal Life OS 正式确立为 Canonical Reference Implementation | Accepted |
-| ADR-015（新增） | Task↔Project 转换扩展为双向（取代 ADR-006） | Accepted |
+Sprint 2（Goal/Vision/Today-Week View/Review/Waiting）不属于本项目，
+属于 Life Execution OS，见下方说明——不在这条链路里。
 
-本轮**没有**遗留 Proposed 状态的条目——两轮评审的意见经核对后互相
-兼容，均已合并进正式决定。
+## Sprint Acceptance Gate（ADR-2026-07-24-019，评审要求新增的流程）
 
-## 阅读顺序（不变）
+不是一次把 4 个 Sprint 写完才验证，而是 **Sprint → Gate → Sprint**：
+每个 Sprint 交付后先过自己的 Gate，通过才允许在其上继续叠加下一层。
+Gate 通过还带来 **Reference Domain Certification**——Sprint 1 Gate
+通过后，Foundation 层模式（Identity/Task/Project/Workflow/Timeline/
+Query/Projection）即被认证为 Canonical，未来 Property OS 等 Domain
+OS 可以直接信任、复用这层，不需要重新验证。
 
-1. `00_Architecture.js` — 新增 Principle 12（Producer/Consumer）、
-   P2 升级为 Canonical Reference Implementation
-2. `00_Domain_Boundary.js` — Dashboard 一节已定稿；新增「七」
-   Reference Integrity 契约
-3. `00_Module_Responsibility.js` — TaskEngine/ProjectEngine 新增双向
-   转换函数；WorkflowEngine 的 Branch 处理改写；BusinessRuleEngine
-   重构为管理两张表
-4. `00_Data_Ownership.js` — Metadata 由 9 字段扩为 11 字段
-5. `00_Entity_Relationship.js` + `Entity_Relationship.mermaid` —
-   BusinessRule 三层模型、双向转换关系
-6. `00_Event_Flow.js` + `Event_Flow.mermaid` — Business Rule 事件
-   改名/新增、PROJECT_CONVERTED_TO_TASK
-7. `00_Sheets_Structure.js` — 新增 LIFE_WORKFLOW_TEMPLATES 表
-8. `00_File_Map.js` — 无新增文件编号，仅更新既有文件的职责范围说明
-9. `00_Business_Rules.js` — 新增「七」Branch Resolution Policy、
-   「八」Decision Owner / Approval
-10. `00_ADR.js` — 15 条决策记录（8 条不变 + 3 条修订 + 6 条新增，
-    含 ADR-006 的 Superseded 记录）
+### Sprint 1 Gate 的六项测试
 
-## 两个原有新功能的最新状态
+代码见 `personal-life-os-sprint1-code/35_Tests_Sprint1Acceptance.js`，
+单一入口 `runSprint1AcceptanceGate()`：
 
-- **Task↔Project 转换**：v5.1 起双向（`00_ADR.js` ADR-015 取代
-  ADR-006），Project→Task 有明确前置条件（无 Sub-Project、无非终态
-  子 Task），规则见 `00_Business_Rules.js`「一」
-- **Project 记录重复性流程**：三层模型定稿（`00_ADR.js` ADR-011），
-  同一 BusinessRule 下的版本演进不影响已实例化的旧 Workflow
-  Instance（ADR-010），规则见 `00_Business_Rules.js`「三」
+1. **Migration Test** — `migrateSchemaPersonalLifeOS()` 正确追加新列，
+   不破坏既有列/顺序
+2. **Existing Data Compatibility Test** — 模拟一条"迁移前"的旧数据行
+   （新列全空），验证读取/更新/完成全部正常
+3. **Workflow Test（洗衣流程场景）** — Project→Workflow→Task→完成→
+   Workflow 自动 FINISHED 全链路
+4. **Timeline Integrity Test** — 每个实体的历史记录完整、按时间正序、
+   可追溯回 Events
+5. **Metadata Traceability Test** — User 创建 vs AI 创建两种路径下，
+   十一字段（含 decision_owner/approval_status）是否正确
+6. **Reference Contract Mock Test**（评审唯一明确要求新增的一项）—
+   不需要 Life Execution OS 真实存在，用
+   `CanonicalRepresentation.composeCanonicalIdentity_` + Query Engine
+   模拟"构造 Reference → resolve → Domain 数据变化 → 重新 resolve
+   看到最新值"这条契约，提前暴露 Reference 结构本身是否够用
 
-## 本包的生命周期（不变）
+### 一处范围澄清（评审消息内部的不一致，已按 ADR-019 处理）
 
-这些文件仍是设计阶段产物，Carson 确认后进入实现阶段时会并入
-Productivity OS 既有的 8 份治理文件，对应关系见 v5.0 版本的说明
-（未变化）。
+评审给的四个验证场景和七项测试清单里，"Business Rule → Workflow
+Template → Workflow Instance"场景和"Task ⇄ Project Test"引用的是
+`42_ConversionEngine.gs` / `41_BusinessRuleEngine.gs`——这两个模块
+按 Sprint 1-4 的既定范围（评审同一条消息里也重申了"Sprint 1 范围：
+Identity/Task/Project/Workflow/Query/Projection"）属于 **Sprint 3**，
+Sprint 1 代码里没有这两个模块的任何实现，无法测试一个不存在的东西。
+这两项验收挪到 Sprint 3 自己的 Gate（那两个模块真正落地的时候），
+不在 Sprint 1 Gate 里空跑。完整论证见 `00_ADR.js` ADR-2026-07-24-019。
 
-## 血缘与依据
+### 重要：Gate 是否通过需要 Carson 亲自跑
 
-v5.1 的全部变更均来自对两份独立外部评审意见的逐条核对——相同意见
-直接采纳、不同意见（如 Branch 处理方式）经分析后判断为互补而非
-冲突，予以合并，而不是任选其一。合并过程中发现的唯一潜在张力
-（ADR-007 两轮评审的表述方式略有不同）已在 ADR-007 的 Notes 段落
-说明取舍理由。
+这份测试代码不能被这次交付自称"已通过"——没有直接执行 Carson 真实
+Spreadsheet 的能力。请在 Apps Script 编辑器里跑一次
+`runSprint1AcceptanceGate()`，把 Logger 输出（尤其任何 ❌）贴回来，
+再决定要不要正式进 Sprint 3。
+
+## v5.2 Architecture Freeze 变更摘要（不变，见上一版）
+
+ADR-016（Canonical Identity）、ADR-017（Canonical Entity Lifecycle）、
+ADR-018（定名）——三条均 Accepted，完整内容见 `00_ADR.js`。
+
+## 阅读顺序
+
+设计文档：10 份 `00_*.js` + README + 两份 Mermaid 图，见
+`00_ADR.js` 完整决策清单（现有 19 条：15 条 v5.0/v5.1 + 3 条 v5.2 +
+1 条 Sprint 1 实现阶段追加的 ADR-019）。
+
+Sprint 1 代码：`personal-life-os-sprint1-code/` 目录，14 个功能文件 +
+1 个验收测试文件，部署顺序见下。
+
+## 部署顺序
+
+1. `setupSheets()`（15_Setup.js）
+2. `migrateSchemaPersonalLifeOS()`（11_ProjectionRebuilder 新函数，
+   **已有生产数据必须跑这一步**，见 15_Setup.js 文件头说明）
+3. Core 项目 Library 引用改指向 `PersonalLifeOS`，`04_Main.gs` 调用点
+   同步改名
+4. `createTriggers()`
+5. `runDiagnostics()`（15_Setup.js，基础冒烟测试）
+6. `runSprint1AcceptanceGate()`（35_Tests_Sprint1Acceptance.js，
+   **正式验收，见上）
+7. 全部通过 → 回报结果 → 讨论是否正式进 Sprint 3
+
+## 本包的生命周期
+
+设计阶段（v5.0 → v5.1 → v5.2）已结束。实现阶段的后续决定（如
+ADR-019）直接追加进 `00_ADR.js`，不再新增独立的"设计包版本号"。

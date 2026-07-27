@@ -1,6 +1,14 @@
 /**
  * 00_Sheets_Structure.gs
- * Personal Life OS v5.1（Design Phase）— Google Sheets Structure
+ * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Google Sheets Structure
+ *
+ * Changelog: v5.1 → v5.2——LIFE_PROJECTS.status / LIFE_WORKFLOWS.status
+ * 原生改用 Canonical Entity Lifecycle 词汇（见「三」「四」），Tasks
+ * 表不变（保留原生词汇，映射逻辑见
+ * 00_Business_Rules.gs「十」）。Canonical Identity（Domain+
+ * EntityType+EntityID+Version）不新增任何存储列——按需现算，见
+ * 00_ADR.gs ADR-2026-07-24-016。
  *
  * Changelog: v5.0 → v5.1——新增 LIFE_WORKFLOW_TEMPLATES 表（三层模型
  * 中间层）；LIFE_BUSINESS_RULES 简化为纯顶层分类；LIFE_WORKFLOWS 新增
@@ -73,11 +81,16 @@
  *   parent_project_id / depends_on_project_ids / source_task_id /
  *   archived_at / chat_id — 不变
  *
- *   status                     — v5.1 新增枚举值 CONVERTED_TO_TASK
- *                                （本 Project 已被降级转换为 Task，见
- *                                00_ADR.gs ADR-2026-07-24-015）；既有
- *                                PENDING/ACTIVE/ON_HOLD/COMPLETED/
- *                                CANCELLED/ARCHIVED 不变
+ *   status                     — v5.2 起原生采用 Canonical Entity
+ *                                Lifecycle（见 00_ADR.gs
+ *                                ADR-2026-07-24-017）：DRAFT / READY /
+ *                                IN_PROGRESS / WAITING / BLOCKED /
+ *                                COMPLETED / ARCHIVED / CANCELLED，
+ *                                + Project 专属的 CONVERTED_TO_TASK
+ *                                （v5.0/v5.1 曾用 PENDING/ACTIVE/
+ *                                ON_HOLD，v5.2 起统一替换，因为这两张
+ *                                表在 v5.2 定稿前从未写过生产数据，
+ *                                改动零成本）
  *   converted_to_task_id          — v5.1 新增，可空，本 Project 降级
  *                                转换后指向新 Task
  *   captured_as_rule_id              — v5.1 起废弃此列（v5.0 曾用于指向
@@ -108,8 +121,33 @@
 // ============================================================
 
 /**
- *   workflow_id / identity / project_id / title / workflow_type /
- *   status / recurrence_rule / loop_max_iterations / chat_id — 不变
+ *   workflow_id / identity / project_id / title / loop_max_iterations /
+ *   chat_id — 不变
+ *
+ *   recurrence_rule            — 【实现阶段核实后修正】简单字符串标签
+ *                                （'Daily'/'Weekly'/'Monthly'/
+ *                                'Yearly'，可空），直接复用既有
+ *                                ProductivityConfig.TASK_RECURRING
+ *                                同一套词汇——不是独立的 JSON 规则
+ *                                对象。这是对照
+ *                                09_TemporalParser.computeNextDueDateFromLabel
+ *                                (prevDueDateStr, recurringLabel) 的
+ *                                真实签名核实后的修正（v5.2 设计阶段
+ *                                曾设想为可序列化的复杂规则对象，实现
+ *                                阶段发现既有日期计算函数就是按这个
+ *                                简单标签工作，直接复用，不重新发明
+ *                                格式）
+ *   workflow_type              — 不变（SEQUENTIAL/PARALLEL/BRANCH/
+ *                                LOOP/RECURRING）
+ *   status                         — v5.2 起原生采用 Canonical Entity
+ *                                Lifecycle 的子集（见
+ *                                00_ADR.gs ADR-2026-07-24-017）：
+ *                                DRAFT / READY / IN_PROGRESS /
+ *                                COMPLETED / CANCELLED（Workflow 本身
+ *                                不用 WAITING/BLOCKED，那是它下面
+ *                                具体 Task 的事）；v5.0/v5.1 曾用
+ *                                PENDING/ACTIVE/FINISHED，v5.2 起
+ *                                替换
  *
  *   instantiated_from_template_id  — v5.1 新增，可空，若本 Workflow
  *                                （Instance）是从某个 WorkflowTemplate

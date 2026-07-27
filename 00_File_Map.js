@@ -1,6 +1,10 @@
 /**
  * 00_File_Map.gs
- * Personal Life OS v5.1（Design Phase）— File Map
+ * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * File Map
+ *
+ * Changelog: v5.1 → v5.2——新增 45_CanonicalRepresentation.gs
+ * （Foundation 层，见下方「一」）。
  *
  * Changelog: v5.0 → v5.1——41_BusinessRuleEngine.gs 现在同时管理
  * LIFE_BUSINESS_RULES 和 LIFE_WORKFLOW_TEMPLATES 两张表；
@@ -88,6 +92,9 @@
  *                              00_Module_Responsibility.gs「六」】
  *   42_ConversionEngine.gs                                        【新增，
  *                              v5.1 增加 Project→Task 反方向】
+ *   45_CanonicalRepresentation.gs                                    【v5.2
+ *                              新增，纯函数，见
+ *                              00_Module_Responsibility.gs「十」】
  *
  * ── 4. Integration（1个新文件）───────────────────────────────────────
  *   43_ReminderConnector.gs                                          【新增】
@@ -178,7 +185,11 @@
  *                    26_AnalyticsEngine.gs, 27_ProjectEngine.gs,
  *                    28_WorkflowEngine.gs, 29_NoteEngine.gs,
  *                    40_ReviewEngine.gs, 41_BusinessRuleEngine.gs,
- *                    42_ConversionEngine.gs
+ *                    42_ConversionEngine.gs,
+ *                    45_CanonicalRepresentation.gs（v5.2 新增，跟
+ *                    07_IdentityEngine.gs 归同一层——纯函数、承载
+ *                    跨实体的规范定义，符合 Domain 层"承载业务能力"
+ *                    的定义，不是通用读写基础设施）
  *
  *   Infrastructure : 01_SecureConfig.gs, 02_EventBus.gs, 03_Output.gs,
  *                    05_SheetUtils.gs, 10_ProjectionEngine.gs,

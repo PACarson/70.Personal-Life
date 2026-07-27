@@ -1,6 +1,10 @@
 /**
  * 00_Business_Rules.gs
- * Personal Life OS v5.1（Design Phase）— Business Rules
+ * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Business Rules
+ *
+ * Changelog: v5.1 → v5.2——新增「十」Task 状态到 Canonical Lifecycle
+ * 的完整映射表（ADR-017）。
  *
  * Changelog: v5.0 → v5.1（两轮外部评审后）——「一」新增 Project→Task
  * 反方向规则；「三」因三层模型重写；新增「七」Branch Resolution
@@ -252,3 +256,37 @@
 // ============================================================
 // 九、辨析补充（沿用 v5.0 结尾辨析，见「六」）
 // ============================================================
+
+// ============================================================
+// 十、Task 原生状态 → Canonical Entity Lifecycle 映射表
+//     （v5.2 新增，完整 ADR 见 00_ADR.gs ADR-2026-07-24-017）
+// ============================================================
+
+/**
+ *   Task 原生 status   | Canonical Lifecycle 值 | 说明
+ *   -------------------|------------------------|---------------------
+ *   PENDING             | READY                  | 尚未开始，可以开始
+ *   DONE                   | COMPLETED              | 完成
+ *   CANCELLED                 | CANCELLED              | 原生词汇恰好
+ *                       |                        | 和规范词汇相同
+ *   BLOCKED                     | BLOCKED                | 原生词汇恰好
+ *                       |                        | 和规范词汇相同
+ *   WAITING                       | WAITING                | 原生词汇恰好
+ *                       |                        | 和规范词汇相同
+ *   CONVERTED                       | ARCHIVED               | 已转换离开，
+ *                       |                        | 归入"已归档"类
+ *   NOT_SELECTED                       | CANCELLED              | 未被选中的
+ *                       |                        | 分支，归入
+ *                       |                        | "已取消"类（但
+ *                       |                        | Task 自己的原生
+ *                       |                        | status 仍保留
+ *                       |                        | NOT_SELECTED 这个
+ *                       |                        | 更精确的值，只有
+ *                       |                        | 对外规范化报告
+ *                       |                        | 时才折叠成
+ *                       |                        | CANCELLED）
+ *
+ * Project/Workflow 不需要映射表——v5.2 起它们的原生 status 直接就是
+ * Canonical Lifecycle 词汇（见 00_Sheets_Structure.gs「三」「四」），
+ * mapTaskStatusToCanonical_ 是本文件唯一需要的映射函数。
+ */

@@ -1,8 +1,17 @@
 /**
  * 00_Architecture.gs
- * Personal Life OS v5.1（Design Phase）— Architecture
+ * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Architecture
  *
  * Changelog
+ *   v5.1 → v5.2（第三轮外部评审，"Architecture Freeze"，2026-07-24）：
+ *   项目正式定名 Personal Life OS，Library Identifier 改为
+ *   PersonalLifeOS（见 00_ADR.gs ADR-2026-07-24-018）；新增
+ *   Canonical Identity（ADR-016）、Canonical Entity Lifecycle
+ *   （ADR-017）两条锁定未来 5-10 年的原则；新增
+ *   45_CanonicalRepresentation.gs 承载两者的纯函数实现。至此三轮
+ *   评审结束，设计阶段完成，进入 Sprint 1（Foundation）实现阶段。
+ *
  *   v5.0 → v5.1（2026-07-24，两轮外部评审后）：新增 Architecture
  *   Principle 12（Execution is Consumer, Domain is Producer，见
  *   00_ADR.gs ADR-2026-07-24-012）；P2 定位从"参考实现"升级为
