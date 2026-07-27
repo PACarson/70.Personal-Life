@@ -1,0 +1,481 @@
+/**
+ * 06_TaskIntentParser.gs
+ * Productivity OS v4.7 — 任务意图解析器
+ *
+ * 【2026-07-17 新增，ADR-2026-07-17-009，Carson 批准】parseTaskIntent()
+ * 的 TASK_CREATE 分支新增转发 reminder_policy（09_TemporalParser.gs
+ * extractDateTime() 新增的返回字段，null｜{offsets:[]}｜
+ * {offsets:[{value,unit}]}），createTaskIfNotExists 的 meta 对象同步
+ * 新增这个字段。新增 _formatReminderPolicyDisplay_()，在建任务回复里
+ * 只在用户显式覆盖提醒策略时追加一行确认文案（沿用 recurring 字段"只在
+ * 有值时才显示"的既有惯例）。完整跨项目设计见
+ * Reminder-Policy-Override_Architecture-Review.md 和本项目
+ * 00_Known_Limitations.gs 本次新增的解析范围扩展条目。
+ *
+ * 【V4.7 新增，Due Time Support，00_Architecture_Review.gs「七、
+ * Review #3」，Carson 2026-07-13 批准】parseTaskIntent() 的 TASK_CREATE
+ * 分支和 createTaskIfNotExists 的 meta 对象都新增转发 due_time/
+ * due_datetime（此前只转发 due_date）——沿用
+ * 00_Known_Limitations.gs"自然语言解析范围止于 due_date/recurring"这条
+ * 既有边界，这里是同一类"时间解析"能力的延伸，不是新增 category/
+ * priority 这类语义推断。新增共用辅助函数 _formatDueDisplay_()，5 处
+ * 展示文案统一在有 due_time 时于日期后追加"HH:mm"。
+ *
+ * 【V4.4 配套 HIGH RISK 1 修复】TASK_DONE/TASK_CANCEL 分支新增对
+ * completeTask/cancelTask 新返回信号（already_done/already_cancelled/
+ * invalid_state）的处理——20_TaskEngine.gs 现在会拦截"对已经是终态的
+ * 任务重复调用"，这里要如实回复"之前已经处理过"，不能再显示成好像这次
+ * 操作真的生效了一样。
+ *
+ * 【V4.2 审计修复】
+ *
+ * 1. HIGH RISK 1 配套修复：09_IdempotencyManager.gs 现在会在 3 秒内拿不到
+ *    锁时抛出 "SYSTEM_BUSY:" 开头的 Error（fail-fast，避免占用 Webhook
+ *    执行通道）。TASK_CREATE 分支现在 catch 住这个错误，回复用户"系统繁忙
+ *    请重试"，而不是让异常从 handleTaskIntent 裸抛出去。
+ *
+ * 2. MEDIUM RISK 1 配套修复：20_TaskEngine.completeTask/cancelTask 现在
+ *    会在任务不存在时拦截并返回 { not_found: true }（不再产生幽灵行）。
+ *    TASK_DONE/TASK_CANCEL 分支相应增加了对 not_found 的判断，回复
+ *    "找不到任务"而不是继续回"✅ 完成"这种误导性文案。
+ *
+ * 【V4 变更】
+ *
+ * 1. 【架构违规修复】原来的 _getActiveTasksForDisplay_ /
+ *    _getCompletedTasksForDisplay_ 直接调用 getSheet_/getHeaderMap_ 读
+ *    ActiveTasks/Tasks，绕过 QueryEngine，违反"所有查询必须经过 QueryEngine"
+ *    的架构铁律（见 00_Project_State.gs"已知Bug"第3条）。V4 起本文件全部
+ *    查询改经 12_TaskQueryEngine.gs，不再 import 05_SheetUtils.gs 的任何
+ *    Sheet 读取函数（只用它的 _cleanTitle_ 纯文本工具）。
+ *
+ * 2. 新增指令（对应 V4 规格书 Telegram Commands 小节）：
+ *    /today /week /month /priority /overdue /upcoming /recurring
+ *    /dashboard /stats /search keyword
+ *    全部通过 12_TaskQueryEngine.gs 读，绝不重放 Events。
+ *
+ * 沿用 v3.1 的 bug fix（历史记录）：
+ *   - help/我的任务 被错误创建为任务 → TASK_LIST 模式增补 + skipPatterns
+ *     增补 help 类命令。
+ *   - MEDIUM RISK 1：删除全局 _cleanTitle_ 声明，统一使用 05_SheetUtils.gs。
+ */
+
+// ============ 意图识别 ============
+
+function parseTaskIntent(rawText) {
+  var text = String(rawText || '').trim();
+
+  // ── 0. 明确排除的指令（必须在所有其他匹配之前检查）──────────────────────
+  if (/^\/?(help|帮助|命令|指南|菜单|使用说明|h)$/i.test(text)) {
+    return { intent: null };
+  }
+
+  // ── 1. TASK_HISTORY ──────────────────────────────────────────────────────
+  var historyPatterns = [
+    /^\/history$/i,
+    /^(历史|已完成|完成记录|已完成任务|任务历史)$/,
+    /^(completed|done tasks?|finished tasks?)$/i
+  ];
+  for (var h = 0; h < historyPatterns.length; h++) {
+    if (historyPatterns[h].test(text)) {
+      return { intent: 'TASK_HISTORY' };
+    }
+  }
+
+  // ── 1.5 TASK_ARCHIVE（查 ArchiveTasks，区别于只看 Tasks 近期完成的 TASK_HISTORY）
+  if (/^\/archive$/i.test(text) || /^(归档|已归档|归档记录)$/.test(text)) {
+    return { intent: 'TASK_ARCHIVE' };
+  }
+
+  // ── 2. TASK_LIST ──────────────────────────────────────────────────────────
+  var listPatterns = [
+    /^(show|list|查看?|看看?|显示)(一下|下)?任务s?$/i,
+    /^(我的?|所有|全部)?任务(列表)?$/,
+    /^(我的?任务|待办任务|所有任务|全部任务)$/,
+    /^(待办|todo|todos)$/i,
+    /^\/(tasks?|todos?|mytasks)$/i
+  ];
+  for (var i = 0; i < listPatterns.length; i++) {
+    if (listPatterns[i].test(text)) {
+      return { intent: 'TASK_LIST' };
+    }
+  }
+
+  // ── 2.5 V4 新增：View/Dashboard/Search 指令 ────────────────────────────────
+  if (/^\/today$/i.test(text) || /^今天(任务)?$/.test(text))      return { intent: 'TASK_TODAY' };
+  if (/^\/week$/i.test(text)  || /^本周(任务)?$/.test(text))       return { intent: 'TASK_WEEK' };
+  if (/^\/month$/i.test(text) || /^本月(任务)?$/.test(text))       return { intent: 'TASK_MONTH' };
+  if (/^\/priority$/i.test(text) || /^(优先级|高优先级)(任务)?$/.test(text)) return { intent: 'TASK_PRIORITY' };
+  if (/^\/overdue$/i.test(text)  || /^逾期(任务)?$/.test(text))     return { intent: 'TASK_OVERDUE' };
+  if (/^\/upcoming$/i.test(text) || /^即将到来$/.test(text))        return { intent: 'TASK_UPCOMING' };
+  if (/^\/recurring$/i.test(text) || /^(重复|循环)(任务)?$/.test(text)) return { intent: 'TASK_RECURRING_VIEW' };
+  if (/^\/dashboard$/i.test(text) || /^仪表盘$/.test(text))          return { intent: 'TASK_DASHBOARD' };
+  if (/^\/stats$/i.test(text) || /^(统计|统计数据)$/.test(text))      return { intent: 'TASK_STATS' };
+
+  var searchM = text.match(/^\/search\s+(.+)$/i) || text.match(/^搜索\s*(.+)$/);
+  if (searchM) return { intent: 'TASK_SEARCH', keyword: searchM[1].trim() };
+
+  // ── 3. TASK_DONE ──────────────────────────────────────────────────────────
+  var doneM = text.match(/^(?:done|完成|finish|finished|\/done)\s+(TSK-[\w-]+)$/i);
+  if (doneM) return { intent: 'TASK_DONE', task_id: doneM[1].toUpperCase() };
+
+  // ── 4. TASK_CANCEL ────────────────────────────────────────────────────────
+  var cancelM = text.match(/^(?:cancel|取消|remove|delete|\/cancel)\s+(TSK-[\w-]+)$/i);
+  if (cancelM) return { intent: 'TASK_CANCEL', task_id: cancelM[1].toUpperCase() };
+
+  // ── 5. Skip patterns（库存类 / 其他域的命令）────────────────────────────
+  var skipPatterns = [
+    /^\/inventory/i,
+    /^(added?|加了|入库|库存|买了|用了|剩)/,
+    /^(设置|更新)过期/,
+    /^\//   // 其余所有 /xxx 指令（未被前面捕获的）不当作任务创建
+  ];
+  for (var j = 0; j < skipPatterns.length; j++) {
+    if (skipPatterns[j].test(text)) return { intent: null };
+  }
+
+  // ── 6. 长度兜底 ──────────────────────────────────────────────────────────
+  if (text.length < 2) return { intent: null };
+
+  // ── 7. TASK_CREATE（最后兜底，只有实质内容才走到这里）─────────────────────
+  var dt = extractDateTime(text); // 09_TemporalParser.gs
+  var title = _cleanTitle_(dt.cleanedText) || _cleanTitle_(text); // 05_SheetUtils.gs
+  if (!title) return { intent: null };
+
+  return {
+    intent:          'TASK_CREATE',
+    title:           title,
+    due_date:        dt.due_date        || '',
+    due_time:        dt.due_time        || '',
+    due_datetime:    dt.due_datetime    || '',
+    recurrence_rule: dt.recurrence_rule || null,
+    reminder_policy: dt.reminder_policy || null
+  };
+}
+
+// ============ 意图处理 ============
+
+function handleTaskIntent(rawText, chatId) {
+  var parsed = parseTaskIntent(rawText);
+  if (!parsed.intent) return { matched: false };
+
+  switch (parsed.intent) {
+
+    case 'TASK_CREATE': {
+      var recurringLabel = RecurringEngine.ruleToLegacyString(parsed.recurrence_rule); // 21_RecurringEngine.gs
+
+      // 【V4.2 修复 HIGH RISK 1 的调用方那一半，V4.5 拆成两条分支】
+      // 09_IdempotencyManager.gs 现在会抛两种不同前缀的 SYSTEM_BUSY 错误
+      // （见该文件文件头 V4.5 修复说明）：
+      //   - "SYSTEM_BUSY_RETRY_IN_PROGRESS:" —— 这个 chatId 已经有一个
+      //     请求在处理中，大概率是 Telegram 对同一条消息的重试，原来的
+      //     请求很可能会成功。回复"没建成，请重发"是误导（V4.5 修复
+      //     MEDIUM RISK 2：锁冲突导致的"假失败"），应该回复"正在处理中"。
+      //   - "SYSTEM_BUSY:"（不带后缀）—— 连 Gate 都没排上，真正的全站级
+      //     繁忙，这次调用大概率什么都没做，"请重发"是准确的建议。
+      // 两个 if 分支顺序不能反：SYSTEM_BUSY_RETRY_IN_PROGRESS 本身也以
+      // "SYSTEM_BUSY"开头，必须先判断更具体的那个前缀。
+      var result;
+      try {
+        result = IdempotencyManager.createTaskIfNotExists(
+          parsed.title,
+          {
+            due_date:        parsed.due_date,
+            due_time:        parsed.due_time,
+            due_datetime:    parsed.due_datetime,
+            recurring:       recurringLabel,
+            reminder_policy: parsed.reminder_policy
+          },
+          chatId
+        );
+      } catch (e) {
+        var busyMsg = String(e.message || '');
+
+        if (busyMsg.indexOf('SYSTEM_BUSY_RETRY_IN_PROGRESS') === 0) {
+          Logger.log('[TaskIntentParser] TASK_CREATE 遇到 SYSTEM_BUSY_RETRY_IN_PROGRESS' +
+            '（同一 chatId 已有请求在处理，很可能是 Telegram 重试）: ' + busyMsg);
+          return {
+            matched: true, intent: 'TASK_CREATE', data: null,
+            replyText: '⏳ 你刚才的请求正在处理中（可能是重复发送触发的），请稍等几秒用 /mytasks 看看是否已经建好，不需要马上重发。'
+          };
+        }
+        if (busyMsg.indexOf('SYSTEM_BUSY') === 0) {
+          Logger.log('[TaskIntentParser] TASK_CREATE 遇到 SYSTEM_BUSY，回复用户稍后重试: ' + busyMsg);
+          return {
+            matched: true, intent: 'TASK_CREATE', data: null,
+            replyText: '⏳ 系统当前写入较多，这个任务没建成，请几秒后重发一次。'
+          };
+        }
+        throw e; // 其他类型的错误不是本函数能处理的，原样往上抛
+      }
+
+      if (!result.created) {
+        return { matched: true, intent: 'TASK_CREATE', data: result.task, replyText: _buildDuplicateTaskReply_(result.task) };
+      }
+      return { matched: true, intent: 'TASK_CREATE', data: result.task, replyText: _buildCreateReply_(result.task) };
+    }
+
+    case 'TASK_LIST': {
+      var tasks = TaskQueryEngine.getPendingTasks(chatId); // 12_TaskQueryEngine.gs
+      return { matched: true, intent: 'TASK_LIST', data: tasks, replyText: _buildListReply_(tasks) };
+    }
+
+    case 'TASK_HISTORY': {
+      var doneTasks = TaskQueryEngine.getCompletedTasks(chatId).slice(0, 30);
+      return { matched: true, intent: 'TASK_HISTORY', data: doneTasks, replyText: _buildHistoryReply_(doneTasks) };
+    }
+
+    case 'TASK_ARCHIVE': {
+      var archivedTasks = TaskQueryEngine.getArchivedTasks(chatId, 20);
+      return { matched: true, intent: 'TASK_ARCHIVE', data: archivedTasks, replyText: _buildArchiveReply_(archivedTasks) };
+    }
+
+    // ── V4 新增分支 ──────────────────────────────────────────────────────
+    case 'TASK_TODAY': {
+      var t = TaskQueryEngine.getTodayTasks(chatId);
+      return { matched: true, intent: 'TASK_TODAY', data: t, replyText: _buildSimpleListReply_('🔥 今天', t) };
+    }
+    case 'TASK_WEEK': {
+      var t = TaskQueryEngine.getWeekTasks(chatId);
+      return { matched: true, intent: 'TASK_WEEK', data: t, replyText: _buildSimpleListReply_('📅 本周', t) };
+    }
+    case 'TASK_MONTH': {
+      var t = TaskQueryEngine.getMonthTasks(chatId);
+      return { matched: true, intent: 'TASK_MONTH', data: t, replyText: _buildSimpleListReply_('🗓️ 本月', t) };
+    }
+    case 'TASK_PRIORITY': {
+      var t = TaskQueryEngine.getPriorityTasks(chatId);
+      return { matched: true, intent: 'TASK_PRIORITY', data: t, replyText: _buildPriorityReply_(t) };
+    }
+    case 'TASK_OVERDUE': {
+      var t = TaskQueryEngine.getOverdueTasks(chatId);
+      return { matched: true, intent: 'TASK_OVERDUE', data: t, replyText: _buildSimpleListReply_('⚠ 逾期', t) };
+    }
+    case 'TASK_UPCOMING': {
+      var t = TaskQueryEngine.getUpcomingTasks(chatId);
+      return { matched: true, intent: 'TASK_UPCOMING', data: t, replyText: _buildSimpleListReply_('⏭️ 即将到来', t) };
+    }
+    case 'TASK_RECURRING_VIEW': {
+      var t = TaskQueryEngine.getRecurringTasks(chatId);
+      return { matched: true, intent: 'TASK_RECURRING_VIEW', data: t, replyText: _buildRecurringReply_(t) };
+    }
+    case 'TASK_DASHBOARD': {
+      var text = TaskQueryEngine.getDashboard('today', chatId);
+      return { matched: true, intent: 'TASK_DASHBOARD', data: null, replyText: text };
+    }
+    case 'TASK_STATS': {
+      var text = TaskQueryEngine.getDashboard('statistics', chatId);
+      return { matched: true, intent: 'TASK_STATS', data: null, replyText: text };
+    }
+    case 'TASK_SEARCH': {
+      var t = TaskQueryEngine.searchTasks(chatId, parsed.keyword);
+      return { matched: true, intent: 'TASK_SEARCH', data: t, replyText: _buildSearchReply_(parsed.keyword, t) };
+    }
+
+    case 'TASK_DONE': {
+      var completeResult = completeTask(parsed.task_id, chatId); // 20_TaskEngine.gs 全局 wrapper
+
+      // 【V4.2 配套 MEDIUM RISK 1 修复】completeTask 现在会在任务不存在时
+      // 拦截并返回 {next_task: null, not_found: true}，而不是继续发布事件
+      // 产生幽灵行——这里要把这个情况回复清楚，不能还是回"✅ 完成"。
+      if (completeResult && completeResult.not_found) {
+        return {
+          matched: true, intent: 'TASK_DONE', data: { task_id: parsed.task_id },
+          replyText: '❓ 找不到任务 ' + parsed.task_id + '，请检查 ID 是否正确（可以用 /mytasks 查看当前任务）。'
+        };
+      }
+
+      // 【V4.4 配套 HIGH RISK 1 修复】双击/Telegram 重试导致 completeTask
+      // 被调用两次时，第二次会命中 already_done——回复要如实说明"已经处理过"，
+      // 不能显示成好像这次操作真的生效了一样。
+      if (completeResult && completeResult.already_done) {
+        return {
+          matched: true, intent: 'TASK_DONE', data: { task_id: parsed.task_id },
+          replyText: '✅ 任务 ' + parsed.task_id + ' 之前已经完成过了（这次点击没有重复处理）。'
+        };
+      }
+      if (completeResult && completeResult.invalid_state) {
+        return {
+          matched: true, intent: 'TASK_DONE', data: { task_id: parsed.task_id },
+          replyText: '⚠️ 任务 ' + parsed.task_id + ' 当前状态是 ' + completeResult.current_status +
+            '，不能标记完成。'
+        };
+      }
+
+      var doneReply = '✅ 完成: ' + parsed.task_id;
+      if (completeResult && completeResult.next_task) {
+        doneReply += '\n🔁 已自动创建下一次: ' + completeResult.next_task.task_id +
+                     '（' + _formatDueDisplay_(completeResult.next_task) + '）';
+      }
+      return { matched: true, intent: 'TASK_DONE', data: { task_id: parsed.task_id }, replyText: doneReply };
+    }
+
+    case 'TASK_CANCEL': {
+      var cancelResult = cancelTask(parsed.task_id, chatId); // 20_TaskEngine.gs 全局 wrapper
+
+      // 【V4.2 配套 MEDIUM RISK 1 修复】同 TASK_DONE。
+      if (cancelResult && cancelResult.not_found) {
+        return {
+          matched: true, intent: 'TASK_CANCEL', data: { task_id: parsed.task_id },
+          replyText: '❓ 找不到任务 ' + parsed.task_id + '，请检查 ID 是否正确（可以用 /mytasks 查看当前任务）。'
+        };
+      }
+
+      // 【V4.4 配套 HIGH RISK 1 同类修复】双击"取消"是同一类问题。
+      if (cancelResult && cancelResult.already_cancelled) {
+        return {
+          matched: true, intent: 'TASK_CANCEL', data: { task_id: parsed.task_id },
+          replyText: '🗑️ 任务 ' + parsed.task_id + ' 之前已经取消过了（这次点击没有重复处理）。'
+        };
+      }
+      if (cancelResult && cancelResult.invalid_state) {
+        return {
+          matched: true, intent: 'TASK_CANCEL', data: { task_id: parsed.task_id },
+          replyText: '⚠️ 任务 ' + parsed.task_id + ' 当前状态是 ' + cancelResult.current_status +
+            '，不能取消。'
+        };
+      }
+
+      return { matched: true, intent: 'TASK_CANCEL', data: { task_id: parsed.task_id }, replyText: '🗑️ 取消: ' + parsed.task_id };
+    }
+  }
+
+  return { matched: false };
+}
+
+// ============ 回复文案 ============
+
+/**
+ * 【V4.7 新增，Due Time Support】统一到期日展示格式——有 due_time 就在
+ * 日期后面加 "HH:mm"，没有就只显示日期。5 处展示位置共用，避免各自
+ * 重复同一句判断。具体展示格式属于 00_Architecture_Review.gs「七、
+ * Review #3」「八」Pending Design Decision #3（Decision Type: UX，
+ * 当时标注"本次不预先定稿"）——这里先按最直白的"日期 时间"实现，以后
+ * 如果 Architecture Owner 有不同偏好，只需要改这一个函数，不用改 5 个
+ * 调用点。
+ */
+function _formatDueDisplay_(task) {
+  if (!task || !task.due_date) return '';
+  return task.due_time ? (task.due_date + ' ' + task.due_time) : task.due_date;
+}
+
+function _buildCreateReply_(task) {
+  var lines = ['✅ 已建任务', 'ID: ' + task.task_id, '标题: ' + task.title];
+  if (task.due_date) lines.push('到期: ' + _formatDueDisplay_(task));
+  if (task.recurring) lines.push('🔁 重复: ' + task.recurring);
+  var reminderLine = _formatReminderPolicyDisplay_(task);
+  if (reminderLine) lines.push(reminderLine);
+  return lines.join('\n');
+}
+
+/**
+ * 【2026-07-17 新增，ADR-2026-07-17-009】只在这次创建时用户显式覆盖了
+ * 提醒策略（reminder_policy 非空）才显示这一行——沿用上面 recurring
+ * "只在有值时才显示"的既有惯例，reminder_policy 为 null（用 Reminder OS
+ * 默认策略）时保持沉默，不给每条建任务回复都加一行没有信息量的"提醒:
+ * 默认"文案。这也是用户唯一能在创建当下确认"我说的覆盖有没有被听懂"的
+ * 地方，不是可有可无的装饰——所以即使原始需求文档没有明确要求这行回复
+ * 文案，这里还是加了，纯展示层改动，不影响任何持久化或 Reminder OS 行为。
+ */
+function _formatReminderPolicyDisplay_(task) {
+  if (!task || !task.reminder_policy) return '';
+  var policy;
+  try {
+    policy = JSON.parse(task.reminder_policy);
+  } catch (e) {
+    return ''; // 解析失败不影响主回复，静默跳过这一行
+  }
+  if (!policy || !policy.offsets) return '';
+  if (policy.offsets.length === 0) return '⏰ 提醒: 不提前提醒（到期提醒不受影响）';
+
+  var unitLabels = { minutes: '分钟', hours: '小时', days: '天' };
+  var labels = policy.offsets.map(function (o) {
+    return o.value + (unitLabels[o.unit] || o.unit) + '前';
+  });
+  return '⏰ 提醒: ' + labels.join('、');
+}
+
+function _buildDuplicateTaskReply_(task) {
+  var lines = [
+    '⚠️ 任务已存在（未重复创建）',
+    'ID: '   + task.task_id,
+    '标题: ' + task.title,
+    '状态: ' + (task.status || 'PENDING')
+  ];
+  if (task.due_date) lines.push('到期: ' + _formatDueDisplay_(task));
+  lines.push('');
+  lines.push('如需再建一个，请改变标题或日期。');
+  return lines.join('\n');
+}
+
+function _buildListReply_(tasks) {
+  if (!tasks || tasks.length === 0) return '🎉 没有待办任务';
+  var lines = ['📋 待办任务（' + tasks.length + '）'];
+  tasks.forEach(function (t, idx) {
+    var due = t.due_date ? (' | 到期: ' + _formatDueDisplay_(t)) : '';
+    lines.push((idx + 1) + '. [' + t.task_id + '] ' + t.title + ' (' + (t.priority || 'MEDIUM') + ')' + due);
+  });
+  return lines.join('\n');
+}
+
+function _buildHistoryReply_(tasks) {
+  if (!tasks || tasks.length === 0) return '📭 没有已完成或已取消的任务记录';
+  var lines = ['📖 任务历史（最近 ' + tasks.length + ' 条）'];
+  tasks.forEach(function (t, idx) {
+    var statusIcon = (String(t.status || '').toUpperCase() === 'DONE') ? '✅' : '🗑️';
+    var when = t.completed_at ? (' | ' + String(t.completed_at).slice(0, 10)) : '';
+    lines.push((idx + 1) + '. ' + statusIcon + ' ' + t.title + when);
+  });
+  lines.push('');
+  lines.push('更早的归档记录：/archive');
+  return lines.join('\n');
+}
+
+function _buildArchiveReply_(tasks) {
+  if (!tasks || tasks.length === 0) return '📭 归档库是空的（任务要 DONE/CANCELLED 超过7天才会被自动搬进来）';
+  var lines = ['🗄️ 归档记录（最近 ' + tasks.length + ' 条）'];
+  tasks.forEach(function (t, idx) {
+    var statusIcon = (String(t.status || '').toUpperCase() === 'DONE') ? '✅' : '🗑️';
+    var when = t.archived_at ? (' | 归档于: ' + String(t.archived_at).slice(0, 10)) : '';
+    lines.push((idx + 1) + '. ' + statusIcon + ' ' + t.title + when);
+  });
+  return lines.join('\n');
+}
+
+/** V4 新增：通用简单列表文案（今天/本周/本月/逾期/即将到来 共用） */
+function _buildSimpleListReply_(label, tasks) {
+  if (!tasks || tasks.length === 0) return label + '：没有任务';
+  var lines = [label + '（' + tasks.length + '）'];
+  tasks.forEach(function (t, idx) {
+    var due = t.due_date ? (' | ' + _formatDueDisplay_(t)) : '';
+    lines.push((idx + 1) + '. [' + t.task_id + '] ' + t.title + due);
+  });
+  return lines.join('\n');
+}
+
+function _buildPriorityReply_(tasks) {
+  if (!tasks || tasks.length === 0) return '🎯 优先级：没有待办任务';
+  var lines = ['🎯 优先级排序（' + tasks.length + '）'];
+  tasks.forEach(function (t, idx) {
+    lines.push((idx + 1) + '. [' + t.task_id + '] ' + t.title + ' — 分数 ' + t._priority_score +
+      '（' + (t.priority || 'MEDIUM') + '）');
+  });
+  return lines.join('\n');
+}
+
+function _buildRecurringReply_(tasks) {
+  if (!tasks || tasks.length === 0) return '🔁 没有重复任务';
+  var lines = ['🔁 重复任务（' + tasks.length + '）'];
+  tasks.forEach(function (t, idx) {
+    lines.push((idx + 1) + '. [' + t.task_id + '] ' + t.title + ' — ' + RecurringEngine.describeRule(t.recurring)); // 21_RecurringEngine.gs
+  });
+  return lines.join('\n');
+}
+
+function _buildSearchReply_(keyword, tasks) {
+  if (!tasks || tasks.length === 0) return '🔍 "' + keyword + '"：没有匹配结果';
+  var lines = ['🔍 "' + keyword + '"（' + tasks.length + ' 条结果）'];
+  tasks.forEach(function (t, idx) {
+    lines.push((idx + 1) + '. [' + t.task_id + '] ' + t.title);
+  });
+  return lines.join('\n');
+}

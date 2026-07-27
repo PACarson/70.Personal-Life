@@ -1,0 +1,168 @@
+/**
+ * 00_Known_Limitations.gs
+ * Productivity OS v4.7 — Known Limitations & Internal-Only Capabilities
+ *
+ * 目的：记录"刻意不做，或者已经实现但暂未对外暴露"的能力边界——
+ * Universal Domain OS Blueprint「Governance」目录里的 Not Yet 一类。
+ * 跟其它治理文件的分工：
+ *   00_Command_Reference.gs → 记录"已经对外生效的行为规则"
+ *   00_Known_Limitations.gs（本文件）→ 记录"刻意不做 / 暂未暴露"的边界
+ *   00_Roadmap.gs           → 记录"打算做但还没排期"的未来计划
+ * 三者的区别：Command Reference 是"现状"，Known Limitations 是"现状的
+ * 边界（而且这个边界是有意的，不是没写完）"，Roadmap 是"将来"。本文件
+ * 存在的直接目的是让 Claude/外部审计在做 Architecture Review 时，看到
+ * 这里列出的行为，不要当成 bug 或遗漏去提修复建议。
+ *
+ * LAST_UPDATED: 2026-07-17 — Reminder Policy Override 落地后同步措辞：
+ * Natural Language Parser Scope 补充 reminder_policy（ADR-2026-07-17-009，
+ * Carson 批准，判断标准沿用 V4.7 那次的同一套测试——确定性时间表达式
+ * 解析 vs. 语义/领域判断——不是新引入一条）。
+ *
+ * 2026-07-13 — V4.7 Due Time Support 落地后同步措辞：
+ * Natural Language Parser Scope 补充 due_time/due_datetime（同一类"时间
+ * 解析"能力的延伸，边界本身未变，category/priority 仍不参与自然语言
+ * 解析）；updateTask() Internal API 一节的 IDENTITY_AFFECTING_FIELDS
+ * 引用同步补充 due_time。完整设计见 00_Architecture_Review.gs「七、
+ * Review #3」。
+ *
+ * 2026-07-11 — 首次创建，收录三类：Natural Language Parser
+ * Scope、updateTask() Internal API、Weekly/Monthly Dashboard +
+ * suggestPriority() Internal Capability。全部由 Carson 在 2026-07-11
+ * 当面确认，不是 Claude 单方面推测的"这应该是有意的吧"。
+ */
+
+// ============================================================
+// 一、Natural Language Parser Scope（Known Limitation）
+// ============================================================
+
+/**
+ * Known Limitation: Natural language parser intentionally extracts only:
+ *   - due_date / due_time / due_datetime（V4.7 起，同一类"时间解析"
+ *     能力的延伸——此前时间偶尔折叠进 due_date 字符串本身，现在拆成
+ *     显式字段，解析范围本身没有扩大）
+ *   - recurring
+ *   - reminder_policy（2026-07-17 起，ADR-2026-07-17-009——"提前N分钟/
+ *     小时/天提醒"这类短语，同样是确定性时间表达式解析，不是语义/领域
+ *     判断，理由见下方【2026-07-17 补充】）
+ *
+ * Category and Priority are assigned by caller or default values
+ * (category → 'GENERAL', priority → 'MEDIUM'; see 00_Command_Reference.gs
+ * C5 / 20_TaskEngine.createTaskDirect_).
+ *
+ * Future AI callers may enrich these fields before createTask().
+ *
+ * ── 中文说明（架构理由）──────────────────────────────────────────────
+ * 实现位置：06_TaskIntentParser.gs 的 TASK_CREATE 分支把
+ * `{due_date, due_time, due_datetime, recurring, reminder_policy}` 传给
+ * IdempotencyManager.createTaskIfNotExists，09_TemporalParser.gs 也只
+ * 解析时间、重复规则、提醒偏移量，不解析"这句话在说什么类型的事、有多急"。
+ *
+ * 这是刻意的 Clean Architecture 边界，不是没写完：Productivity OS 的
+ * 职责到"解析时间/重复规则、生成 identity、去重落库"为止，理解任务
+ * 语义（"下周找律师"该归 ADMIN 还是 GENERAL、该给 HIGH 还是 MEDIUM）
+ * 不是这一层该做的事——那需要自然语言理解/领域知识，属于上层调用方
+ * （比如 Personal AI Core 这类 AI Agent）的职责。分层如下：
+ *
+ *   Personal AI Core（理解"下周找律师"是什么、该多急）
+ *     ↓ 决定好 category/priority 之后调用
+ *   Productivity OS.createTask(title, { due_date, due_time, recurring,
+ *                                        category, priority })
+ *     ↓
+ *   （Productivity OS 自己永远不需要知道"找律师"是什么意思）
+ *
+ * 好处：Productivity OS 保持"傻瓜式"API，不掺业务语义判断，未来任何
+ * 调用方（新的 AI Agent、批量导入脚本、另一个前端）想要更聪明的分类，
+ * 只需要在调用 createTask() 之前自己算好 category/priority 传进来，
+ * 不需要修改 Productivity OS 内部任何一行代码。
+ *
+ * 【V4.7 补充】Reminder OS（如果/当它开始消费本项目数据）同样适用这条
+ * 边界——它能读到 due_time/due_datetime（本项目现在会存这两个字段），
+ * 但"什么时候该提醒、提醒几次、怎么发通知"完全是 Reminder OS 自己的
+ * 职责，不会因为本项目新增了这两个字段而产生任何反向依赖。
+ *
+ * 【2026-07-17 补充，ADR-2026-07-17-009】上面这条预判应验了——Reminder OS
+ * 现在确实开始消费本项目数据了，具体是新增的 reminder_policy 字段（见
+ * 26_ReminderOffsetEngine.gs 的 _ensureRulesFromPolicy_ 和该项目
+ * 00_ADR_006）。判断"提前N分钟/小时/天提醒"这类短语是否属于本文件开头
+ * 说的"解析范围"，用的是跟 due_time 那次完全一样的测试：这是不是需要
+ * 语义/领域判断？不是——"提前30分钟"和"tomorrow 3pm"是同一类可枚举、
+ * 可正则匹配的确定性时间表达式，不需要判断"这件事有多急、算哪个分类"。
+ * 具体识别逻辑见 09_TemporalParser.gs 的 _extractReminderOffsets_()。
+ * reminder_policy 是"提醒该怎么发"这件事的输入信号，不是"提醒该怎么发"
+ * 这件事本身——后者仍然完全是 Reminder OS 的职责，本项目只负责把用户
+ * 说的话转换成结构化数据存在 Task 上，跟 due_date/due_time 的角色完全
+ * 一样。
+ *
+ * 如果以后 Telegram 自身想支持"关键词猜分类"这种轻量能力，那是一个新的
+ * 、独立的功能决策（要不要在 Productivity OS 内部做，还是应该由
+ * Personal AI Core 做），不属于"修复现有行为"，请另开 ADR 讨论，不要
+ * 当成本条限制的延伸。
+ */
+
+// ============================================================
+// 二、updateTask() — Internal API
+// ============================================================
+
+/**
+ * updateTask() — Internal API
+ *
+ * 实现：20_TaskEngine.updateTask(taskId, changes, chatId)。
+ * Status: Implemented, fully functional, not yet routed through any
+ *         Telegram command.
+ *
+ * Current callers: none via Telegram（06_TaskIntentParser.gs 的指令
+ *   列表里没有任何 intent 路由到 updateTask；目前只有 completeTask/
+ *   cancelTask 两个状态转换有对应指令）。
+ *
+ * Anticipated future callers:
+ *   - Future Telegram command（比如 /edit TSK-xxx category=SHOPPING）
+ *   - Future AI（Personal AI Core 之类的 Agent 直接调用，不经过
+ *     Telegram 指令解析这一层）
+ *   - Future Batch（比如批量重新分类脚本）
+ *
+ * 保留原因：updateTask 已经处理好了 identity 重算（改到
+ * IDENTITY_AFFECTING_FIELDS = ['title','due_date','due_time','recurring',
+ * 'priority','category'] 里任一个字段都会重算 identity，避免"改了标题但
+ * identity 还是旧的"这种不一致），是一个可以直接安全复用的 Internal API，
+ * 不需要现在为了"没有 Telegram 指令用它"而删掉或标记成 dead code——它
+ * 本来就是设计成给"未来调用方"用的引擎层能力，不是每个 Engine 函数都
+ * 必须马上对应一个 Telegram 指令才算数。
+ *
+ * 【2026-07-17 补充，ADR-2026-07-17-009】reminder_policy 刻意不在
+ * IDENTITY_AFFECTING_FIELDS 里——跟 budget/notes/description/tags 同类，
+ * 是提醒相关的元信息，不是任务本身的身份特征，改一次提醒策略不应该触发
+ * identity 重算。同样刻意不在 UPDATABLE_FIELDS 里——本次改动范围只覆盖
+ * Task 创建流程（Carson 2026-07-17 决定 #2），"创建后修改提醒策略"是
+ * 独立能力，未来需要时另开 ADR/Phase 评估，不是这次遗漏。
+ */
+
+// ============================================================
+// 三、Weekly/Monthly Dashboard & suggestPriority() — Internal Capability
+// ============================================================
+
+/**
+ * Internal capability. Not yet exposed to users.
+ *
+ * 1. 25_DashboardEngine.buildWeeklyDashboard() / buildMonthlyDashboard()
+ *    Status: Implemented（今日完成数/本周剩余/即将到来/逾期/完成率——或
+ *    本月待办/已完成/已取消/Recurring/提醒次数/完成率），06_TaskIntent
+ *    Parser.gs 目前只把 /dashboard 接到 'today'（→
+ *    12_TaskQueryEngine.getDashboard('today', chatId)），没有 /weekly、
+ *    /monthly 这类指令去调用它们。
+ *
+ * 2. 22_PriorityEngine.suggestPriority(task)
+ *    Status: Implemented（按 Priority Score ≥80→CRITICAL / ≥55→HIGH /
+ *    ≥25→MEDIUM / 否则 LOW 给建议标签），/priority 指令的回复文案
+ *    （06_TaskIntentParser._buildPriorityReply_）目前只展示原始
+ *    Priority Score 和任务自己已有的 manual priority，不调用
+ *    suggestPriority，也就不会把"建议标签"显示给用户。
+ *
+ * 两者共同点：函数本身已经写好、能正常工作、有对应的单元测试覆盖（如果
+ * 有的话请在对应 Engine 文件里确认），只是还没有一个 Telegram 指令把它
+ * 路由出去。如果外部审计/Architecture Review 报告"这个功能缺失"或
+ * "这里应该加个 suggestPriority 调用"，先来这里核对——这不是遗漏，是
+ * 有意暂缓（可能是想等 /edit 或 /weekly 这类指令一起设计的时候再接，
+ * 避免为了接一个函数临时拍板一套指令格式）。真正要接的时候，在
+ * 00_Roadmap.gs 排期，接完之后把对应条目从本文件挪到
+ * 00_Command_Reference.gs 第二/六节。
+ */

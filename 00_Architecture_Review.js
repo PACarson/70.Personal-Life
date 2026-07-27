@@ -1,0 +1,1256 @@
+/**
+ * 00_Architecture_Review.gs
+ * Productivity OS — Architecture Review #1（UEF v1.0 Domain Profile）
+ *
+ * 目的：Universal Engineering Framework（UEF）v1.0 于 2026-07-10 ratify 后，
+ * 本项目第一次按 UEF 正式流程（00_Review_Framework.md）跑 Architecture
+ * Review——此前 5 轮"外部审计"走的是本项目自己的 ad hoc 流程，跟 UEF
+ * Domain Profile 的 checklist 不是同一套东西，UEF Constitution §6.3
+ * 要求每个项目在其 Release Gate 之前至少有一次匹配 Profile 的正式 Review，
+ * 本项目已经在生产环境跑了 V4~V4.6，属于"补跑"（retroactive），跟
+ * UEF Review History 里 Investment OS 2026-07-10 那条的性质一样。
+ *
+ * 本文件是本项目 Governance 层新增的第 8 份文件（Constitution/State/
+ * File Map/ADR/Roadmap/Known Limitations/Command Reference/本文件）。
+ *
+ * LAST_UPDATED: 2026-07-13（同日第二次更新）— Carson review 后两处措辞
+ * 调整：「七」的「八、Open Decisions」改名为「Pending Design
+ * Decisions」，绑定角色 Decision Authority（Architecture Owner）而非
+ * 人名 Carson，四项各补 Decision Type（Semantic/Migration/UX/
+ * Governance）标签；「九」Review Summary 同步措辞。均为纯文档措辞
+ * 调整，不改变四项决策本身的内容或任何已完成的设计判断。
+ *
+ * 2026-07-13 — 新增「七、Review #3」：Due Time Support
+ * 的 Pre-Implementation Design Review（Feature/Change Review，跟
+ * Review #1/#2 的周期性 Domain Profile 合规扫描性质不同）。对应需求方
+ * 提出的 7 项 Deliverables（Architecture Review/Proposed Schema
+ * Changes/API Impact/Migration Plan/Risk Analysis/Updated File Map/
+ * Updated Data Flow）。产出 1 条 MEDIUM Finding（DT-2，
+ * _addColumnsIfMissing_ 缺少纯文本格式步骤，修复已设计并包含在本次
+ * Migration Plan 内）、3 条 Improvement Opportunity、4 项待 Carson
+ * 决定的 Open Decision。**本次只完成设计与审查，未修改任何 .gs 代码
+ * 文件，需 Carson 批准后才进入实现**，详见「七」全文。
+ *
+ * 2026-07-12 — Review #2（六）的 B2-1 经 Carson review 后，由 MEDIUM
+ * Architecture Finding 改列为 Improvement Opportunity（按 UEF
+ * Evidence-first 原则：现有证据只支持"可以做得更好"，不支持"当前架构
+ * 已经出现需要修正的问题"）；C3-1 维持 LOW 不变。详见「六、Review #2」
+ * 的 Review Disposition 小节。首次创建于 2026-07-11。
+ */
+
+// ============================================================
+// 一、Review Request（按 UEF Review Templates §1）
+// ============================================================
+
+/**
+ * Scope:            Productivity OS（整个项目，21 个可执行文件 + 7 份既有
+ *                    治理文档）
+ * Review Profile:   Domain
+ *                    （判定依据：UEF 01_Review_Profiles.md §2 选择测试——
+ *                    本项目"是一个完整的 Domain OS 整体"，命中第5问，选
+ *                    Domain，不是 Engine——虽然本项目内部有 5 个 Engine
+ *                    Profile 的纯函数模块，但那是"项目内部子模块"的归类，
+ *                    不改变"项目整体"这次 Review 的 Profile）
+ * Minimum checklist: Separation of Concerns（A1）/ Layering（A3）/
+ *                    Governance（D1）/ Testing（C1）/ Doc-Code Drift（D3）
+ *                    （UEF 01_Review_Profiles.md §3.2 Domain Profile）
+ * Feeds gate:       Testing Gate（补跑——本项目已经部署到生产环境跑了
+ *                    V4~V4.6，这次是"回溯性"对照检查，不是新功能走 Gate
+ *                    流程，跟 UEF 06_Review_History.md 里 Investment OS
+ *                    2026-07-10 那次 Review 性质相同）
+ * Trigger:          UEF v1.0 ratify（2026-07-10）后，本项目作为 Universal
+ *                    Domain OS Blueprint 的首个完整落地样本，补齐这次
+ *                    "正式对齐新流程标准"的 Review
+ * Prior review:     无（本项目此前的 5 轮审计不是 UEF Profile-based
+ *                    Review，见文件头说明；这是本项目在
+ *                    02_Architecture_Review_Standard/06_Review_History.md
+ *                    里的第一条记录）
+ * Requested by:     Carson
+ * Reviewer:         Claude（single-project review——UEF 00_Review_Framework.md
+ *                    §4 Roles 对这种情况的要求：不能凭"写过这段代码的印象"
+ *                    判断，每一项都要对照本次实际读到的代码核实，而不是
+ *                    对照既有治理文档的自我描述）
+ * Date:             2026-07-11
+ */
+
+// ============================================================
+// 一之二、本项目声明的加深 Checklist（UEF 01_Review_Profiles.md §4：
+// "A project can require more, never less"）
+// ============================================================
+
+/**
+ * 【2026-07-11 追加】Domain Profile 的最低 checklist（A1/A3/D1/C1/D3）
+ * 不含 Event Flow / Extensibility / Scalability / AI Readiness——这几项
+ * 对一个"只管内部数据怎么摆"的 Domain OS 不是必答题，但对本项目不是
+ * 这样：本项目明确希望自己的数据未来能被 Personal AI Core 消费
+ * （见 00_Roadmap.gs 长期方向），且已经有 recurring/priority 这类"会
+ * 越长越复杂"的功能演进历史。因此本项目正式声明比最低要求更深的
+ * 子集，往后每次 Review 都必须覆盖：
+ *
+ *   - A5 Event Flow（每个 Task 生命周期事件是否有清楚定义、是否优雅降级）
+ *   - B1 Extensibility（新功能能否不改现有 Engine 边界就加进来）
+ *   - B2 Scalability（Sheet 行数增长/GAS 执行时间上限相关的具体阈值）
+ *   - C3 AI Readiness（本项目数据未来被 Personal AI Core 读取时是否
+ *     需要重新设计——见 02_Review_Checklist_Library.md C3 的 Applies to
+ *     说明，本次一并扩展为明确包含"未来有具名 AI 消费者的 Domain OS"
+ *     这一种情况）
+ *
+ * 这条声明本身不需要 ADR（UEF §4："A project can require more, never
+ * less"，加深不是缩窄，不算需要走 Decision Matrix 的那类决定），但作为
+ * 一个会长期影响"以后每次 Review 该测什么"的事实，记录在这里，跟
+ * Profile 选择放在同一份文件里，避免下次 Review 的人重新决定一遍。
+ */
+
+// ============================================================
+// 二、Checklist Execution（Domain Profile 最低子集，逐项 Pass/Fail/N-A）
+// ============================================================
+
+/**
+ * ── A1. Separation of Concerns ──────────────────────────────────────────
+ * [Pass] 逐条核实（不是复述 00_File_Map.gs 的自我描述，是直接读代码）：
+ *   - 22/23/24/25_Engine.gs 四个 Domain 层纯函数 Engine：grep 全文件搜索
+ *     getSheet_/getHeaderMap_/EventBus\./SpreadsheetApp\.，零命中——确认
+ *     真的不摸 Sheet/Events，不是文档说了算。
+ *   - 26_AnalyticsEngine.gs：唯一命中 EventBus.getAllEvents() 的地方是
+ *     replayCompletionTrend_()，且该函数文件头 Engine Contract 块明确
+ *     标注"Replay Events: YES（本 OS 唯一允许重放 Events 的函数）"，
+ *     不在任何 Telegram 指令路径上（06_TaskIntentParser.gs 指令列表核实
+ *     确认不存在对应路由）——这是唯一例外，且例外本身有名有姓、边界清楚，
+ *     符合"一个模块的职责能用一句话说清楚"的要求。
+ *   - 06_TaskIntentParser.gs：grep 命中的一处 getSheet_/getHeaderMap_ 字样
+ *     是文件头注释里描述"V4 之前的架构违规"这段历史，本身不是当前代码在
+ *     调用——核实当前代码路径（_getActiveTasksForDisplay_ 等）确认已经
+ *     全部改经 12_TaskQueryEngine.gs，没有 drift。
+ *
+ * ── A3. Layering ─────────────────────────────────────────────────────────
+ * [Pass] 00_File_Map.gs「三、Architecture Layer Map」宣称 21 个文件each
+ *   恰好归类到 Presentation/Application/Domain/Infrastructure 四层之一；
+ *   对照「二、模块关系」列出的具体函数级调用关系逐条核对，没有发现箭头
+ *   往上指的未记录案例。唯一一处跨层依赖
+ *   （21_RecurringEngine.gs → 09_IdempotencyManager.gs，Domain→Application）
+ *   在 File Map 和 Constitution 零之四都有一致、清楚的记录——但这处例外
+ *   牵出一个 Governance 层面的问题，见下方 Finding D1-1（例外本身没有
+ *   越界，越界的是"这个决定该有的正式记录方式"）。
+ *
+ * ── D1. Governance ───────────────────────────────────────────────────────
+ * [Fail — 见 Finding D1-1] ADR log 存在且质量高（00_ADR.gs 五条正式 ADR，
+ *   每条都有 Metadata/Context/Decision/Consequences，且 Consequences 部分
+ *   老实列了代价，不是只写好处——这部分是真正的 Pass）。Project State
+ *   反映真实现状（核对 V4.6 changelog 与实际代码一致，见下方 D3 checklist
+ *   的交叉核实）。唯一的 Fail 点：有两处"决定不改"的架构判断符合 UEF 自己
+ *   定义的 ADR 触发标准，却没有被记录成正式 ADR 条目——见 Finding D1-1。
+ *
+ * ── C1. Testing ──────────────────────────────────────────────────────────
+ * [Fail — 见 Finding C1-1] 全项目 21 个可执行文件里，只有 07/08/09 三个
+ *   文件带手工测试函数（且这三个是"逐字未改"继承自 Core 项目的 V3 遗留
+ *   代码，不是本项目 V4 新增部分）。V4 新增的全部 12 个文件（10/11/12/13/
+ *   15/20/21/22/23/24/25/26）——包括本项目最核心的 5 个纯函数 Domain
+ *   Engine 和整条 Application 层写入/查询路径——零测试覆盖。
+ *
+ * ── D3. Doc/Code Drift ───────────────────────────────────────────────────
+ * [Fail — 见 Finding D3-1，范围仅限 00_Roadmap.gs] 交叉核实过的其余文档
+ *   （00_Project_State.gs / 00_File_Map.gs / 00_Known_Limitations.gs /
+ *   00_Command_Reference.gs / 00_Project_Constitution.gs）版本号、改动
+ *   描述均与实际代码一致——这几份是真正的 Pass，说明本项目治理文档整体
+ *   维护得不错，Drift 不是普遍问题。唯一的例外是 00_Roadmap.gs 本身，
+ *   见 Finding D3-1。
+ */
+
+// ============================================================
+// 三、Findings（按 UEF Review Templates §2，每条 Fail 一条）
+// ============================================================
+
+// ------------------------------------------------------------
+// Finding C1-1
+// ------------------------------------------------------------
+
+/**
+ * ### Finding: V4 原生的 12 个文件（含全部 5 个 Domain 纯函数 Engine）
+ *     没有任何形式的测试覆盖
+ *
+ * File / Module:  10_ProjectionEngine.gs, 11_ProjectionRebuilder.gs（部分——
+ *                 verifyProjection()/_verifyActiveTasksConsistency_() 是
+ *                 一致性校验，但 rebuild 系列函数本身无测试）,
+ *                 12_TaskQueryEngine.gs, 13_ActiveTasksEngine.gs,
+ *                 15_Setup.gs, 20_TaskEngine.gs, 21_RecurringEngine.gs,
+ *                 22_PriorityEngine.gs, 23_SearchEngine.gs,
+ *                 24_ViewEngine.gs, 25_DashboardEngine.gs,
+ *                 26_AnalyticsEngine.gs
+ * Function:       上述文件的全部 public API（如
+ *                 PriorityEngine.computePriorityScore/computeUrgencyScore/
+ *                 suggestPriority，TaskQueryEngine.getTask/getTasks/...，
+ *                 TaskEngine.createTask/updateTask/completeTask/cancelTask
+ *                 等）
+ * Checklist item: C1 Testing
+ *
+ * Mechanism:
+ * 只有 07_IdentityEngine.gs / 08_DeduplicationEngine.gs /
+ * 09_IdempotencyManager.gs 带手工测试函数（testIdentity /
+ * testDuplicateTask / testDuplicateInventory / testWebhookRetry /
+ * testDifferentChatsDontBlock / testConcurrentExecution）——这三个文件
+ * 都是"逐字未改"继承自 Core 项目的 V3 遗留代码（见 00_File_Map.gs
+ * Foundation 分类），本项目自己在 V4 新增的 12 个文件一个测试函数都没有。
+ * 15_Setup.runDiagnostics() 是目前唯一会执行到这些模块的验证路径，但它
+ * 只走 happy path（try/catch 只是记日志、不断言预期值），且会在生产
+ * Spreadsheet 里真实创建一条任务（标题"诊断测试任务"，notes 里标
+ * DIAGNOSTIC_TEST_TEMP）——用真实数据做手工冒烟测试，不是隔离的测试用例。
+ *
+ * Evidence:
+ * 对 21 个 .gs 文件分两轮 grep：一轮找 `function test`（未加锚点，覆盖
+ * IIFE 内部缩进的函数定义），一轮找 verify/check/diagnos/validate 命名——
+ * 命中只在 07/08/09（test 系列）和 11（verify 系列，但只覆盖一致性校验，
+ * 不覆盖 rebuild 逻辑本身）。另外直接读取 22_PriorityEngine.gs 和
+ * 26_AnalyticsEngine.gs 全文——两者都是评分/计算类纯函数（UEF Testing
+ * Standard §1.7 Boundary Test 明确要求"任何做归一化/打分/除法的 Engine
+ * 函数"要有边界测试），确认代码本身实现质量不差（26 的三处除法都有
+ * `total > 0 ? ... : 0` 式的零除防护，22 的逾期天数有 clamp(30) 上限），
+ * 但这些防护本身完全没有测试锁定——防护存在但没有回归测试，意味着未来
+ * 任何一次改动都可能在无声无息中撤掉这层防护而不被发现。
+ *
+ * Severity:          MEDIUM
+ *   Likelihood:      Foreseeable（不是"现在就在发生"的錯誤，而是"这个
+ *                    项目会继续按 Roadmap 演进"这件事本身可预见会带来的
+ *                    后果——5 轮外部审计期间已经在这一层修过好几个真实
+ *                    bug（TaskStatistics 漂移、归档排重、getTask 全表
+ *                    扫描），没有一次是靠测试先捕捉到的，全部是外部审计
+ *                    人工读代码发现，说明"未来某次改动引入类似问题、且
+ *                    没有测试拦截"不是假设性风险）
+ *   Impact:          Medium（错误的优先级排序/视图过滤/统计数字会被静默
+ *                    地算错，不会崩溃、不会丢数据，但会让用户看到错误的
+ *                    结果而不自知——符合 Risk Matrix Impact:Medium 定义
+ *                    "a subset of operations produce wrong or degraded
+ *                    results"，够不上 High 的"硬失败/数据丢失/安全暴露"）
+ *
+ * Disposition:       Confirmed
+ *   （本次直接读代码核实，不是照抄某份既有文档的自我描述）
+ *
+ * Recommendation:
+ * 这是实现工作，不属于本次 Review 本身范围（UEF 00_Review_Framework.md
+ * §6："A review is not a rewrite"），按优先级供下一次专门的测试补齐会话
+ * 参考：
+ *   1. 先做 5 个 Domain 纯函数 Engine（22-26）——UEF Testing Standard §3
+ *      "standalone logic reproduction" 对纯函数最省成本：不需要 mock
+ *      Sheet/Event，直接给定输入断言输出。22_PriorityEngine 优先（有
+ *      具体边界：无 due_date/临界天数/逾期 clamp/recurring 折扣/最终
+ *      Math.min(100) 五类边界），其次 26_AnalyticsEngine（三处已加固的
+ *      零除防护，正该补一个回归测试把"防护存在"这件事锁死，而不是留着
+ *      "现在没事"）。
+ *   2. 再做 12_TaskQueryEngine 的 Contract Test（全项目唯一的查询入口，
+ *      被依赖面最广）。
+ *   3. Application 层（20_TaskEngine/13_ActiveTasksEngine/
+ *      09_IdempotencyManager 的新增部分）由于涉及真实 Sheet/Event I/O，
+ *      按 Testing Standard §3 需要"结构化的手工验证流程"而非
+ *      standalone reproduction，成本更高，可以晚一步。
+ *   4. 这份清单本身建议搬进 00_Roadmap.gs（本次 Review 已经代为补上，
+ *      见该文件本次更新）。
+ *
+ * Gate 影响：
+ * 按 UEF 00_Review_Framework.md §9，MEDIUM finding 会 block Testing Gate，
+ * 除非有 ADR 明确接受延后。本次 Review 没有替 Carson 做"接受延后"这个
+ * 产品判断——是选择现在开一轮测试补齐会话，还是先用 ADR 记录"已知暂缓，
+ * 原因和期限"，由 Carson 决定，见本文件末尾「五、待决问题」。
+ */
+
+// ------------------------------------------------------------
+// Finding D3-1
+// ------------------------------------------------------------
+
+/**
+ * ### Finding: 00_Roadmap.gs 的版本头与「当前版本」章节停留在 V4.4，
+ *     落后实际状态两个版本
+ *
+ * File / Module:  00_Roadmap.gs
+ * Function:       文件头版本号声明 + 「二、Current Version」章节
+ * Checklist item: D3 Doc/Code Drift
+ *
+ * Mechanism:
+ * 00_Roadmap.gs 文件头写"Productivity OS v4.4"，「二、Current Version」
+ * 章节把 V4.4（第三轮外部审计修复）描述成"本 OS 现状"，其中包括一句
+ * "治理文档齐备（Constitution/State/File Map/ADR/Roadmap 五份）"。但
+ * 00_Project_State.gs 的文件头写"v4.6"，且记录了 V4.5（第四轮审计：
+ * Gate 等待时间/Projection 幂等/归档有界扫描/SecureConfig 缓存/
+ * SYSTEM_BUSY 错误细分）和 V4.6（第五轮审计：TaskStatistics 降级为
+ * 每日批量重算，ADR-2026-07-06-005）两轮完整的后续变更，Roadmap 完全
+ * 没有反映这两轮。另外 00_Project_Constitution.gs 2026-07-11 的
+ * changelog 记录了新增 00_Command_Reference.gs 和
+ * 00_Known_Limitations.gs 两份治理文档，实际治理文档数量现在是七份，
+ * Roadmap 里"五份"这个数字也过期了。Roadmap 文件头自己写的维护规则是
+ * "快照，每次更新覆盖旧内容，不是日志"——这次核实到的落后正是这条
+ * 自定规则本身没有被遵守，不是一个抽象的"文档可能不准"的泛泛担忧。
+ *
+ * Evidence:
+ * 直接对照 00_Roadmap.gs 第 3 行、第 15-27 行 与 00_Project_State.gs
+ * 第 3 行及其 V4.5/V4.6 完整记录，以及 00_Project_Constitution.gs 文件头
+ * 2026-07-11 changelog 条目。补记两条新 ADR（见 Finding D1-1）时发现
+ * 同一类 drift 的第二个实例：00_ADR.gs 文件头写"v4.5"，但文件内容本身
+ * 已经收录 ADR-2026-07-06-005（V4.6 的架构决定），头部版本号没有跟着
+ * 内容一起更新。第三个实例：00_File_Map.gs「三、Architecture Layer Map」
+ * 开头说"00_ 开头的四份治理文档（Constitution/State/File Map/ADR）以及
+ * 本次新增的 00_Roadmap.gs 不参与这个分层"——这句话写于 V4.3，此后
+ * 2026-07-11 新增的 00_Known_Limitations.gs / 00_Command_Reference.gs
+ * 两份治理文档没有被补进这句话。三个实例都已一并修正，不算三条独立
+ * Finding，是同一个"版本头/计数类元数据容易落后于内容"模式的三次出现，
+ * 说明这不是 Roadmap 一个文件的孤立问题。
+ *
+ * Severity:          MEDIUM
+ *   Likelihood:      Routine（现在就是这个状态，不是理论风险）
+ *   Impact:          Low（不影响运行中的代码；影响的是未来交接/规划——
+ *                    按本项目自己的交接约定"新窗口先贴 Constitution +
+ *                    ADR + Roadmap"，一个只看 Roadmap 的读者会误以为
+ *                    TaskStatistics 相关工作还没做，可能重新提出已经
+ *                    做过的方案）
+ *
+ * Disposition:       Confirmed
+ *
+ * Recommendation:
+ * 本次 Review 已经直接修正（见本次 00_Roadmap.gs 和 00_ADR.gs 文件头
+ * 更新），属于纯文档修正，不涉及重新论证任何架构决定本身（UEF
+ * 00_Review_Framework.md §6：Review 不重新审判已有 ADR 的决定，只核对
+ * 实现是否跟决定一致——这里核对的是"Roadmap/ADR 文件头版本号描述"是否
+ * 跟 Project State 记录的实际历史一致）。
+ */
+
+// ------------------------------------------------------------
+// Finding D1-1
+// ------------------------------------------------------------
+
+/**
+ * ### Finding: 两处"维持现状/不改"的架构决定符合 UEF 自己定义的 ADR
+ *     触发标准，但只以行内注释形式记录，没有正式 ADR 条目
+ *
+ * File / Module:  00_Project_Constitution.gs「零之四、Dependency Rules」
+ *                 已知例外（21_RecurringEngine.gs → 09_IdempotencyManager.gs）；
+ *                 05_SheetUtils.gs 文件头（裸全局函数命名冲突风险，V4.5
+ *                 LOW RISK 1 / V4.6 MEDIUM RISK 3 两轮评估后维持不变）
+ * Function:       N/A（这是治理文档归档位置问题，不是某个函数的行为问题）
+ * Checklist item: D1 Governance
+ *
+ * Mechanism:
+ * 两处决定本身论证质量不差——都清楚写了"考虑过的替代方案"和"为什么选
+ * 现在这个"（RecurringEngine 例外：重新实现一遍幂等判重 vs 复用现有路径，
+ * 选了复用；裸全局函数：包进命名空间需要动十几个函数+项目里几乎所有
+ * 调用点 vs 维持现状，两轮评估后都选维持现状）。但两者都只是 Constitution
+ * 或文件头里的一段叙述性注释，没有对应的 00_ADR.gs 正式条目。
+ * 按 UEF 01_Architecture_Design_Standard.md §6："跨 Blueprint 层边界的
+ * 新依赖是一个架构决定，要走 Decision Matrix"——RecurringEngine 例外
+ * 正是跨了 Domain→Application 这条边界。按 §8 的 ADR 触发标准（"不易
+ * 撤销""存在过认真考虑过的替代方案且被否决""未来的人会问为什么这样做"），
+ * 两处都至少命中后两条。按 UEF Constitution §5.2，"Won't fix" 这个
+ * disposition 要求"必须引用对应 ADR"——目前两处都没有 ADR 可引用。
+ *
+ * Evidence:
+ * grep 00_ADR.gs 全文搜索"RecurringEngine"和裸全局函数相关字样（如
+ * "裸全局""命名冲突"），零命中——确认这两处决定确实不在 ADR 文件里，
+ * 只在 Constitution 零之四和 05_SheetUtils.gs 文件头。
+ *
+ * Severity:          LOW
+ *   Likelihood:      Foreseeable（只有当有人专门核对"00_ADR.gs 这一份
+ *                    文件"来确认决定清单时才会踩到——本次 Review 过程中
+ *                    确实发生了一次：一开始 grep ADR 文件没找到，是后来
+ *                    去读 Constitution/文件头才确认原来早有论证，不是
+ *                    真的遗漏了推理，只是推理没放在预期的位置）
+ *   Impact:          Low（推理内容本身没有缺失，只是没有归档到"预期该
+ *                    找到它的地方"，不影响任何运行时行为）
+ *
+ * Disposition:       Confirmed
+ *
+ * Recommendation:
+ * 补记两条正式 ADR（ADR-2026-07-11-006 / 007），明确标注"这是对已经
+ * 做出且已经实现的决定做补充归档，不是重新做一次决定、也不是重新论证
+ * 是否应该这样"——本次 Review 已经代为起草并加入 00_ADR.gs（见本次
+ * 更新），沿用现有 5 条 ADR 一致的 Metadata/Context/Decision/
+ * Consequences 结构。
+ */
+
+// ============================================================
+// 四、Review Summary（按 UEF Review Templates §4，供
+//     Universal Engineering Framework 项目里的
+//     02_Architecture_Review_Standard/06_Review_History.md 收录用）
+// ============================================================
+
+/**
+ * ### 2026-07-11 — Productivity OS — 全项目（Profile: Domain）
+ * Reviewer:      Claude（single-project review，逐项对照实际代码核实）
+ * Gate feeding:  Testing Gate（补跑——项目已在生产环境运行 V4~V4.6）
+ * Findings:      0 HIGH, 2 MEDIUM, 1 LOW
+ * Dispositions:  3 confirmed（1 项 MEDIUM——测试覆盖缺口——待 Carson 决定
+ *                是开专门的测试补齐会话还是先用 ADR 记录延后；另 1 项
+ *                MEDIUM + 1 项 LOW 本次 Review 已直接修正/补记，不需要
+ *                额外的实现工作）
+ * Notable:       两个后续可能对其它 Domain OS 也适用的观察——(1) 一个
+ *                项目可以在"Layering/Separation of Concerns"上做得很干净，
+ *                同时在"Testing"上几乎空白，两者是完全独立的健康度轴，
+ *                不能因为架构分层做得好就默认测试也补齐了；(2)"决定维持
+ *                现状"的论证如果只写在受影响文件的文件头/Constitution
+ *                里而不落一条正式 ADR，会在"专门核对 ADR 清单"这个场景
+ *                下显得像是遗漏——即使论证本身完全没有缺失。
+ * Full record:   本文件（00_Architecture_Review.gs），Productivity OS
+ *                项目自己的 Governance 层
+ */
+
+// ============================================================
+// 五、待决问题（需要 Carson 决定，本次 Review 没有单方面替他决定）
+// ============================================================
+
+/**
+ * 1. Finding C1-1（测试覆盖缺口，MEDIUM）：是现在就开一轮专门的测试补齐
+ *    会话（按上方 Recommendation 的优先级顺序），还是先接受用一条 ADR
+ *    记录"已知暂缓，原因是 XXX，暂缓到 YYY"？两种都是合理选择，取决于
+ *    接下来的时间/优先级安排，不该由我单方面替 Carson 决定。
+ */
+
+// ============================================================
+// 六、Review #2（2026-07-11）——项目级增强检查项
+// Scope: A5 Event Flow / B1 Extensibility / B2 Scalability / C3 AI
+// Readiness（一之二声明的加深子集，Domain 最低要求 A1/A3/D1/C1/D3 已在
+// Review #1 覆盖，不重复跑）
+// ============================================================
+
+/**
+ * ### Executive Summary
+ *
+ * 本次只跑「一之二」声明的四项加深 checklist，逐项直接读代码找证据，
+ * 不假设、不套用经验判断。结论：Event Flow（A5）和 Extensibility（B1）
+ * 两项全部通过，证据扎实；AI Readiness（C3）有一条 LOW Finding。
+ * Scalability（B2）核实出 ActiveTasks 表已存在且被正确维护，但从未被
+ * 查询路径实际读取——不过原始 Evidence 只能证明"这里有优化空间"，不能
+ * 证明"当前架构已经出现需要修正的问题"（没有任何实测执行时间、真实
+ * 生产数据规模、或接近 GAS quota 上限的证据）。按 UEF Evidence-first
+ * 原则复核后（Carson review, 2026-07-12），这一条改列为 Improvement
+ * Opportunity / Roadmap Item，不计入本次 Architecture Finding——详见
+ * 下方「Review Disposition」及「Improvement Opportunities」小节。
+ * **No HIGH Issues Found.**
+ * 已有 ADR/Constitution/Governance 明确决定的设计（比如 Dashboard 不落盘
+ * 的 ADR-2026-07-06、TaskStatistics 每日批量重算的 ADR-2026-07-06-005）
+ * 均未重新拿出来讨论——本次唯一的 Finding（C3-1）和唯一的 Improvement
+ * Opportunity（B2-1）都是此前从未被记录过的空白点，不是对已有决定的
+ * 重新审判。**All findings are forward-looking improvements rather than
+ * corrections to existing architectural decisions.**
+ *
+ * ### Findings
+ *
+ * HIGH: 无。**No HIGH Issues Found.**
+ *
+ * MEDIUM: 无。（原判定为 MEDIUM 的 B2-1，经 Carson review 后按
+ * Evidence-first 原则改列为 Improvement Opportunity，不计入 Finding——
+ * 原始 Evidence 未变，只是严重度归类被修正，见下方「Review
+ * Disposition」及「Improvement Opportunities」小节。）
+ *
+ * LOW:
+ *   - [C3-1] DashboardEngine.build() 返回纯文本字符串（专为 Telegram 人眼
+ *     阅读排版），不是结构化数据；本项目已经明确希望这份数据未来给
+ *     Personal AI Core 消费（见「一之二」新增的 C3 适用范围扩展），但
+ *     Dashboard 这条路径目前的输出形态需要被重新解析文本才能结构化使用。
+ *
+ * ### Review Disposition — B2-1 Reclassified（Carson review, 2026-07-12）
+ *
+ * 原始判定（2026-07-11 草稿）：B2-1 列为 MEDIUM Architecture Finding。
+ * Carson 复核后指出：草稿自己给出的 Evidence 里已经写明——当前规模通常
+ * 只有几百到几千行、getValues() 在此规模下运行没有问题、也没有任何
+ * 执行时间实测数据证明当前已经构成瓶颈；"ActiveTasks 已存在但未被利用"
+ * 本身只能证明"存在可以做得更好的空间"，不能证明"当前架构已经出现
+ * 需要修正的问题"。按 UEF Evidence-first 原则——Finding 应代表有证据
+ * 支持的当前问题，没有证据支持的应进入 Roadmap 而不是提高严重度——本条
+ * 改列为 Improvement Opportunity / Roadmap Item，不再计入本次
+ * Architecture Finding 统计（HIGH/MEDIUM/LOW 计数相应从 0/1/1 更正为
+ * 0/0/1）。C3-1 维持 LOW，不受影响。
+ * Upgrade trigger：一旦出现具体证据（实测执行时间、真实生产数据规模、
+ * 或确认接近 GAS quota 上限），应在下一次 Review 中重新评估是否把本条
+ * 升级回正式 Finding。
+ *
+ * ### Improvement Opportunities（非 Finding — 有证据支持"可以做得更好"，
+ * 没有证据支持"当前架构已经出现问题"）
+ *
+ *   - [B2-1] ActiveTasks（专门为"非终态工作台"设计、且被正确维护的表）
+ *     在全部查询路径上都没有被实际读取过；9 个共享同一个全表扫描模式的
+ *     查询函数里，只有 1 个（getStatistics）写了"这个数据量级还跑得动"
+ *     的假设，且这条假设本身没有实测数据支撑，也没有设定"什么情况下要
+ *     重新评估"的触发条件。详见上方 Review Disposition 说明。
+ *
+ * ### Evidence
+ *
+ * [B2-1]（Improvement Opportunity——以下证据支持"存在优化空间"，不支持
+ * "当前架构已出现问题"，详见上方 Review Disposition）:
+ *   - 00_Project_Constitution.gs 零之二：ActiveTasks 被明确定义为"工作台，
+ *     只有非终态任务"，且 CQRS 写入链路显示它由 Projection 同步增量维护
+ *     （10_ProjectionEngine.gs 的 projectTaskCreated_/projectTaskUpdated_/
+ *     projectTaskCompleted_/projectTaskCancelled_ 四个函数都有 ActiveTasks
+ *     的 upsert 或 delete 调用，逐条读代码核实过，维护逻辑本身是对的）。
+ *   - 12_TaskQueryEngine.gs 文件头 Engine Contract 明确写"Reads: Tasks
+ *     Sheet（唯一直接读取方...)"——不含 ActiveTasks。
+ *   - 12_TaskQueryEngine.gs 第 105-109 行 _readAllTasks_()：唯一的数据入口，
+ *     读的是 TASKS_SHEET 常量（= 'Tasks'），不是 ActiveTasks。
+ *   - getTodayTasks/getTomorrowTasks/getWeekTasks/getMonthTasks/
+ *     getUpcomingTasks/getOverdueTasks/getRecurringTasks/
+ *     getCancelledTasks/getArchivedTasksInline/getPriorityTasks/
+ *     searchTasks/getDashboard（12 个函数里的 12 个——即除 getStatistics
+ *     外全部走视图/展示类查询的函数）全部经由 _readAllTasks_() 读全量
+ *     Tasks，再交给 24_ViewEngine.gs 用 _isNonTerminal_() 在内存里过滤掉
+ *     DONE/CANCELLED——用全表扫描 + 内存过滤，达成了跟直接读 ActiveTasks
+ *     一样的正确结果，但付出了更高的 I/O 成本。
+ *   - 13_ActiveTasksEngine.gs 文件头：归档只对 Tasks 打 archived=true 标记，
+ *     "不物理删除"——确认 Tasks 表只会随时间单调增长，没有任何机制让它
+ *     变小。
+ *   - 12_TaskQueryEngine.gs 第 264-271 行 getStatistics() 注释：唯一一处
+ *     写明了规模假设——"数据量在 GAS 场景下（个人任务系统，通常几百到
+ *     几千行）现算完全够快"——这是一句断言，不是一次实测记录，且只覆盖
+ *     getStatistics 这一个函数，其余 8 个共享同一扫描模式的函数没有任何
+ *     等价说明。
+ *   - 网络查证（2026-07 数据）：GAS 单次执行硬上限 6 分钟，批量
+ *     getRange().getValues() 单次调用处理数万个 cell 量级通常在几秒内
+ *     完成——这意味着即使数据量涨到远超"几百到几千行"，大概率也不会
+ *     真的撞到 6 分钟上限，风险的性质是"效率随时间线性变差、违背
+ *     ActiveTasks 表本来的设计目的"，不是"某天会突然崩溃"。
+ *
+ * [C3-1]:
+ *   - 25_DashboardEngine.gs 文件头 Engine Contract，Forbidden Dependencies
+ *     字段原文："返回值是纯文本字符串，不是 Telegram 消息格式，呼应
+ *     ADR-2026-07-06 关于'不知道 Telegram 是什么'的正式条款"。
+ *   - 00_ADR.gs ADR-2026-07-06 的实际决定范围核实过：只回答了"Dashboard
+ *     该不该落盘（该不该做成 Projection）"，没有涉及"build() 的返回值
+ *     该是字符串还是结构化对象"这个问题——这是两个不同的设计问题被放在
+ *     同一条 Constitution 引用下，本次 Finding 只针对后一个、此前从未被
+ *     讨论过的问题，不重新审判 ADR-2026-07-06 本身"不落盘"这个结论。
+ *   - 25_DashboardEngine.gs 内部实现：buildTodayDashboard 等函数在拼字符
+ *     串之前，实际上是先调用 24_ViewEngine.gs 拿到结构化的 task 数组
+ *     （today()/tomorrow()/overdue() 等的返回值本身就是结构化的），
+ *     只是最后一步把它们循环拼接成人类可读文本——结构化数据在函数内部
+ *     是存在过的中间态，不是从来不存在。
+ *
+ * ### Recommendation
+ *
+ * [B2-1]（Improvement Opportunity——以下建议供未来"顺手做"参考，不是本次
+ * Review 要求修正的问题）:
+ *   WHY：ActiveTasks 已经被正确维护，只是没被读——补上"让高频视图查询读
+ *   ActiveTasks 而不是 Tasks"这一步，不需要新建任何东西，是把已经花了
+ *   成本维护的表用起来。
+ *   Trade-off：getTodayTasks 这类只关心非终态任务的查询改读 ActiveTasks
+ *   后，代码分叉成两类数据源（ActiveTasks 给非终态类查询，Tasks 给
+ *   Recurring/Cancelled/Archived(inline)/Statistics 这类需要看终态或全量
+ *   历史的查询），比现在"所有查询统一读一张表"要多一点分支复杂度——但
+ *   这个分叉本身反映的是两类查询真实不同的数据需求，不是无意义的复杂化，
+ *   符合"只在有真实收益时增加复杂度"这条本项目一贯坚持的原则。
+ *   Expected Benefit：高频查询（today/tomorrow/priority 等大概率是日常
+ *   使用里调用最频繁的指令）的 I/O 成本从"正比于全部历史任务数"降到
+ *   "正比于当前工作台任务数"，且不会随使用年限增长而变差——这正是
+ *   ActiveTasks 当初被设计出来的理由，现在补上让它真正生效。
+ *
+ * [C3-1]:
+ *   WHY：结构化中间态已经在 DashboardEngine 内部存在，暴露它的成本很低
+ *   （不需要重新设计，只需要让 build() 除了拼好的文本，也把背后的结构化
+ *   数据一并返回或者提供一个单独的入口）。
+ *   Trade-off：如果现在就做，是在没有实际调用方（Personal AI Core 目前
+ *   不存在）的情况下先做一次接口设计，有"猜错未来需求形状"的风险——
+ *   这也是这条只定为 LOW、且本次不建议立刻动手的原因，等真的开始接
+ *   Personal AI Core 时再做，形状会更准。
+ *   Expected Benefit：真正需要的时候，改动范围小（暴露既有中间态，不是
+ *   重新计算一遍），且不影响 06_TaskIntentParser.gs 现在依赖的文本格式，
+ *   两者可以并存。
+ *
+ * ### Follow-up Actions
+ *
+ *   1. [B2-1，Improvement Opportunity] 建议下次动 Query/View 这块代码时
+ *      顺手做：把 getTodayTasks/getTomorrowTasks/getWeekTasks/
+ *      getMonthTasks/getUpcomingTasks/getOverdueTasks/getPriorityTasks
+ *      这几个只关心非终态任务的查询，数据源从 _readAllTasks_(Tasks) 切到
+ *      读 ActiveTasks；getRecurringTasks/getCancelledTasks/
+ *      getArchivedTasksInline/getStatistics/searchTasks 因为需要终态或
+ *      全量历史数据，继续读 Tasks，保持不变。不是本次 Review 范围内的
+ *      实现工作（UEF 00_Review_Framework.md §6），也不是需要修正的
+ *      Architecture Finding，已记进 00_Roadmap.gs 的 Improvement
+ *      Opportunity 条目。若未来出现具体性能证据（实测执行时间、真实
+ *      生产数据规模、或接近 GAS quota 上限），下次 Review 应重新评估
+ *      是否升级为正式 Finding。
+ *   2. [C3-1，LOW] 暂不动代码，等 Personal AI Core 真的要接 Dashboard
+ *      数据时再设计结构化返回形态——记一条 Roadmap 待办，不是现在的
+ *      优先级。
+ *   3. C3-1（1 项 LOW Finding）与 B2-1（1 项 Improvement Opportunity）
+ *      都已经不是"讨论话题"而是有具体证据支持的记录，跟 Review #1 的
+ *      三条一样，建议一并同步进 00_Roadmap.gs 的 Architecture Evolution
+ *      小节（B2-1 的 Roadmap 条目措辞需同步更正为 Improvement
+ *      Opportunity，不再称 Finding——本次已一并更正）。
+ *
+ * ### Review Summary（供 UEF 06_Review_History.md 收录）
+ * Findings:      0 HIGH, 0 MEDIUM, 1 LOW（+ 1 Improvement Opportunity，
+ *                不计入 Finding 统计——见上方 Review Disposition）
+ * Dispositions:  1 confirmed（C3-1，未修正代码），1 reclassified（B2-1：
+ *                Carson review 后由 MEDIUM Finding 改列为 Improvement
+ *                Opportunity，Evidence 未变，仅严重度归类修正）。两条均
+ *                未修正代码（Review 不等于 Rewrite），已记入 00_Roadmap.gs
+ *                供下次实现/重新评估时参考
+ */
+
+// ============================================================
+// 七、Review #3（2026-07-13）— Feature Architecture Review:
+// Due Time Support（Pre-Implementation Design Review）
+// ============================================================
+
+/**
+ * ### Review Request
+ *
+ * Scope:            due_date/due_time/due_datetime 三字段的新增支持——
+ *                    Sheet Schema、Task Model、Create Task flow、Update
+ *                    Task flow、既有 validation、既有 API（Library 导出
+ *                    函数）、既有 Connector（Reminder OS 边界）。不含
+ *                    Reminder OS 本身（提醒调度、通知发送不属于本项目
+ *                    职责，见下方「一、边界确认」）。
+ * Review Type:      Feature/Change Review（pre-implementation）——跟
+ *                    Review #1/#2 的性质不同：那两次是"补跑"的周期性
+ *                    Domain Profile 合规扫描（针对已经在生产环境跑的
+ *                    代码），这次是"改动前置审查"，针对一个尚未落地的
+ *                    具体增强请求。本次审查没有引用 UEF
+ *                    01_Review_Profiles.md 的 Profile 选择流程——那份
+ *                    文件本次会话没有被提供，不假装引用具体章节号；
+ *                    本次结构改为直接对应需求方给出的 7 项 Deliverables，
+ *                    但沿用 Review #1/#2 已经确立的 Finding /
+ *                    Improvement Opportunity / Evidence / Disposition
+ *                    这套共享词汇和 Evidence-first 判断标准（详见
+ *                    02_Review_Checklist_Library.md 引言、
+ *                    06_Review_History.md、08_Review_Knowledge_Base.md，
+ *                    以及 Review #2 的 Review Disposition 先例）。
+ * Requested by:     Carson
+ * Reviewer:         Claude
+ * Date:             2026-07-13
+ * Prior review:     Review #1（2026-07-11）/ Review #2（2026-07-11，
+ *                    2026-07-12 Disposition Amendment）——本次不重复跑
+ *                    A1/A3/A5/B1/B2/C1/C3/D1/D3，只在触及到相同代码区域
+ *                    时交叉引用，不重新下结论。
+ * Feeds:            Design Gate（本次结果是"设计是否批准"，不是"是否可以
+ *                    上线"——批准后才进入实现，实现完成后如果需要，可以
+ *                    再补一次 Testing Gate 性质的 Review）。
+ *
+ * ── 零、边界确认（复述需求方原文，作为本次审查的硬约束）──────────────────
+ *   Productivity OS 拥有：title / project / priority / due_date /
+ *   due_time / due_datetime / status。
+ *   Productivity OS 不得：计算 reminder time、调度通知、发送 Telegram
+ *   提醒、管理 reminder 规则——这些属于 Reminder OS。
+ *   本次设计全程遵守这条边界：新增的三个字段止于"任务自己知道自己什么
+ *   时候到期"，不涉及"谁在什么时候该被提醒"。
+ */
+
+// ------------------------------------------------------------
+// 一、现有架构审查（Deliverable 1：Architecture Review）
+// ------------------------------------------------------------
+
+/**
+ * ### 核心结论（先说答案，再展开证据）
+ *
+ * 需求方要求"判断现有架构是否已经支持 time 字段"——答案是：**部分支持，
+ * 但从未被当作正式字段暴露**。这不是一次"从零设计"，而是一次"把已经
+ * 存在、但只活在字符串格式里的能力，提升为显式 Schema 字段"。这个判断
+ * 直接决定了下面「二、Proposed Schema Changes」为什么可以做得比表面看
+ * 起来更小——具体证据如下。
+ *
+ * ### 1.1 Sheet Schema（15_Setup.gs，Schema Authority，
+ *     00_ADR.gs ADR-2026-07-06-002）
+ *
+ * Tasks / ActiveTasks / ArchiveTasks 三张表当前表头（setupSheets() 与
+ * repairSheetHeaders() 两处字面量数组逐字核对，二者一致）只有单一
+ * `due_date` 列，不存在 `due_time` / `due_datetime`。TaskFilters（搜索
+ * 扁平投影）/ TaskStatistics（聚合计数器）两张表不含任何到期日相关列，
+ * 本次设计维持这个现状（理由见 2.4）。
+ *
+ * ### 1.2 Task Model / Create Task flow / Update Task flow —— 关键发现
+ *
+ * 09_TemporalParser.extractDateTime()（06_TaskIntentParser.gs 在
+ * TASK_CREATE 分支唯一调用的日期解析函数）**已经在解析时间**：
+ *   - `_extractTime_()` / `_buildTimeInfo_()` 已经能从"早上/上午/中午/
+ *     下午/晚上/凌晨 + X点X分 或 X:XX"这类中文表达里，正确抽出 hour/
+ *     minute（含"下午/晚上"自动 +12、"中午 1 点"按 13:00 算这些细节）。
+ *   - `extractDateTime()` 第 149-176 行：如果 `timeInfo` 存在，把
+ *     算好的时间通过 `base.setHours(...)` 合并进日期，最终用
+ *     `Utilities.formatDate(base, tz, "yyyy-MM-dd'T'HH:mm:ss")` 格式化，
+ *     **返回一个已经带时间的 ISO 字符串，塞进唯一的 due_date 字段**；
+ *     没有时间时，才返回纯日期字符串 `'yyyy-MM-dd'`。
+ *   - 05_SheetUtils.parseDueDate_()（isOverdue_ / 22_PriorityEngine /
+ *     23_SearchEngine / 24_ViewEngine 全部共用的唯一日期解析函数）本身
+ *     已经能正确区分两种格式：纯日期字符串走"手动按本地时区午夜"分支
+ *     （避免 UTC 偏移 bug，见该函数注释），其余（带时间）字符串直接交给
+ *     `new Date(raw)`，按 ES2015+ 规范，带 T 无 offset 的日期时间字符串
+ *     本身就按本地时区解析——**两种格式都已经被正确处理，不是本次新增
+ *     的能力**。
+ *   - 09_TemporalParser.computeNextDueDateFromLabel()（21_RecurringEngine.
+ *     spawnNextIfNeeded 用来算 recurring 任务下一次到期日的函数）第
+ *     421 行：`var hasTime = /T\d{2}:\d{2}:\d{2}/.test(prevDueDateStr);`
+ *     ——**已经会侦测输入是否带时间，并在输出时保留同样的格式**（纯日期
+ *     → 纯日期，带时间 → 带时间）。也就是说：如果一个 recurring 任务
+ *     当前恰好带着时间（比如"每天早上8点"），它的下一次实例**已经会
+ *     正确延续这个时间**，不会被重置成 00:00。
+ *
+ * 结论：日期时间的抽取、解析、跨 recurring 实例的延续，三个环节的底层
+ * 计算逻辑**全部已经正确工作**，且不需要为本次改动而修改
+ * computeNextDueDateFromLabel() 或 parseDueDate_() 内部任何一行。缺的
+ * 只是"这个能力有没有一个正式、显式、可独立查询的字段"——目前它只是
+ * 藏在 due_date 字符串的格式差异里（有没有 `T`），没有任何字段告诉
+ * 调用方"这个任务是不是真的有一个具体时间点"。
+ *
+ * ### 1.3 现有 Validation
+ *
+ * 20_TaskEngine.updateTask() 对 `category`/`priority`/`recurring` 三个
+ * 字段做白名单校验（不在 ProductivityConfig 枚举里的值会被静默丢弃，见
+ * 该函数 changes.forEach 循环），但对 `due_date` **没有任何格式校验**
+ * ——这是现有代码的既有状态，不是本次改动引入的缺口（Telegram 正常路径
+ * 下 due_date 永远来自 extractDateTime()，天然格式正确；但 updateTask
+ * 本身作为 00_Known_Limitations.gs 记录的 Internal API，理论上可以被
+ * 未来的 AI Agent/批量脚本直接传入任意字符串）。本次不新增这类校验
+ * ——沿用现有"信任上游解析器，不在 Engine 层重复校验格式"的一贯模式，
+ * 但作为 Improvement Opportunity 记录（见「五、Risk Analysis」IO-2），
+ * 不因为本次顺便新增两个字段就单方面提高这一处的校验标准。
+ *
+ * ### 1.4 现有 API（Library 导出函数）与 Connector
+ *
+ * 00_Project_Constitution.gs P4 第4层 Integration 明确记录本项目当前
+ * Bridge/Connectors/APIs/Import-Export/External Systems **全部"暂无"**
+ * ——本项目对外只有 Apps Script Library 导出函数（createTask/updateTask/
+ * completeTask/cancelTask/getPendingTasks，经 TaskEngine 命名空间或
+ * 向后兼容裸全局 wrapper），没有独立 REST API，也没有任何面向 Reminder
+ * OS 的现成读取通道。00_Roadmap.gs「四、Future」的 Domain OS Bridge
+ * 条目目前只有 Property OS 的假设性例子，没有 Reminder OS 的具体计划。
+ * 这一点直接关系到需求方"Reminder OS will consume this information
+ * later"这句话——**目前不存在任何机制能让 Reminder OS 消费任何
+ * Productivity OS 数据，遑论 due_datetime**。这不是本次要解决的问题
+ * （需求方明确排除"计算 reminder time / 调度通知"），但本次设计会
+ * 确保 due_datetime 以显式字段（而不是需要正则猜测的字符串）存在，
+ * 让未来真正建那条 Bridge 时不需要重新解决"怎么知道这个任务有没有
+ * 具体时间"这个问题——这是本次设计的一个自然副产品，不是范围扩大。
+ */
+
+// ------------------------------------------------------------
+// 二、Proposed Schema Changes（Deliverable 2）
+// ------------------------------------------------------------
+
+/**
+ * ### 2.1 新增列
+ *
+ *   Tasks / ActiveTasks / ArchiveTasks 三张表（不含 TaskFilters /
+ *   TaskStatistics，理由见 2.4）各新增两列：
+ *     due_time      — 'HH:mm'（24小时制，两位数字，如 '10:00'）或 ''
+ *     due_datetime  — 'yyyy-MM-ddTHH:mm:ss' 或 ''
+ *
+ * ### 2.2 三字段的关系（关键设计决策，需 Carson 确认）
+ *
+ *   due_date      —— 永远是纯日期 'yyyy-MM-dd' 或 ''。语义不变。
+ *   due_time      —— 有具体时间点时是 'HH:mm'；**没有时间时是 ''
+ *                     （需求方原文的 null，本项目惯例里空字符串等同于
+ *                     该字段的"无值"状态，跟其余字段如 context/notes
+ *                     的空值约定一致，不单独发明"null"这个字面量）**。
+ *   due_datetime  —— **派生字段，不接受外部直接写入**：
+ *                     `due_date && due_time` 都有值时 =
+ *                     `due_date + 'T' + due_time + ':00'`；
+ *                     只要 due_time 为空，due_datetime **也是空
+ *                     字符串，不回退成"该日期的 00:00:00"**。
+ *
+ *   【需要 Carson 明确确认的点】：due_datetime 在"只有日期没有时间"时
+ *   到底该是空，还是该默认成当天 00:00:00？本次设计选择"空"，理由：
+ *   如果默认成 00:00:00，会让"用户真的说了'凌晨0点'"和"用户根本没说
+ *   时间"这两种情况在 due_datetime 这个字段上变得无法区分——而这正是
+ *   1.2 节发现的现有系统里已经存在的同一个歧义（due_date 字符串本身
+ *   在带时间和不带时间两种情况下的形状差异，虽然可以通过正则区分，
+ *   但从未被提升成一个明确字段）。选择"空"能让这个歧义被彻底解决，
+ *   而不是从"字符串格式里隐含的歧义"平移成"数值默认值带来的同一个
+ *   歧义"。但这确实是一个产品语义决定，不是纯技术判断，本次按此
+ *   实现，等 Carson 审阅本文件时确认或改判。
+ *
+ * ### 2.3 Identity 计算 —— 保持函数签名不变，只改调用方传入的值
+ *
+ *   07_IdentityEngine.generateTaskIdentity(chatId, title, dueDate,
+ *   repeatRule, priority, category) 当前对 dueDate 参数所在位置只接受
+ *   一个字符串。00_Command_Reference.gs C4 已经把"标题相同、due_date
+ *   不同 → 不同 identity"写成正式生效的行为规则——而 1.2 节已经证明，
+ *   现有系统里"due_date 不同"其实已经包含"时间不同"的情况（因为时间
+ *   本来就折叠在这个字符串里）。也就是说，**"改时间会产生不同的
+ *   identity"是现有系统已经在做的事，不是本次新引入的行为**。
+ *
+ *   为了不改变这个已经生效的行为、也不改 generateTaskIdentity() 的
+ *   函数签名（避免牵动 07_IdentityEngine.gs 本身及其单元测试），本次
+ *   建议：**所有调用方在这个参数位置传入"due_datetime 有值则用
+ *   due_datetime，否则用 due_date"这个合并值**，而不是裸传 due_date。
+ *   对于本次迁移前就存在的历史行（due_time 恒为空，due_datetime 恒
+ *   等于 due_date），这个合并值跟原来直接传 due_date 完全相同——
+ *   **意味着全部存量任务的 identity 哈希在迁移前后逐字节不变，这是
+ *   一条可以在实现阶段直接写单元测试验证的具体不变量，不是一句无法
+ *   验证的"应该没问题"**。
+ *
+ *   为了避免这个"取 due_datetime 或回退 due_date"的合并逻辑被在 4 个
+ *   调用点（见「三、API Impact」）各自重复一遍字面量表达式——那正是
+ *   08_Review_Knowledge_Base.md KB-2（Duplicated fallback constants）
+ *   描述的形状——建议在 07_IdentityEngine.gs 内新增一个与
+ *   generateTaskIdentity 同层、职责相邻的小型纯函数：
+ *
+ *     function resolveIdentityDueValue(task) {
+ *       return (task.due_datetime || task.due_date || '');
+ *     }
+ *
+ *   四个调用点统一改成先调用这个函数，再把结果传给
+ *   generateTaskIdentity 的 dueDate 参数位。这个函数本身零依赖、
+ *   零副作用，符合 07_IdentityEngine.gs 文件头"Pure Function: YES /
+ *   Forbidden Dependencies: Sheet, Events, Telegram/Output，任何其他
+ *   Engine"的既有 Engine Contract，不需要修改该文件头的 Contract
+ *   声明本身（只是新增一个同样满足这份 Contract 的函数）。
+ *
+ * ### 2.4 为什么 TaskFilters / TaskStatistics 不新增列
+ *
+ *   TaskFilters 只存 searchable_text（全文拼接字符串）和 tags_csv，
+ *   不是按字段单独查询的表——23_SearchEngine 的 dateFrom/dateTo 范围
+ *   过滤直接操作 due_date 字段本身（走 TaskQueryEngine.getTasks() 返回
+ *   的 task[]，不经过 TaskFilters），不需要 due_time 参与拼字符串。
+ *   TaskStatistics 是纯计数器（total_count/pending_count/...），跟
+ *   任何单个任务的到期时间无关。两张表维持现状，符合"只在有真实收益
+ *   时增加复杂度"的既有原则（00_Project_Constitution.gs Architecture
+ *   Principles 关联表述），不是遗漏。
+ */
+
+// ------------------------------------------------------------
+// 三、API Impact（Deliverable 3）
+// ------------------------------------------------------------
+
+/**
+ * ### 3.1 需要改动的文件（8 个，全部是新增/扩展，无破坏性变更）
+ *
+ *   1. 09_TemporalParser.gs
+ *      extractDateTime() 返回对象新增 due_time / due_datetime 两个键，
+ *      due_date 键保留、语义不变（且从此永远是纯日期——当前偶尔带时间
+ *      的行为到此为止，时间改由 due_time/due_datetime 承载）。
+ *      computeNextDueDateFromLabel() **不改一行**（1.2 节已证明其
+ *      现有逻辑对本次需求完全够用）。
+ *
+ *   2. 06_TaskIntentParser.gs
+ *      TASK_CREATE 分支：`{ due_date: parsed.due_date, recurring:
+ *      recurringLabel }` 扩展为同时传 due_time / due_datetime（沿用
+ *      00_Known_Limitations.gs"自然语言解析范围止于 due_date/recurring"
+ *      这条边界——这里新增的是同一类"时间解析"能力的自然延伸，不是
+ *      新增 category/priority 这类语义推断，不违反该 Known
+ *      Limitation，建议在该文件"一、Natural Language Parser Scope"
+ *      小节补一句说明，见「六」）。展示文案（4 处 `'到期: ' +
+ *      task.due_date` 及同类拼接）视是否有 due_time 决定要不要多显示
+ *      时间，具体文案本次不预先定稿，留待实现阶段跟 Carson 确认展示
+ *      格式（例如"到期: 2026-07-30 10:00"还是"到期: 2026-07-30
+ *      （10:00）"）。
+ *
+ *   3. 07_IdentityEngine.gs
+ *      新增 resolveIdentityDueValue()（见 2.3）。generateTaskIdentity()
+ *      本身签名和内部逻辑不变。
+ *
+ *   4. 09_IdempotencyManager.gs
+ *      createTaskIfNotExists() 生成 identity 时，第三个参数从
+ *      `meta.due_date || ''` 改为 `resolveIdentityDueValue(meta)`。
+ *      JSDoc 里的 meta 形状说明同步补上 due_time/due_datetime。
+ *
+ *   5. 20_TaskEngine.gs（改动点最多，逐条列出）
+ *      - createTaskDirect_() 的 task 对象字面量新增
+ *        `due_time: meta.due_time || ''` 和
+ *        `due_datetime: (meta.due_date && meta.due_time) ?
+ *        (meta.due_date + 'T' + meta.due_time + ':00') : ''`。
+ *      - `ProductivityConfig.IDENTITY_AFFECTING_FIELDS` 新增
+ *        'due_time'（due_date 已在列表里；due_datetime 是派生值，不
+ *        需要、也不应该出现在这个"外部传入触发重算"的清单里，见下条）。
+ *      - `UPDATABLE_FIELDS` 新增 'due_time'（**不**新增
+ *        'due_datetime'——2.2 节已定义它是派生字段，updateTask 不接受
+ *        外部直接覆写它，防止调用方传入一个跟 due_date/due_time 自相
+ *        矛盾的 due_datetime）。
+ *      - updateTask() 内部：当 due_date 或 due_time 任一被改动时，
+ *        重新计算 merged.due_datetime（复用 2.2 的合并公式），一并
+ *        写进 payload，保证 due_datetime 永远是另外两个字段的正确
+ *        派生结果，不会出现三个字段互相矛盾的存储状态。
+ *      - identity 重算调用点改用 `resolveIdentityDueValue(merged)`。
+ *
+ *   6. 21_RecurringEngine.gs
+ *      spawnNextIfNeeded()：`computeNextDueDate(task.due_date, ...)`
+ *      改为先取 `var prevValue = resolveIdentityDueValue(task);` 再
+ *      `computeNextDueDate(prevValue, task.recurring)`；拿到
+ *      `nextDueValue` 后，按其中是否含 `T` 拆回 next due_date /
+ *      next due_time 两个值，一并放进传给
+ *      IdempotencyManager.createTaskIfNotExists 的 meta 对象（当前
+ *      这里只传 due_date，需要补 due_time）。
+ *
+ *   7. 11_ProjectionRebuilder.gs
+ *      新增 migrateSchemaDueTime()（见「四、Migration Plan」）；
+ *      rebuildTasksProjection() / rebuildActiveTasksProjection() 两处
+ *      identity 重算调用改用 resolveIdentityDueValue(task)。
+ *
+ *   8. 15_Setup.gs
+ *      setupSheets() 与 repairSheetHeaders() 两处字面量数组（各 3 张表，
+ *      共 6 处）追加 'due_time', 'due_datetime'（**新装机**路径；已有
+ *      部署走第 7 项的迁移函数）。
+ *
+ * ### 3.2 确认零改动的文件（9 个，逐一给出证据，不是"大概不用改"）
+ *
+ *   - 02_EventBus.gs：publish() 对 payload 不做任何字段级校验，整个
+ *     对象 `JSON.stringify` 后原样存进 Events 表（第 155 行函数体逐行
+ *     核对过）——新字段自动跟着走，不需要改。
+ *   - 10_ProjectionEngine.gs：projectTaskCreated_() /
+ *     projectTaskUpdated_() 都是把 `event.payload` 整个对象（或
+ *     shallowCopy 后减去 task_id）原样传给 upsertRowByKey_()，不是
+ *     逐字段搬运（第 169-231 行核对过）——新字段自动按表头名字写进
+ *     对应列，不需要改。
+ *   - 05_SheetUtils.gs：parseDueDate_() / isOverdue_() 已经正确处理
+ *     两种字符串格式，upsertRowByKey_() 按表头名字通用赋值——都不需要
+ *     感知"这是 due_time 还是别的什么字段"。
+ *   - 12_TaskQueryEngine.gs：getTask() 第 129-165 行 `for (var h in
+ *     headerMap) task[h] = rowValues[headerMap[h]]`——通用按表头读取，
+ *     没有任何字段白名单；`_readAllTasks_`/`getTasks` 同理。新列自动
+ *     出现在返回的 task 对象里。
+ *   - 22_PriorityEngine.gs / 23_SearchEngine.gs / 24_ViewEngine.gs /
+ *     25_DashboardEngine.gs / 26_AnalyticsEngine.gs：五个纯函数
+ *     Engine 目前全部按"日期粒度"工作（00_Command_Reference.gs V1
+ *     原文："只比较日期部分，不管 due_date 里带没带具体时间"——这是
+ *     已经生效、已经文档化的行为，不是本次发现的疏漏）。本次不修改
+ *     这五个文件的任何逻辑——它们会继续正确工作（多出来的 due_time/
+ *     due_datetime 字段对它们不可见，也不需要可见），"让这五个 Engine
+ *     开始感知 due_time"是一次独立的、后续的功能决策，见「七」
+ *     Improvement Opportunity IO-1。
+ *
+ * ### 3.3 对外契约
+ *
+ *   createTask(title, meta, chatId) / updateTask(taskId, changes,
+ *   chatId) 两个 Library 导出函数签名不变，`meta`/`changes` 对象新增
+ *   一个可选键 `due_time`——现有调用方（Personal AI Core 04_Main.gs 等）
+ *   不传这个键完全不受影响，符合 02_Review_Checklist_Library.md A4
+ *   "契约变更应该是新增可选字段"的标准。本项目没有独立 REST API，没有
+ *   Connector，因此没有需要单独走版本协商的外部契约。
+ */
+
+// ------------------------------------------------------------
+// 四、Migration Plan（Deliverable 4）
+// ------------------------------------------------------------
+
+/**
+ * ### 4.1 新装机路径
+ *   setupSheets() 已经建好带 due_time/due_datetime 的表头（见 3.1 第
+ *   8 项），无需额外步骤。
+ *
+ * ### 4.2 既有部署路径（Carson 现在这个场景）
+ *
+ *   在 11_ProjectionRebuilder.gs 新增一个函数，命名和结构直接照抄
+ *   已有的 migrateSchemaV4() 先例（同一个文件、同一种"一次性、幂等、
+ *   只加列不改数据"的迁移模式，不发明新机制）：
+ *
+ *     function migrateSchemaDueTime() {
+ *       Logger.log('=== migrateSchemaDueTime ===');
+ *       _addColumnsIfMissing_('Tasks',        ['due_time', 'due_datetime']);
+ *       _addColumnsIfMissing_('ActiveTasks',  ['due_time', 'due_datetime']);
+ *       _addColumnsIfMissing_('ArchiveTasks', ['due_time', 'due_datetime']);
+ *       _setPlainTextFormatForNewColumns_('Tasks',        ['due_time', 'due_datetime']);
+ *       _setPlainTextFormatForNewColumns_('ActiveTasks',  ['due_time', 'due_datetime']);
+ *       _setPlainTextFormatForNewColumns_('ArchiveTasks', ['due_time', 'due_datetime']);
+ *       Logger.log('✅ due_time/due_datetime 列迁移完成（含纯文本格式修复，见 Finding DT-2）。');
+ *     }
+ *
+ *   其中 `_setPlainTextFormatForNewColumns_` 是本次新增的一个小型
+ *   共用辅助函数（原因见「五」Finding DT-2）——定位每一列的位置，对
+ *   整列数据区调用 `setNumberFormat('@')`，逻辑上是把
+ *   15_Setup._ensureSheet_() 里"新建表时对整个数据区设纯文本格式"这
+ *   一步，补给"给既有表追加列"这条路径，两条路径此后行为一致。实现
+ *   草案（放在 11_ProjectionRebuilder.gs，跟 `_addColumnsIfMissing_`
+ *   同层、供其配套调用）：
+ *
+ *     function _setPlainTextFormatForNewColumns_(sheetName, columnNames) {
+ *       var sheet = getSheet_(sheetName); // 05_SheetUtils.gs
+ *       var headerMap = getHeaderMap_(sheet);
+ *       var lastRow = sheet.getLastRow();
+ *       if (lastRow < 2) return; // 只有表头，没有数据行，不需要设格式
+ *       columnNames.forEach(function (col) {
+ *         if (!(col in headerMap)) return; // 列不存在（理论上不会，防御性检查）
+ *         var colIndex = headerMap[col] + 1; // 转 1-based
+ *         sheet.getRange(2, colIndex, lastRow - 1, 1).setNumberFormat('@');
+ *       });
+ *     }
+ *
+ *   （只处理"迁移时已存在的行"；迁移之后新建的行走 createTaskDirect_ →
+ *   upsertRowByKey_ 正常写入路径，不经过这个函数，不需要它管。）
+ *
+ * ### 4.3 是否需要回填存量数据
+ *
+ *   **不需要，也不建议**：现有 Tasks 行的 due_time 迁移后为 ''，
+ *   due_datetime 为 ''——这正是需求方"如果只有 due_date，due_time 视
+ *   为 null"这条要求本身，不是缺陷。
+ *
+ *   【需要 Carson 决定的独立问题，不影响本次迁移是否可以先做】：1.2 节
+ *   发现，存量数据里可能已经存在"due_date 字符串本身带 T 时间后缀"的
+ *   历史行（任何过去用自然语言创建、且说了具体时间的任务）。这些行
+ *   迁移后 due_time/due_datetime 仍然是空——**不是错误**（due_date
+ *   本身没有丢任何信息，字符串还在），但如果 Carson 希望这些历史行也
+ *   能被当作"有 due_time"来查询/展示，需要另外写一个一次性回填脚本
+ *   （扫描 Tasks 全表，凡是 due_date 匹配 `T\d{2}:\d{2}:\d{2}` 的行，
+ *   拆成新的三字段并覆写）。这不属于"backward compatible 的最小增强"
+ *   本身，是一个范围更大、需要单独评估的数据清理决定，本次只提出来
+ *   供选择，不预设答案，也不阻塞前面的 Schema 迁移先执行。
+ *
+ * ### 4.4 执行顺序
+ *   Carson 批准设计 → 实现 8 个文件的代码改动 → 运行一次
+ *   migrateSchemaDueTime() → 用 15_Setup.runDiagnostics() 里现成的
+ *   createTask/updateTask 冒烟测试路径验证新字段能正确写入/读出 → 视
+ *   4.3 的决定，选择是否另外跑历史数据回填。全程不需要
+ *   rebuildAllProjections()（存量 Events 里没有 due_time 字段，重放
+ *   出来的 due_time 天然是空，跟增量路径的迁移结果一致，不会产生
+ *   Read Model 与 Events 对不上的问题）。
+ */
+
+// ------------------------------------------------------------
+// 五、Risk Analysis（Deliverable 5）
+// ------------------------------------------------------------
+
+/**
+ * ### Findings（本次唯一的正式 Finding）
+ *
+ * ------------------------------------------------------------
+ * Finding DT-2
+ * ------------------------------------------------------------
+ * Severity:     MEDIUM
+ * Category:     对应 Checklist Library C2（Migration）/ B3（Reusability，
+ *               "在别处发现相同复制品也要一并处理"这条精神）
+ * Statement:    11_ProjectionRebuilder._addColumnsIfMissing_()（既有函数，
+ *               本次迁移计划直接复用）只对新增列调用
+ *               `sheet.getRange(1, lastCol).setValue(col)`
+ *               写表头文字，不对该列的数据区调用
+ *               `setNumberFormat('@')`——而 15_Setup._ensureSheet_()
+ *               对**全新建表**的数据区是明确调用了 `setNumberFormat('@')`
+ *               的（15_Setup.gs 第 113 行）。Google Sheets 对形如
+ *               'HH:mm'（如 '10:00'）的单元格内容有文档化的自动类型
+ *               识别行为，会在没有显式纯文本格式的列里把它识别成 Time
+ *               类型并转换存储形式，而不是保留字面字符串——这会让本项目
+ *               所有依赖"due_time 是字符串"的代码（正则匹配、
+ *               resolveIdentityDueValue 的字符串拼接等）静默拿到错误
+ *               的值，不会抛出任何异常。
+ * Evidence:     11_ProjectionRebuilder.gs `_addColumnsIfMissing_()`
+ *               函数体（第 75-96 行）逐行核对，函数末尾没有任何
+ *               setNumberFormat 调用；对照 15_Setup.gs `_ensureSheet_()`
+ *               第 110-114 行确认新建表路径确实做了这一步——两条路径
+ *               行为不一致，是可以直接读代码核实的事实，不是推测。
+ *               此前 V4 用同一个 `_addColumnsIfMissing_()` 加过
+ *               description/tags 两列，没有出现过这个问题——因为自由
+ *               文本内容不会被 Sheets 误判成特殊类型，这个既有 gap
+ *               此前没有可观测后果，不代表它不存在（这是为什么这条
+ *               现在才第一次被发现：due_time 是第一个"值的形状恰好会
+ *               触发 Sheets 自动类型识别"的、经由这条迁移路径新增的列）。
+ * Why not lower (Improvement Opportunity)：这不是"可以做得更好"，而是
+ *               本次迁移如果照抄现有 `_addColumnsIfMissing_()` 原样
+ *               使用、不额外处理，**会在第一次有人写入非空 due_time
+ *               时就触发**，触发条件不需要等待任何未来证据出现——
+ *               跟 Review #2 的 B2-1（需要未来证据才能升级）性质不同，
+ *               这条现在就有完整的因果链证据，直接满足 Evidence-first
+ *               对 Finding 的要求。
+ * Disposition:  Confirmed — Remediation designed within this proposal
+ *               （见「四、4.2」的 `_setPlainTextFormatForNewColumns_`）。
+ *               这是一个 Review #1/#2 的 Disposition 词表里还没有的
+ *               取值——"确认属实，且修复方案已经设计好、随本次改动一并
+ *               交付"，跟"confirmed 但推到 Roadmap 以后再修"、
+ *               "reclassified"都不一样。建议在下次讨论 UEF Review
+ *               Report Standard 时把这个 Disposition 取值正式收进
+ *               词表（比如叫 Remediated-in-Proposal），因为
+ *               Pre-Implementation Design Review 这种审查类型天然会
+ *               产生这一类 Disposition，跟事后审计的场景不同。
+ *
+ * ### Improvement Opportunities（非本次必须解决，供参考/后续追踪）
+ *
+ *   - [IO-1] 22/23/24/25/26 五个纯函数 Engine 目前对到期日的判断全部
+ *     停在"日期粒度"（见 3.2 说明）。due_time 存在之后，理论上
+ *     Urgency Score（22_PriorityEngine.computeUrgencyScore）可以把
+ *     "今天但已经过了这个时间点"和"今天但时间还没到"区分对待，
+ *     ViewEngine.today() 也可以在同一天内按时间排序。本次不做——需求
+ *     方本次的目标明确是"新增字段"，不是"重新设计打分/排序逻辑"，
+ *     且这类改动会实质改变现有 Urgency Score 的输出数值，影响面超出
+ *     "backward compatible 的最小增强"，应该作为独立的功能决策，
+ *     单独评审。已建议同步进 00_Roadmap.gs「三、Next Version」。
+ *
+ *   - [IO-2] 20_TaskEngine.updateTask() 对 due_date（以及本次新增的
+ *     due_time）不做任何格式校验（见 1.3）。这是本次改动之前就存在的
+ *     既有状态，不因为新增两个字段而被认为"应该顺带修"——按
+ *     Evidence-first 原则，没有证据表明这在当前唯一的调用路径
+ *     （Internal API，尚无 Telegram 指令、尚无外部脚本在用）下已经
+ *     造成过问题，升级为本次 Finding 理由不足。记录为独立
+ *     Improvement Opportunity，供以后 updateTask() 真正对外开放
+ *     （00_Known_Limitations.gs 记录的"未来可能场景"）时一并设计校验。
+ *
+ *   - [IO-3] `_addColumnsIfMissing_()` 本身（不只是本次两个新列）
+ *     缺少 DT-2 描述的纯文本格式步骤，是一个通用工具函数级别的缺口，
+ *     不只影响 due_time。本次的修复（4.2 的
+ *     `_setPlainTextFormatForNewColumns_`）只覆盖本次新增的列；要不要
+ *     把纯文本格式步骤直接并入 `_addColumnsIfMissing_()` 本身（让
+ *     所有未来调用者自动获得这个保护，不需要每次都记得额外调用一次），
+ *     是一个更大范围的重构决定，超出本次"最小增强"范围，记录供未来
+ *     参考。
+ *
+ * ### 其余风险点（不构成 Finding 或 Improvement Opportunity，是需要
+ *     Carson 知情/确认的设计影响）
+ *
+ *   - 09_TemporalParser.gs 是从 Personal AI Core 项目"分叉"维护的
+ *     共用文件（00_ADR.gs ADR-2026-07-11-007 明确记录了这个历史，
+ *     且该 ADR 的决定范围只限于"要不要包命名空间"，跟本次改动
+ *     extractDateTime() 返回值形状是两个不同问题，不冲突）。本次
+ *     改动只影响 Productivity OS 自己这一份拷贝，Core 项目的
+ *     09_TemporalParser.gs（含 22_InventoryIntentParser.gs 消费的
+ *     那一份）不受影响，也不会自动获得 due_time 能力——这是"多项目
+ *     分叉共用文件"这个既有架构特征的自然结果，不是本次引入的新
+ *     风险，但值得记录，避免以后有人以为"改一份就等于全都改了"。
+ *
+ *   - 00_ADR.gs ADR-2026-07-06-002（Schema Authority）明确写了触发
+ *     拆分 04_Schema.gs 的三个条件之一是"单张表的字段数量频繁变化
+ *     （半年内变化 3 次以上）"。本次是继 V4 新增 description/tags
+ *     之后，Tasks/ActiveTasks/ArchiveTasks 表头的又一次变更——具体
+ *     这是不是"半年内第 3 次"需要对照 00_Project_State.gs 完整
+ *     changelog 才能确认次数，本次审查没有做这个计数（不确定的事
+ *     不断言），建议 Carson 顺手核对一下，如果确实达到触发条件，
+ *     这次改动之后可能就是"该考虑拆 04_Schema.gs"的时间点，而不是
+ *     现在就因为"感觉应该拆"而提前拆分。
+ */
+
+// ------------------------------------------------------------
+// 六、Updated File Map（Deliverable 6，proposed —— 本节是提议内容，
+// 尚未写入 00_File_Map.gs 本体，待设计批准、实现完成后再正式同步）
+// ------------------------------------------------------------
+
+/**
+ * 「一、文件详情」需要更新变更说明的文件（8 个，对应「三、3.1」）：
+ *   09_TemporalParser.gs / 06_TaskIntentParser.gs / 07_IdentityEngine.gs /
+ *   09_IdempotencyManager.gs / 20_TaskEngine.gs / 21_RecurringEngine.gs /
+ *   11_ProjectionRebuilder.gs / 15_Setup.gs——每处按既有格式追加一句
+ *   "【Due Time 支持新增】..."的变更说明，不改写这些文件现有的历史
+ *   变更记录（沿用"只追加、不覆写历史"的既有惯例，本文件自己也是这样
+ *   记录 V4.2/V4.3/.../V4.6 历次变更的）。
+ *
+ * 「二、模块关系」需要新增的依赖边：
+ *   09_IdempotencyManager.gs / 20_TaskEngine.gs / 11_ProjectionRebuilder.gs /
+ *   21_RecurringEngine.gs 四者新增对 07_IdentityEngine.resolveIdentityDueValue
+ *   的调用——这四条边本身不是新的跨层依赖（这四个文件本来就已经依赖
+ *   07_IdentityEngine.generateTaskIdentity，只是多调用同一个文件里的
+ *   另一个函数），不影响「三、Architecture Layer Map」的分层结论，
+ *   不需要变更任何文件的 Layer 归类。
+ *
+ * 「三、Architecture Layer Map」：无变更。21 个文件的分层结论不受
+ *   本次改动影响（本次没有新增文件，也没有改变任何文件的层间调用
+ *   方向）。
+ */
+
+// ------------------------------------------------------------
+// 七、Updated Data Flow（Deliverable 7，proposed）
+// ------------------------------------------------------------
+
+/**
+ * ### Create 路径（对照 00_Project_Constitution.gs 零之二·流程B，标注
+ *     本次改动落在哪一步）
+ *
+ *   Request（06_TaskIntentParser.parseTaskIntent，接收原始文字）
+ *     ↓
+ *   Planner（同文件内 + 09_TemporalParser.extractDateTime —— 【改动】
+ *     返回值新增 due_time/due_datetime，due_date 保持纯日期）
+ *     ↓
+ *   （【改动】06_TaskIntentParser 把三个字段一并放进 meta 对象，原来
+ *     只放 due_date）
+ *     ↓
+ *   Execution 前置（09_IdempotencyManager.createTaskIfNotExists —— 
+ *     【改动】用 resolveIdentityDueValue(meta) 取代 meta.due_date 传给
+ *     IdentityEngine）
+ *     ↓
+ *   Execution（20_TaskEngine.createTaskDirect_ —— 【改动】task 对象
+ *     字面量新增 due_time / due_datetime 两个字段）
+ *     ↓
+ *   Event（02_EventBus.publish —— 不改，整个 task 对象原样进 Events）
+ *     ↓
+ *   Projection（10_ProjectionEngine.projectTaskCreated_ —— 不改，
+ *     整个 payload 原样 upsert 进 Tasks/ActiveTasks/TaskFilters）
+ *     ↓
+ *   Query（12_TaskQueryEngine —— 不改，新列自动出现在返回的 task
+ *     对象里）
+ *
+ * ### Update 路径
+ *
+ *   20_TaskEngine.updateTask —— 【改动】UPDATABLE_FIELDS 新增
+ *   due_time；due_date/due_time 任一变化时重算 merged.due_datetime；
+ *   identity 重算改用 resolveIdentityDueValue(merged)。其余步骤
+ *   （EventBus.publish → ProjectionEngine.projectTaskUpdated_）不改，
+ *   理由同 Create 路径。
+ *
+ * ### Recurring 续期路径
+ *
+ *   20_TaskEngine.completeTask
+ *     ↓
+ *   21_RecurringEngine.spawnNextIfNeeded —— 【改动】取
+ *   resolveIdentityDueValue(task) 而不是裸 task.due_date 喂给
+ *   computeNextDueDate；拿到结果后拆回 next due_date / next due_time
+ *   两个值放进新实例的 meta
+ *     ↓
+ *   09_TemporalParser.computeNextDueDateFromLabel —— **不改**（1.2
+ *   节已证明现有的 hasTime 侦测 + 格式保留逻辑对此已经够用）
+ *     ↓
+ *   09_IdempotencyManager.createTaskIfNotExists —— 同 Create 路径
+ *
+ * ### 明确不变的路径
+ *
+ *   View（Today/Week/Month/Upcoming/Overdue）、Priority（Urgency/
+ *   Priority Score）、Search（日期范围过滤）、Dashboard、Analytics
+ *   五条只读展示/计算路径——继续按纯日期粒度工作，新字段对它们透明
+ *   存在但不影响当前行为，面向未来的可能改动记录在 IO-1，本次不动。
+ */
+
+// ------------------------------------------------------------
+// 八、Pending Design Decisions（不是 Finding，也不是 Improvement
+// Opportunity——这四项是"证据本身无法替你选出答案，需要一个决策角色
+// 做判断"的设计分岔点。UEF 惯例：条目绑定角色而非人名，见下方
+// Decision Authority；沿用 Review #1「五、待决问题」的既有惯例，只是
+// 换成更通用的命名——Carson 2026-07-13 反馈，这个通用化本身也建议
+// 沉淀回 UEF，见对话另行讨论）
+// ------------------------------------------------------------
+
+/**
+ * Decision Authority: Architecture Owner（本项目现由 Carson 担任；这是
+ * 一个角色，不是绑定到具体人名——未来其他 Domain OS 项目可以由不同的
+ * Architecture Owner 对本项目的 Pending Design Decision 做出判断，
+ * 不需要因为换人而修改这份模板本身）。
+ *
+ * 1. [Decision Type: Semantic] due_datetime 在"只有日期没有时间"时是
+ *    空字符串还是默认当天 00:00:00？本次按"空字符串"设计（见 2.2），
+ *    需要 Architecture Owner 确认或改判。
+ * 2. [Decision Type: Migration] 是否需要对存量 due_date 里已经隐含
+ *    时间（字符串带 T 后缀）的历史任务做一次性回填，把时间拆进
+ *    due_time/due_datetime（见 4.3）？本次设计不依赖这个决定也能先
+ *    落地，属于独立的、范围更大的数据清理决定。
+ * 3. [Decision Type: UX] 06_TaskIntentParser 展示到期日文案要不要在有
+ *    due_time 时同时显示时间、具体格式是什么（见 3.1 第 2 项）？本次
+ *    不预先定稿。
+ * 4. [Decision Type: Governance] 本次变更是否让 Schema Authority
+ *    （ADR-2026-07-06-002）的拆分触发条件（b）"半年内变化 3 次以上"
+ *    成立？需要对照 00_Project_State.gs 完整 changelog 计数确认
+ *    （见「五」风险点，本次审查不做这个计数）。
+ *
+ * 四项 Decision Type 分别对应四种不同性质的判断依据——Semantic 靠
+ * 产品语义直觉、Migration 靠数据完整性/清理成本权衡、UX 靠呈现效果、
+ * Governance 靠对照既有 ADR 触发条件——列出类型是为了让 Architecture
+ * Owner 一眼看出"这条该用什么方式想清楚"，不是为了给决策本身分优先级
+ * （四项目前都不阻塞已批准部分先落地）。
+ */
+
+// ------------------------------------------------------------
+// 九、Review Summary（供 06_Review_History.md 收录用）
+// ------------------------------------------------------------
+
+/**
+ * Findings:      0 HIGH, 1 MEDIUM（DT-2）, 0 LOW
+ * Improvement Opportunities: 3（IO-1/IO-2/IO-3）
+ * Pending Design Decisions: 4（见「八」，均待 Architecture Owner 决定，
+ *                 不阻塞已获批准部分的实现）
+ * Dispositions:  1 confirmed-remediated-in-proposal（DT-2，修复方案
+ *                已设计并包含在本提案的 Migration Plan 里，不是推迟到
+ *                以后）
+ * 核心判断:      现有架构已经在字符串格式层面隐式支持时间解析、跨
+ *                recurring 实例延续时间——本次改动的本质是"把已经
+ *                正确工作的能力提升为显式字段"，而不是新建一套时间
+ *                处理逻辑。8 个文件需要改动（全部是新增字段/新增
+ *                调用，无一处需要修改现有函数的对外签名或删除现有
+ *                行为），9 个文件被逐一核实确认不需要改动。全部存量
+ *                任务的 identity 在迁移前后逐字节不变，是一条可在
+ *                实现阶段直接写单元测试验证的具体不变量——2026-07-13
+ *                实现阶段已把这条断言写进
+ *                07_IdentityEngine.testIdentity()（第5/6组用例），不是
+ *                停留在"应该没问题"。
+ * Status:        IMPLEMENTED（2026-07-13，Carson 批准设计后同日实现）——
+ *                8 个代码文件改动 + Finding DT-2 的修复已随
+ *                migrateSchemaDueTime() 一并写入，正式 ADR 记录见
+ *                00_ADR.gs ADR-2026-07-13-008。已有部署仍需手动执行一次
+ *                migrateSchemaDueTime() 完成迁移（见「四、4.4」执行顺序），
+ *                这一步不因为"设计已批准"而自动发生。「八」
+ *                Pending Design Decision 的 Semantic/UX 两项已在实现中
+ *                拍板（见 2.2/06_TaskIntentParser 的 _formatDueDisplay_
+ *                注释），Migration/Governance 两项仍待 Architecture
+ *                Owner 决定，不阻塞已完成部分。
+ */

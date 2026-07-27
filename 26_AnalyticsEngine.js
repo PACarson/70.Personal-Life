@@ -1,0 +1,175 @@
+/**
+ * 26_AnalyticsEngine.gs
+ * Productivity OS v4.4 — Analytics Engine（V4 新增）
+ *
+ * 职责：completion rate / overdue rate / reminder statistics / recurring
+ * statistics / workload。
+ *
+ * 默认路径（getStatistics 等）只读 Read Model（12_TaskQueryEngine 传入的
+ * task 数组，来自 Tasks Sheet / TaskStatistics 投影），不重放 Events。
+ *
+ * 唯一例外：replayCompletionTrend_()——"过去N周每周完成几个任务"这种历史
+ * 时间序列，Read Model 的当前状态快照结构性地不包含（Tasks Sheet 只有
+ * "现在的状态"，不是"每个历史时间点的状态"），只有 Events 的时间轴才有。
+ * 这是 00_Project_Constitution.gs P6 铁律4 明确写的例外，且仅限于这一个
+ * 函数、明确标注、不在任何 Telegram 指令路径上（12_TaskQueryEngine.
+ * getStatistics 不调用它，需要历史趋势的场景请在 GAS 编辑器手动调用）。
+ *
+ * 【V4.4 澄清 HIGH RISK 3】外部审计提到"普通用户通过 Telegram 触发
+ * /insights 指令会调用 replayCompletionTrend_"——核实后本项目没有 /insights
+ * 或任何等价指令接到这个函数上（06_TaskIntentParser.gs 的指令列表里
+ * 不存在），这条风险描述在本项目里不成立。但"Events 表全量扫描"这个
+ * 底层风险本身是真实的（Events 只增不减，迟早会大），已经在
+ * 02_EventBus.gs 的 getAllEvents() 里加了行数警告——本函数调用
+ * getAllEvents() 时会自动带上这层保护，不需要在这里重复实现。
+ */
+
+/**
+ * ── Engine Contract（V4.3，按 00_Project_Constitution.gs 零之三标准补全）──
+ * 本文件两个公开函数的 Contract 不同，分开写：
+ *
+ *   computeStatistics(tasks)
+ *     Responsibilities      : completion rate / overdue rate / reminder
+ *                             statistics / recurring statistics / workload
+ *     Owns                  : 各项统计指标的计算公式
+ *     Reads                 : task[]（由调用方传入）
+ *     Writes                : none
+ *     Dependencies          : 05_SheetUtils.gs（isOverdue_/round1_/round2_，
+ *                             纯计算工具）
+ *     Forbidden Dependencies: Sheet, Events, Telegram/Output
+ *     Pure Function         : YES
+ *     Replay Events         : NO
+ *     Projection            : NO
+ *     Thread Safety         : 不需要
+ *     Side Effects          : NO
+ *
+ *   replayCompletionTrend_(chatId, weeks?)
+ *     Responsibilities      : 历史完成趋势（过去 N 周每周完成几个任务）
+ *     Owns                  : 按周分桶的时间序列计算
+ *     Reads                 : Events（全量，通过 EventBus.getAllEvents）
+ *     Writes                : none
+ *     Dependencies          : 02_EventBus.gs（getAllEvents）
+ *     Forbidden Dependencies: 不得被 Telegram 指令路径调用（见
+ *                             00_Project_Constitution.gs P6 铁律4）
+ *     Pure Function         : NO（依赖当前时间做分桶起点）
+ *     Replay Events         : YES（本 OS 唯一允许重放 Events 的函数）
+ *     Projection            : NO
+ *     Thread Safety         : 不需要（只读）
+ *     Side Effects          : NO
+ *     Notes                 : 仅供 GAS 编辑器手动调用做深度分析/debug，
+ *                             12_TaskQueryEngine.getStatistics 不调用它。
+ */
+
+var AnalyticsEngine = (function () {
+
+  /**
+   * 综合统计——完成率/逾期率/提醒统计/recurring统计/workload 一次性算完，
+   * 供 12_TaskQueryEngine.getStatistics / 25_DashboardEngine 复用（避免
+   * 各自重复过滤同一批 tasks）。
+   *
+   * @param {object[]} tasks  已终结+未终结的全量 task（某个 chatId 范围内）
+   * @returns {object}
+   */
+  function computeStatistics(tasks) {
+    var total = tasks.length;
+    var pending   = 0, done = 0, cancelled = 0;
+    var overdueCount = 0, recurringCount = 0, highPriorityCount = 0;
+    var totalReminders = 0;
+    var completionDurationsMs = [];
+    var workloadByCategory = {};
+
+    tasks.forEach(function (t) {
+      var status = String(t.status || '').toUpperCase();
+      if (status === 'DONE') done++;
+      else if (status === 'CANCELLED') cancelled++;
+      else pending++;
+
+      if (status !== 'DONE' && status !== 'CANCELLED' && isOverdue_(t.due_date)) { // 05_SheetUtils.gs
+        overdueCount++;
+      }
+      if (t.recurring) recurringCount++;
+      if (['HIGH', 'CRITICAL'].indexOf(String(t.priority || '').toUpperCase()) !== -1) {
+        highPriorityCount++;
+      }
+      totalReminders += Number(t.reminder_count) || 0;
+
+      if (status === 'DONE' && t.completed_at && t.timestamp) {
+        var created = new Date(t.timestamp).getTime();
+        var completedAt = new Date(t.completed_at).getTime();
+        if (!isNaN(created) && !isNaN(completedAt) && completedAt >= created) {
+          completionDurationsMs.push(completedAt - created);
+        }
+      }
+
+      if (status !== 'DONE' && status !== 'CANCELLED') {
+        var cat = t.category || 'GENERAL';
+        workloadByCategory[cat] = (workloadByCategory[cat] || 0) + 1;
+      }
+    });
+
+    var completionRate = total > 0 ? round2_((done / total) * 100) : 0; // 05_SheetUtils.gs
+    var overdueRate     = pending > 0 ? round2_((overdueCount / pending) * 100) : 0;
+    var avgReminderCount = total > 0 ? round1_(totalReminders / total) : 0;
+
+    var avgCompletionHours = 0;
+    if (completionDurationsMs.length > 0) {
+      var sumMs = completionDurationsMs.reduce(function (a, b) { return a + b; }, 0);
+      avgCompletionHours = round1_(sumMs / completionDurationsMs.length / (60 * 60 * 1000));
+    }
+
+    return {
+      total_count:            total,
+      pending_count:          pending,
+      done_count:             done,
+      cancelled_count:        cancelled,
+      overdue_count:          overdueCount,
+      recurring_count:        recurringCount,
+      high_priority_count:    highPriorityCount,
+      completion_rate:        completionRate,   // %
+      overdue_rate:           overdueRate,       // % （相对未完成任务）
+      avg_reminder_count:     avgReminderCount,
+      avg_completion_hours:   avgCompletionHours,
+      workload_by_category:   workloadByCategory
+    };
+  }
+
+  /**
+   * 【历史趋势，唯一允许重放 Events 的函数】过去 N 周，每周完成了几个任务。
+   * 明确标注：不在任何 Telegram 指令路径上，仅供手动 debug/深度分析调用。
+   *
+   * @param {string} chatId
+   * @param {number} [weeks=8]
+   * @returns {object[]}  [{week_start: 'yyyy-MM-dd', completed_count: n}, ...]
+   */
+  function replayCompletionTrend_(chatId, weeks) {
+    weeks = weeks || 8;
+    var events = EventBus.getAllEvents(); // 唯一的例外调用点，见文件头注释
+    var now = new Date();
+    var buckets = {};
+
+    for (var i = 0; i < weeks; i++) {
+      var weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() - 7 * i);
+      var key = Utilities.formatDate(weekStart, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      buckets[key] = 0;
+    }
+
+    events.forEach(function (e) {
+      if (e.type !== 'TASK_COMPLETED') return;
+      if (chatId && String(e.chat_id) !== String(chatId)) return;
+      var t = new Date(e.timestamp);
+      if (isNaN(t.getTime())) return;
+      var weekStart = new Date(t.getFullYear(), t.getMonth(), t.getDate() - t.getDay());
+      var key = Utilities.formatDate(weekStart, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      if (buckets.hasOwnProperty(key)) buckets[key]++;
+    });
+
+    return Object.keys(buckets).sort().map(function (k) {
+      return { week_start: k, completed_count: buckets[k] };
+    });
+  }
+
+  return {
+    computeStatistics:        computeStatistics,
+    replayCompletionTrend_:   replayCompletionTrend_
+  };
+})();

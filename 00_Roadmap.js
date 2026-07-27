@@ -1,0 +1,237 @@
+/**
+ * 00_Roadmap.gs
+ * Productivity OS v4.7 — Roadmap（长期规划）
+ *
+ * ⚠️ 本文件只谈"接下来要往哪走"，不记录历史、不记录 Bug、不记录架构决策——
+ * 那三类内容分别属于 00_Project_State.gs（当前状态快照）、
+ * 00_Project_State.gs"已知Bug"、00_ADR.gs（决策记录）。本文件跟
+ * 00_Project_State.gs 一样是"快照"，每次更新覆盖旧内容，不是日志。
+ *
+ * LAST_UPDATED: 2026-07-13（同日第二次更新）— Due Time Support（上次
+ * 更新新增的「三、Next Version」第5项）已经批准并完成实现（V4.7，见
+ * 00_Project_State.gs"一、已完成"），从本文件移除——本文件只谈"接下来
+ * 要往哪走"，已完成的事不该继续留在这里，完整记录改由 Project State
+ * 和 00_Architecture_Review.gs「七、Review #3」承接。
+ *
+ * 2026-07-13（第一次更新）— 「三、Next Version」新增第5项 Due Time
+ * Support，指向 00_Architecture_Review.gs「七、Review #3」已完成的
+ * Pre-Implementation Design Review。这项本身还未实现（待 Carson 批准
+ * 设计），本次只是把已完成的设计审查结果同步进 Roadmap，纯文档同步，
+ * 不代表功能已经交付。
+ *
+ * 2026-07-11 — 00_Architecture_Review.gs（UEF v1.0 Domain
+ * Profile Review #1）Finding D3-1：本文件版本头和「一、Current Version」
+ * 落后实际状态两个版本（停留在 V4.4，未反映 V4.5/V4.6），且治理文档数量
+ * 描述过期（写"五份"，实际现在七份 + 本次新增的 Architecture Review
+ * 共八份）。本次已按 00_Project_State.gs 的实际记录修正，纯文档修正，
+ * 不涉及任何架构决定本身的重新论证。
+ */
+
+// ============================================================
+// 一、Current Version
+// ============================================================
+
+/**
+ * V4.6——第五轮外部审计修复（TaskStatistics 从事件驱动实时投影降级为
+ * 每日批量重算，一并解决并发漂移与冗余高频写入两个问题，见 00_ADR.gs
+ * ADR-2026-07-06-005）。此前 V4.5 完成第四轮修复（Gate 等待时间调优、
+ * Projection 消费端幂等、归档有界扫描、SecureConfig/Spreadsheet 执行期
+ * 缓存、SYSTEM_BUSY 错误细分）。完整逐条记录见 00_Project_State.gs。
+ *
+ * 本 OS 现状一句话概括：9 个 Engine（Task/Recurring/Priority/Search/View/
+ * Dashboard/Analytics/Query + Archive），严格 CQRS（Events 唯一 Write
+ * Model，Tasks/ActiveTasks/TaskFilters 三张实时 Projection 表 +
+ * TaskStatistics 每日批量重算一张，View/Dashboard 按需生成不落盘），
+ * 治理文档共八份（Constitution/State/File Map/ADR/Roadmap/Known
+ * Limitations/Command Reference/Architecture Review），Telegram 是唯一
+ * 呈现层但 Query/View/Dashboard 三层已经不依赖 Telegram 这个呈现介质
+ * 本身。跨项目遗留问题（04_Main.gs/80_RiderConnector.gs 相关，见
+ * 00_Project_State.gs"下一步"P1）不在本 OS 范围内，需要另外在对应项目
+ * 里处理。
+ *
+ * 【2026-07-11 新增】本项目完成了 UEF（Universal Engineering Framework）
+ * v1.0 ratify 后的第一次正式 Domain Profile Architecture Review，完整
+ * 记录见新增的 00_Architecture_Review.gs。结论：Separation of Concerns /
+ * Layering 两项 Pass；Governance / Doc-Code Drift 两项各有一个已修正的
+ * 小问题（Doc-Code Drift 的问题就是本文件本身此前的版本落后，已在本次
+ * 更新里修正）；Testing 一项是本次唯一还没关闭的 MEDIUM 级别发现——见
+ * 下方「六、Architecture Evolution」新增条目。
+ */
+
+// ============================================================
+// 二、Completed（本版本达成的能力边界，非历史记录）
+// ============================================================
+
+/**
+ * 这里只说"现在能做什么"，不重复 00_Project_State.gs"已完成"里的逐条
+ * 修复过程——那些是历史，这里是能力边界快照：
+ *
+ *   - Task 生命周期：create / update / complete / cancel 四件套，
+ *     identity 在影响去重的字段变更时自动重算。
+ *   - Recurring：完成时按 Daily/Weekly/Monthly/Yearly 自动续期一次。
+ *   - 查询能力：Today/Week/Month/Overdue/Upcoming/Recurring/Priority/
+ *     Search/Dashboard/Statistics 十种查询，全部经 TaskQueryEngine 单一
+ *     入口，单次批量读 Sheet。
+ *   - 并发安全：创建路径有幂等去重 + 3 秒 fail-fast 锁；Projection 失败
+ *     有一次性安全兜底写入（不再无条件双写）。
+ *   - 可重建性：Tasks/ActiveTasks/TaskStatistics/TaskFilters 四张表全部
+ *     可以从 Events 全量重建。
+ *   - 治理完整度：Architecture Principles / Engine Contract Standard /
+ *     Dependency Rules / Event Definition Standard 四份正式规则都已建立
+ *     并且用现有代码逐项核对过一遍（不是纸面标准，是标准+核对表）。
+ */
+
+// ============================================================
+// 三、Next Version（下一版本候选，尚未开始）
+// ============================================================
+
+/**
+ * 按优先级排列，供下一次升级会话参考，实际做哪个由到时候的具体需求决定：
+ *
+ *   1. Recurring lifecycle 补全：目前只有"完成后自动续期"一种生命周期
+ *      事件，没有"暂停/恢复某条 recurring 规则"的能力（见
+ *      00_Project_State.gs"下一步"）。如果这个需求变得具体，应该优先做
+ *      这个，因为它是现有 Engine（21_RecurringEngine.gs）的能力补全，
+ *      不涉及新架构。
+ *
+ *   2. TaskPriority 缓存表：如果观察到 22_PriorityEngine.computePriorityScore
+ *      现算变贵（目前没有观察到），按 ADR-2026-07-06 Consequences 里
+ *      记录的方案加一张 Projection 表，由 TASK_CREATED/TASK_UPDATED/
+ *      REMINDER_SENT 增量维护。
+ *
+ *   3. Health Check 独立函数：目前健康检查依附在 15_Setup.runDiagnostics()
+ *      里（见 00_Project_Constitution.gs P4 4.5 Operations），如果需要
+ *      更轻量、可以被定时触发器频繁调用的健康检查，应该拆出独立函数，
+ *      不跟"跑一遍完整诊断"耦合在一起。
+ *
+ *   4. 04_EventDefinitions.gs 独立文件：目前 Event 定义按
+ *      00_Project_Constitution.gs 零之五的标准记录在 Constitution 里，
+ *      如果事件类型数量显著增加（比如超过 10 个），应该拆出独立文件，
+ *      判断标准参照 ADR-2026-07-06-002 Schema Authority 里"何时该拆"
+ *      的同一套思路（数量阈值 + 变化频率 + 消费方数量）。
+ */
+
+// ============================================================
+// 四、Future（方向明确但暂无具体计划）
+// ============================================================
+
+/**
+ *   - Web / App / 语音助手前端：ADR-2026-07-06 已经把 ViewEngine/
+ *     DashboardEngine 设计成不依赖 Telegram 这个呈现介质，理论上换前端
+ *     只需要新写一层呈现逻辑替换 06_TaskIntentParser.gs。目前没有具体的
+ *     第二前端需求，暂不启动。
+ *
+ *   - Domain OS 间的 Bridge：如果未来某个 Domain OS（比如 Property OS）
+ *     需要在自己完成某个操作后顺手建一个 Task，按 Personal AI Core 项目
+ *     Constitution 的 Domain OS↔Domain OS Bridge 模式接（对应本项目
+ *     Blueprint 的 Integration.Bridge，目前是"暂无"，见
+ *     00_Project_Constitution.gs P4 第4层）。
+ *
+ *   - Monitoring（主动监控）：目前是被动告警
+ *     （02_EventBus._alertAdminProjectionFailure_），如果 Projection
+ *     失败频率变得不可忽视，应该考虑主动监控而不是等失败发生再告警。
+ *
+ *   - 移除 20_TaskEngine.gs 的裸全局 wrapper 函数（createTask/updateTask/
+ *     completeTask/cancelTask/getPendingTasks 等，V4.4 第三轮审计
+ *     LOW RISK 2）：V4.4 起已经加了 @deprecated 标注，指向
+ *     ProductivityOS.TaskEngine.xxx 命名空间路径，但没有移除任何一个——
+ *     移除的前提是先确认 Core 项目 04_Main.gs 等全部消费端都已经切换
+ *     完毕，这需要跨项目协调（见 00_Project_State.gs"下一步"P1），本项目
+ *     单方面无法判断"是否已经没人在用旧接口"，暂不启动移除。
+ */
+
+// ============================================================
+// 五、Long Term Vision
+// ============================================================
+
+/**
+ * Productivity OS 是 Universal Domain OS Blueprint 的第一个完整落地样本
+ * （Personal AI Core 项目最早规划这份 Blueprint 时，本项目是第一个拿来
+ * 验证"这套分层在真实代码里跑不跑得通"的 Domain OS）。长期看，本项目的
+ * 价值有两条：
+ *
+ *   1. 作为 Task 这个业务领域本身的系统——继续把 Task 生命周期管理做深
+ *      （更好的 Recurring 规则、更准的 Priority 建议、更快的 Search）。
+ *
+ *   2. 作为 Blueprint 落地范式的参考实现——以后任何新 Domain OS（
+ *      Property OS/Finance OS/Shopping OS 从 External System 升级成
+ *      真正的 Domain OS 等）在设计阶段，应该直接参照本项目的
+ *      00_Project_Constitution.gs / 00_ADR.gs / 00_File_Map.gs 三份文件
+ *      的写法，而不是从零开始摸索"这套 Blueprint 具体落地是什么样子"。
+ *      这意味着本项目的治理文档质量本身就是一种交付物，不只是给自己看。
+ */
+
+// ============================================================
+// 六、Architecture Evolution
+// ============================================================
+
+/**
+ * 记录"架构层面"的演进方向（不是功能层面，功能层面见「三、Next Version」
+ * 和「四、Future」）：
+ *
+ *   - Dependency Rules（00_Project_Constitution.gs 零之四）目前只有一个
+ *     已知例外（21_RecurringEngine.gs → 09_IdempotencyManager.gs）。
+ *     长期目标是"例外数量不再增加"——如果未来有第二个类似的越层依赖需求
+ *     出现，应该优先考虑能不能通过调整 Engine 职责边界避免它，而不是
+ *     默认接受"再记一个例外"。
+ *
+ *   - Schema Authority（00_ADR.gs ADR-2026-07-06-002）现在明确写了拆分
+ *     04_Schema.gs 的触发条件。长期看，这是"先记录标准、按条件触发再
+ *     拆分代码"这套治理模式的第一个应用案例——如果这次实践下来效果好
+ *     （既避免了过早拆分的开销，触发条件出现时又确实能顺利拆分），
+ *     以后类似的"现在没必要但未来可能需要拆"的判断，应该复用同一个模式
+ *     （写清楚触发条件 + 暂不动代码），而不是每次重新论证一遍。
+ *
+ *   - Engine Contract Standard（00_Project_Constitution.gs 零之三）目前
+ *     是文档层面的标准 + 手工维护的速查表，没有任何自动化校验（比如没有
+ *     脚本检查"这个 Engine 文件头是否真的填了 Forbidden Dependencies"）。
+ *     长期方向是这类标准最终应该有轻量的自动化校验，但目前 GAS 环境下
+ *     实现成本较高（没有现成的静态分析工具链），暂不作为具体计划，只
+ *     记录方向。
+ *
+ *   - 【2026-07-11 新增，来自 00_Architecture_Review.gs Finding C1-1】
+ *     测试覆盖：V4 新增的 12 个文件（含全部 5 个 Domain 纯函数 Engine）
+ *     目前零测试覆盖，只有继承自 Core 项目 V3 的 07/08/09 三个文件带
+ *     手工测试函数。按 UEF（Universal Engineering Framework）Testing
+ *     Standard，Domain Profile 至少需要一个跨模块的 Scenario Test，
+ *     其内部的 Engine Profile 子模块各自需要 Unit/Boundary/Contract
+ *     Test，目前都不存在。优先级顺序见 00_Architecture_Review.gs 该
+ *     Finding 的 Recommendation（先补 5 个纯函数 Engine，尤其是
+ *     22_PriorityEngine 和 26_AnalyticsEngine，成本最低）。这是本项目
+ *     目前唯一还没关闭的 Review 发现，需要 Carson 决定是开一轮专门的
+ *     测试补齐会话，还是先用一条 ADR 记录"已知暂缓，原因和期限"。
+ *
+ *   - 【2026-07-11 新增】本项目现在同时接受两套平台级标准的约束：
+ *     Universal Domain OS Blueprint（管"怎么组织"，见零、Constitution
+ *     开头）和 UEF（管"怎么被设计/评审/交付"，v1.0 于 2026-07-10
+ *     ratify）。两者是平行关系，不互相包含——00_Architecture_Review.gs
+ *     走的是 UEF 的 Review 流程，不改变本项目内部按 Blueprint 组织代码
+ *     的方式。
+ *
+ *   - 【2026-07-11 新增，2026-07-12 经 Carson review 更正分类——来自
+ *     00_Architecture_Review.gs Review #2 Improvement Opportunity
+ *     B2-1（原草稿列为 MEDIUM Finding，因缺乏实测性能证据，按
+ *     Evidence-first 原则改列为 Improvement Opportunity，非
+ *     Architecture Finding，详见 00_Architecture_Review.gs 六、Review
+ *     Disposition）】ActiveTasks 表被正确维护但从未被任何查询路径实际
+ *     读取——getTodayTasks/getTomorrowTasks/getWeekTasks/getMonthTasks/
+ *     getUpcomingTasks/getOverdueTasks/getPriorityTasks 这几个只关心
+ *     非终态任务的查询，目前统一走 _readAllTasks_() 全表扫描 Tasks
+ *     （只增不减，只会随使用年限单调变大）再内存过滤，而不是直接读
+ *     专门为此设计的 ActiveTasks。下次动这块代码时，建议把上述几个函数
+ *     切换成读 ActiveTasks（getRecurringTasks/getCancelledTasks/
+ *     getArchivedTasksInline/getStatistics/searchTasks 因为需要终态或
+ *     全量历史数据，不受影响，继续读 Tasks）。当前规模下不影响使用，
+ *     不紧急，纯属"顺手做"的优化，不是需要修正的架构问题；若未来出现
+ *     实测执行时间、真实生产数据规模、或接近 GAS quota 上限的具体证据，
+ *     应在下次 Review 中重新评估是否升级为正式 Finding。
+ *
+ *   - 【2026-07-11 新增，来自 00_Architecture_Review.gs Review #2
+ *     Finding C3-1】25_DashboardEngine.gs 的 build() 返回纯文本字符串
+ *     （面向 Telegram 人眼阅读），不是结构化数据。本项目已声明未来希望
+ *     这份数据给 Personal AI Core 消费（见 00_Architecture_Review.gs
+ *     「一之二」），届时需要把 DashboardEngine 内部已经存在的结构化中间
+ *     态（来自 24_ViewEngine.gs 的返回值）暴露出来，而不是重新解析
+ *     格式化文本。暂不需要现在动手——Personal AI Core 真正要接入时再做，
+ *     那时候需求形状会更准确。
+ */

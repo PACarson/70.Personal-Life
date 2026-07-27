@@ -1,0 +1,509 @@
+/**
+ * 00_Command_Reference.gs
+ * Productivity OS v4.7 — Telegram 指令与业务规则参考
+ * （Command & Business Rule Reference）
+ *
+ * 目的：把"用户/审计员能直接观察到的行为契约"——Telegram 指令匹配规则、
+ * 查询时间窗口定义、打分/统计公式、去重与幂等规则、归档规则等——集中记录
+ * 在一份文件里。V4.6 起本项目 Governance 目录固定为 7 份文件，分工如下：
+ *   00_Project_Constitution.gs → Why —— 架构原则 / 层次划分
+ *   00_Project_State.gs        → 当前快照 —— 已完成/进行中/已知Bug/下一步
+ *   00_ADR.gs                  → Decision —— 为什么选了这个方案而不是那个
+ *   00_File_Map.gs             → Where —— 每个文件"是什么、依赖谁"
+ *   00_Command_Reference.gs（本文件）→ What —— 每条指令/规则的具体数值、
+ *                                 公式、边界条件
+ *   00_Known_Limitations.gs    → Not Yet —— 刻意不做 / 暂未对外暴露的能力，
+ *                                 不要被 Review 误判成 bug 或遗漏
+ *   00_Roadmap.gs              → Future —— 未来计划
+ *
+ * 本文件每一条规则都标注了实现它的具体文件/函数，供以后核对"这是不是
+ * bug"时直接跳转到源码确认，不用每次都重新读一遍七八个 Engine 文件。
+ * 本文件不是代码，不会被任何 Engine 引用，纯粹是治理文档。
+ *
+ * 核对方法：本文件全部内容逐条对照 v4.6 实际源码验证（不是转述任何
+ * 二手总结），核对范围：09_TemporalParser / 07_IdentityEngine /
+ * 08_DeduplicationEngine / 09_IdempotencyManager / 12_TaskQueryEngine /
+ * 13_ActiveTasksEngine / 20_TaskEngine / 21_RecurringEngine /
+ * 22_PriorityEngine / 23_SearchEngine / 24_ViewEngine / 25_DashboardEngine /
+ * 26_AnalyticsEngine / 06_TaskIntentParser / 15_Setup。
+ *
+ * "已实现但暂未通过 Telegram 暴露的能力"（Weekly/Monthly Dashboard、
+ * suggestPriority()、updateTask() 等）不放在本文件——那些是 Not Yet 类，
+ * 记在 00_Known_Limitations.gs，本文件只记"已经对外生效"的规则，避免
+ * 两份文件互相重复。
+ *
+ * 本文件最后一节（七、Design Clarifications）专门收录"容易被误认为 bug、
+ * 实际上是刻意设计"的行为契约（比如 /search 为什么搜全部状态），按 7.1/
+ * 7.2/... 顺次累加，是常青的设计说明，不是审计历史记录——Audit Trail 由
+ * 00_Project_State.gs / Git History / Changelog 承担，本文件不重复。
+ *
+ * LAST_UPDATED: 2026-07-13 — V4.7 Due Time Support（00_Architecture_Review.gs
+ * 「七、Review #3」，Carson 2026-07-13 批准后实现）：C4 identity 公式
+ * 从 dueDate 改记为 dueValue（= 07_IdentityEngine.resolveIdentityDueValue
+ * 的结果），并说明"改时间等同于改 due_date"这条行为的由来；C5 的 meta
+ * 字段列表补充 due_time/due_datetime，category/priority 仍不参与自然
+ * 语言解析这条既有边界不变。
+ *
+ * 2026-07-11 — 首次创建 + 新增第七节 Design Clarifications
+ * 7.1（/search Scope，见二、V11 与 G2(d)），不改动任何代码，版本号沿用
+ * v4.6。
+ */
+
+// ============================================================
+// 一、全局规则
+// ============================================================
+
+/**
+ * G1. 查询入口
+ *     所有对外查询（除任务创建/完成/取消这几个写操作外）都经由
+ *     12_TaskQueryEngine.gs，本模块是唯一允许直接读 Tasks/ActiveTasks/
+ *     TaskStatistics/TaskFilters 这几张 Sheet 的地方（见
+ *     00_Project_Constitution.gs P6 铁律5）。TaskQueryEngine 自己只做
+ *     "批量读 Sheet"，具体过滤/排序/组合逻辑分发给下游五个纯函数 Engine：
+ *     24_ViewEngine（日历相对视图）/ 22_PriorityEngine（打分排序）/
+ *     23_SearchEngine（多维度搜索）/ 25_DashboardEngine（组合展示）/
+ *     26_AnalyticsEngine（统计）。
+ *
+ * G2. "非终结态"过滤不是全局统一的——按指令分三类，不能一概而论：
+ *
+ *     (a) 日历相对视图类（today/tomorrow/thisWeek/thisMonth/upcoming/
+ *         overdue/recurring/highPriority，见 24_ViewEngine.gs 的
+ *         _isNonTerminal_）—— 一律排除 status=DONE 或 CANCELLED。
+ *     (b) getPendingTasks（/mytasks）—— 直接按 status='PENDING' 精确匹配
+ *         （效果上等同排除 DONE/CANCELLED，但实现方式是"只要 PENDING"
+ *         而不是"排除终结态"，如果未来引入新状态如 IN_PROGRESS，两种写法
+ *         的结果会不一样，需要留意）。
+ *     (c) getCompletedTasks（/history）/ getArchivedTasks（/archive）——
+ *         反过来，专门只看终结态（DONE/CANCELLED）。
+ *     (d) searchTasks（/search）—— **不做非终结态过滤**，除非调用方在
+ *         query 里显式传 status。Telegram 单关键字搜索固定只传
+ *         `{text: keyword}`，不带 status，所以 /search 会把 DONE/
+ *         CANCELLED 的历史任务也搜出来——这是刻意的设计，不是 bug，完整
+ *         理由见文末「七、Design Clarifications」7.1。
+ *     (e) getPriorityTasks（/priority）—— 单独在 12_TaskQueryEngine.
+ *         getPriorityTasks 里手写了一次"排除 DONE/CANCELLED"的 filter，
+ *         再转交给 PriorityEngine.rankByPriority，不是靠 ViewEngine。
+ *
+ * G3. 时区
+ *     所有"今天/本周/本月"的边界计算用的是 Apps Script 项目的
+ *     Session.getScriptTimeZone()（脚本时区），不是用户个人时区——本项目
+ *     目前没有按 chatId 存用户时区偏好。
+ */
+
+// ============================================================
+// 二、查询与视图类指令
+// ============================================================
+
+/**
+ * 命令匹配统一规则：每条指令同时接受 `/xxx` 英文形式和对应的中文自然语言
+ * 短语（全部是"从头到尾完全匹配"的正则 `^...$`，不是"包含"匹配），实现于
+ * 06_TaskIntentParser.parseTaskIntent()。
+ *
+ * ── V1. 今天任务 ──────────────────────────────────────────────────────
+ *   触发：/today 或 今天 / 今天任务
+ *   实现：ViewEngine.today() — due_date 落在「今天 00:00:00.000 ~
+ *         23:59:59.999」（本地脚本时区，只比较日期部分，不管 due_date 里
+ *         带没带具体时间），且非终结态。
+ *
+ * ── V2. 本周任务 ──────────────────────────────────────────────────────
+ *   触发：/week 或 本周 / 本周任务
+ *   实现：ViewEngine.thisWeek() — 起点=今天 00:00:00，终点=本周日
+ *         23:59:59.999。终点算法：offsetToSunday = (7 - now.getDay()) % 7
+ *         （JS Date.getDay()，0=周日）——如果今天正好是周日，offset=0，
+ *         终点就是今天。是前瞻窗口，本周内已经过去的日子不含在内。
+ *
+ * ── V3. 本月任务 ──────────────────────────────────────────────────────
+ *   触发：/month 或 本月 / 本月任务
+ *   实现：ViewEngine.thisMonth() — 起点=今天 00:00:00，终点=本月最后一天
+ *         23:59:59.999（算法：`new Date(y, m+1, 0)` 取"下月第0天"）。
+ *
+ * ── V4. 即将到来 ──────────────────────────────────────────────────────
+ *   触发：/upcoming 或 即将到来
+ *   实现：ViewEngine.upcoming() — due_date 严格晚于"今天 23:59:59.999"
+ *         （不含今天），按 due_date 升序排列。
+ *
+ * ── V5. 逾期任务 ──────────────────────────────────────────────────────
+ *   触发：/overdue 或 逾期 / 逾期任务
+ *   实现：ViewEngine.overdue() → 05_SheetUtils.isOverdue_()。
+ *   特殊排除：due_date 以 `km` 结尾的（如 "40000km"，里程类到期条件）
+ *             直接跳过，不参与逾期判断——`isOverdue_` 开头就有
+ *             `if (/km$/i.test(raw)) return false` 这一行。
+ *
+ * ── V6. 优先级排序 ────────────────────────────────────────────────────
+ *   触发：/priority 或 优先级 / 高优先级
+ *   实现：12_TaskQueryEngine.getPriorityTasks()（先排除 DONE/CANCELLED）
+ *         → 22_PriorityEngine.rankByPriority()，按 Priority Score 降序。
+ *
+ *   Priority Score 公式（22_PriorityEngine.computePriorityScore）：
+ *     score = Manual Weight × 0.5 + Urgency Score × 0.5
+ *     若 task.recurring 非空 → score ×= 0.9（防止常规例行事务长期占据
+ *       高优先级位置），最终对 100 取上限。
+ *
+ *   Manual Weight（MANUAL_WEIGHT 表，缺省或未识别值一律按 MEDIUM）：
+ *     CRITICAL=100 / HIGH=70 / MEDIUM=40 / LOW=10
+ *
+ *   Urgency Score（computeUrgencyScore，0~100）：
+ *     - 无 due_date，或 due_date 解析失败：固定 5 分
+ *     - 已逾期：70 + min(逾期天数, 30) → 70~100 分（逾期越久越接近100，
+ *       但30天封顶，避免"逾期100天"和"逾期一万天"没有区分度）
+ *     - ≤1 天内到期：65 分
+ *     - ≤3 天内到期：50 分
+ *     - ≤7 天内到期：35 分
+ *     - ≤30 天内到期：20 分
+ *     - >30 天：10 分
+ *
+ *   注：22_PriorityEngine 还有一个 suggestPriority(task) 函数（按 Score
+ *   ≥80→CRITICAL / ≥55→HIGH / ≥25→MEDIUM / 否则 LOW 给建议标签），目前
+ *   /priority 的回复文案（_buildPriorityReply_）只显示原始分数和任务自己
+ *   的 manual priority，**没有调用 suggestPriority 展示建议标签**——见
+ *   00_Known_Limitations.gs「Internal Capability, Not Yet Exposed」一节。
+ *
+ * ── V7. 重复任务 ──────────────────────────────────────────────────────
+ *   触发：/recurring 或 重复 / 循环 / 重复任务
+ *   实现：ViewEngine.recurring() — recurring 字段非空且非终结态。
+ *
+ * ── V8. 我的任务/待办任务 ─────────────────────────────────────────────
+ *   触发：/tasks /todos /mytasks，或 我的任务 / 待办任务 / 所有任务 /
+ *         全部任务 / 待办 / todo(s)
+ *   实现：12_TaskQueryEngine.getPendingTasks() — 直接按
+ *         status === 'PENDING' 精确匹配（见 G2(b)），无时间窗口限制。
+ *   职责边界（跟 V9/V11 对照，见文末「七、Design Clarifications」7.1）：
+ *         active task list——"我现在要做什么"，只看未完成。
+ *
+ * ── V9. 任务历史 ──────────────────────────────────────────────────────
+ *   触发：/history 或 历史 / 已完成 / 完成记录 / 已完成任务 / 任务历史
+ *   实现：12_TaskQueryEngine.getCompletedTasks()（status='DONE' 精确
+ *         匹配——**不含 CANCELLED**，这点跟 G2(c) 的笼统说法略有出入，
+ *         已取消的任务查不到，只能在 completed_at 排序上 slice(0,30) 取
+ *         最近 30 条，取的是"最近插入顺序"而不是按完成时间显式排序）。
+ *   职责边界（跟 V8/V11 对照，见文末「七、Design Clarifications」7.1）：
+ *         completed record——"我做完了什么"，只看 DONE。
+ *
+ * ── V10. 已归档任务 ───────────────────────────────────────────────────
+ *   触发：/archive 或 归档 / 已归档 / 归档记录
+ *   实现：13_ActiveTasksEngine.getArchivedTasks() — 读独立冷存储表
+ *         ArchiveTasks（DONE/CANCELLED 超过 7 天由每日触发器
+ *         `triggerDailyArchive`（每天凌晨2点）自动搬入，Tasks 表原行不
+ *         物理删除，只打 archived=true 标记）。默认取最新 20 条，按
+ *         archived_at 降序。
+ *
+ * ── V11. 搜索任务 ─────────────────────────────────────────────────────
+ *   触发：/search <关键字> 或 搜索 <关键字>
+ *   实现：23_SearchEngine.search() — 在 title/description/notes/tags/
+ *         category 五个字段拼接后做大小写不敏感的包含匹配。
+ *   范围（见 G2(d)）：不排除 DONE/CANCELLED——刻意设计，非 bug，完整
+ *         Rationale 见文末「七、Design Clarifications」7.1。
+ *
+ * ── V12. 仪表盘 ───────────────────────────────────────────────────────
+ *   触发：/dashboard 或 仪表盘
+ *   实现：12_TaskQueryEngine.getDashboard('today', chatId) →
+ *         25_DashboardEngine.buildTodayDashboard()：
+ *     1. 🔥 Today：今日到期活跃任务，按 Priority Score 降序，前9条用
+ *        圆圈数字①-⑨标号，超过9条退回"10. "这种数字序号。
+ *     2. ⚠ Overdue（若非空才显示该分区）
+ *     3. 📅 Tomorrow（若非空才显示）
+ *     4. 按 category 动态生成的补充分区：SHOPPING→📦 Shopping /
+ *        MAINTENANCE→🚗 Vehicle / HEALTH→💊 Health / ADMIN→📋 Admin。
+ *        GENERAL 和 PROJECT 两个 category 没有对应图标，不会单独成区
+ *        （落不到任何分区的任务，仪表盘里看不到）。已经出现在前三个
+ *        分区的任务不会在这里重复出现。
+ *   注：25_DashboardEngine 还有 buildWeeklyDashboard/buildMonthlyDashboard
+ *   两个函数，但 06_TaskIntentParser 目前只把 /dashboard 接到 'today'——
+ *   Weekly/Monthly 两种展示存在但没有 Telegram 指令能触发，见
+ *   00_Known_Limitations.gs「Internal Capability, Not Yet Exposed」一节。
+ *
+ * ── V13. 统计数据 ─────────────────────────────────────────────────────
+ *   触发：/stats 或 统计 / 统计数据
+ *   实现：12_TaskQueryEngine.getDashboard('statistics', chatId) →
+ *         25_DashboardEngine.buildStatisticsDashboard() →
+ *         26_AnalyticsEngine.computeStatistics()，对当前 chatId 下全部
+ *         任务现算（不读 TaskStatistics 投影表），展示以下9项：
+ *     - 任务总数 / 待办 / 已完成 / 已取消
+ *     - 完成率 = done/total×100%，保留2位小数
+ *     - 平均完成耗时 = (completed_at − timestamp) 折算小时，保留1位小数
+ *       （只统计 status=DONE 且 completed_at≥timestamp 的任务，异常/
+ *       负值样本被跳过不计入平均）
+ *     - 平均提醒次数 = 全部任务 reminder_count 之和 / 总数，保留1位小数
+ *     - 高优先级数（priority ∈ {HIGH, CRITICAL}）
+ *     - 重复任务数（recurring 非空）
+ *   AnalyticsEngine.computeStatistics 实际上还多算了 overdue_rate（相对
+ *   pending 任务的逾期占比）和 workload_by_category（按 category 分组的
+ *   待办任务数），但 buildStatisticsDashboard 的 Telegram 回复文案里
+ *   **没有展示这两项**——只有直接调用 getStatistics() 的场景（比如未来
+ *   接其它前端）能拿到完整字段。
+ *   注：物理表 TaskStatistics 由 11_ProjectionRebuilder.
+ *   recomputeStatisticsFromTasks_() 每天凌晨3点（triggerDailyStatistics
+ *   Recompute）批量重算一次，供未来跨用户低成本总览预留，/stats 指令
+ *   本身完全不依赖它，每次都是实时现算，确保数字绝对准确（见
+ *   00_ADR.gs ADR-2026-07-06-005）。
+ */
+
+// ============================================================
+// 三、任务创建与自然语言解析
+// ============================================================
+
+/**
+ * C1. 判定是否进入创建流程（06_TaskIntentParser.parseTaskIntent，
+ *     按以下顺序依次判断，命中一条就返回，不再往下走）：
+ *
+ *     0. 精确排除：整句只有 help/帮助/命令/指南/菜单/使用说明/h（不分
+ *        大小写）→ 直接判 intent=null，不当创建也不提示错误。
+ *     1. TASK_HISTORY / 1.5 TASK_ARCHIVE / 2. TASK_LIST / 2.5 各 View+
+ *        Dashboard+Search 指令 / 3. TASK_DONE / 4. TASK_CANCEL
+ *        （见第二节 V1-V13 与本节 C4，都在创建判断之前被拦截）。
+ *     5. Skip 模式（命中即判 intent=null，不创建也不当其它指令）：
+ *          - `/^\/inventory/i`（库存相关 Library 指令）
+ *          - `/^(added?|加了|入库|库存|买了|用了|剩)/`（库存类中文口语）
+ *          - `/^(设置|更新)过期/`
+ *          - `/^\//`（前面没被识别出来的所有其它 /xxx 指令，一律不当
+ *            任务创建，即使 /xxx 本身没有对应实现）
+ *     6. 长度兜底：trim 后长度 < 2 → intent=null。
+ *     7. 走到这里才是 TASK_CREATE：调用 09_TemporalParser.extractDateTime()
+ *        抽取 due_date/recurrence_rule，剩余文本经 05_SheetUtils.
+ *        _cleanTitle_() 清洗成标题；如果清洗完标题是空的，也返回
+ *        intent=null（不会创建一个空标题任务）。
+ *
+ * C2. 自然语言时间抽取顺序（09_TemporalParser.extractDateTime，命中一条
+ *     即停止，后续规则不再尝试；顺序本身有讲究——比如"重复规则"必须排在
+ *     "本周/星期几"判断之前，否则"每周一"会被"星期几"规则误吃掉"周一"
+ *     那部分）：
+ *
+ *     0. 重复规则（见 C3），提取到就据此算出第一次 due_date。
+ *     1. 相对日：大后天(+3) / 后天(+2) / 明天(+1) / 今天(+0)。
+ *     2. 下周+星期X：`下(个)?周[一二三四五六日天]`，算下个自然周对应日期。
+ *     3. 裸星期（没写"下周"）：`(星期|周)[一二三四五六日天]`，算"最近的
+ *        那个周X"——如果算出来的日期正好是今天，且时间部分已过，会在
+ *        C2 第5步的时间处理里被顺延一周（不是顺延一天）。
+ *     4. 绝对日期：`X月Y日/号`、`X-Y`、`X/Y`——如果这个日期在今年已经
+ *        过去，自动归入明年。
+ *     5. 时间：`(早上|上午|中午|下午|晚上|凌晨)? H:MM` 或
+ *        `...H点(M分)?`。下午/晚上 且 hour<12 → +12 小时；**中午 且
+ *        hour<12 也 +12**（"中午1点"按13:00算，这一条容易被漏看，
+ *        pasted 版本的旧描述只提过下午/晚上）；早上/上午/凌晨不调整。
+ *        若没写明确日期、只说了时间，且这个时间点今天已经过去 → 顺延
+ *        到明天；裸星期算出的日期（第3步）如果时间已过 → 顺延7天而不是
+ *        1天；重复规则算出来正好是"今天"但时间已过 → 按该重复规则的
+ *        周期顺延一次（不是简单+1天）。
+ *
+ * C3. 重复策略解析（09_TemporalParser._extractRecurrence_，按"先认更
+ *     具体的数字间隔写法，再认裸写法"的顺序匹配）：
+ *       每(隔)?N天         → 内部对象 type=ND, interval=N
+ *       每(隔)?N周/星期     → type=NW, interval=N
+ *       每N个?月            → type=MONTHLY, interval=N
+ *       每N年               → type=YEARLY, interval=N
+ *       每天/每日           → type=DAILY, interval=1
+ *       每个?(周|星期)[X]?  → type=WEEKLY, interval=1, anchor_weekday=X
+ *       每月X号/每个月X号   → type=MONTHLY, interval=1, anchor_day_of_month=X
+ *       每年X月Y号          → type=YEARLY, interval=1, anchor_month=X,
+ *                              anchor_day_of_month=Y
+ *
+ *     存储边界（21_RecurringEngine.ruleToLegacyString）：Tasks Sheet 的
+ *     recurring 列目前只认 5 个字符串
+ *     `['', 'Daily', 'Weekly', 'Monthly', 'Yearly']`（interval 固定为1）。
+ *     ND/NW，以及 interval≠1 的 MONTHLY/YEARLY（"每2个月""每3年"这种），
+ *     算出来的 recurrence_rule 对象在这一步会被转成 `''`（当作没有重复
+ *     规则存下来）——**这是现有 Schema 的边界，不是 bug**，第一次到期日
+ *     仍然会算对（C2第0步已经用完整规则算出了 targetDate），只是"这是
+ *     一个会重复的任务"这个事实没有被记录、完成后不会自动续期。
+ *
+ * C4. 身份去重（Identity + Deduplication）
+ *
+ *     Identity 生成（07_IdentityEngine.generateTaskIdentity，纯函数，
+ *     零外部依赖）：
+ *       identity = SHA256(chatId | normalizeTitle(title) | dueValue |
+ *                          repeatRule | priority | category)
+ *       （priority 缺省按 'MEDIUM'，category 缺省按 'GENERAL' 参与拼接，
+ *       必须跟 20_TaskEngine.createTaskDirect_ 的默认值保持一致，否则
+ *       identity 会跟实际落库的字段对不上）
+ *
+ *       【V4.7 变更，Due Time Support】dueValue 不是裸 due_date，而是
+ *       07_IdentityEngine.resolveIdentityDueValue(task) 的结果——有
+ *       due_time 时取合并后的 due_datetime，否则退回 due_date。所有
+ *       identity 生成调用点（09_IdempotencyManager.createTaskIfNotExists /
+ *       20_TaskEngine.updateTask / 11_ProjectionRebuilder.gs 两处）都
+ *       统一改用这个辅助函数，不再各自裸拼 due_date。这不是新行为——
+ *       此前自然语言解析器偶尔会把时间折叠进 due_date 字符串本身，
+ *       "改时间等同于改 due_date"这条效果早就间接成立；这次只是把它
+ *       变成显式、一致的规则。全部存量任务（due_time 恒为空）的
+ *       identity 哈希因此逐字节不变。
+ *
+ *     normalizeTitle 标准化步骤（顺序固定）：
+ *       1. 全角 ASCII → 半角（如 "ＡＢＣ"→"ABC"）
+ *       2. 转小写
+ *       3. 只保留 \w（字母数字下划线）+ 中文（\u4e00-\u9fa5）+ 空格，
+ *          其余标点全部替换成空格
+ *       4. 折叠连续空白并 trim
+ *       效果：「提醒我去买菜」「去买菜！」「去 买 菜」三者 identity 相同；
+ *       但标题相同、dueValue 不同 → identity 不同 → 视为两个独立任务
+ *       （"明天买菜"和"后天买菜"不会互相拦截；V4.7 起，"明天10点开会"和
+ *       "明天2点开会"同理，也是两个独立任务）。
+ *
+ *     去重判定（08_DeduplicationEngine.findExistingTask）：
+ *       只有 status === 'PENDING' 的同 identity 任务才算"已存在"——
+ *       DONE/CANCELLED 的历史任务不会拦截同名/同 identity 的新任务创建。
+ *
+ *     命中已存在时的行为：**不会报错、也不会创建重复行**，
+ *     09_IdempotencyManager.createTaskIfNotExists 直接返回
+ *     `{ task: existing, created: false }`，06_TaskIntentParser 据此回复：
+ *       "⚠️ 任务已存在（未重复创建）" + 已有任务的 ID/标题/状态/到期日 +
+ *       "如需再建一个，请改变标题或日期。"
+ *     （即：静默复用已有任务，把已有任务信息回显给用户，不是报错拒绝。）
+ *
+ *     并发防线（四层，09_IdempotencyManager 文件头有完整论证，这里只列
+ *     结论）：
+ *       1a. Gate（全局瞬时锁，GATE_WAIT_MS=2000ms）—— 只保护"查/占位"
+ *           这一步的原子性，几十毫秒内释放。
+ *       1b. Soft Lock（每 chatId 一把，CacheService，15秒兜底过期）——
+ *           真正防止"同一用户"并发重试，不同用户互不阻塞。
+ *       2.  EventBus 同次执行内的双写补充校验。
+ *       3.  DeduplicationEngine.findExistingTask —— 跨执行/跨实例的最终
+ *           兜底。
+ *     两种"系统繁忙"错误文案不同（不要混为一谈）：
+ *       - "SYSTEM_BUSY:"（不带后缀）→ 连 Gate 都没排上，真正全站级繁忙，
+ *         这次调用大概率什么都没做，回复"请几秒后重发"。
+ *       - "SYSTEM_BUSY_RETRY_IN_PROGRESS:" → 这个 chatId 自己已经有一个
+ *         请求在处理（很可能是 Telegram 对同一条消息的重试），回复
+ *         "正在处理中，不需要马上重发"。
+ *
+ * C5. 落库默认值（20_TaskEngine.createTaskDirect_ / ProductivityConfig）
+ *       category 有效值：MAINTENANCE / SHOPPING / ADMIN / HEALTH /
+ *         GENERAL / PROJECT，无效或缺省 → 'GENERAL'
+ *       priority 有效值：LOW / MEDIUM / HIGH / CRITICAL，无效或缺省 →
+ *         'MEDIUM'
+ *       recurring 有效值：'' / Daily / Weekly / Monthly / Yearly，
+ *         无效或缺省 → ''
+ *
+ *     **重要**：06_TaskIntentParser 的 TASK_CREATE 分支调用
+ *     `IdempotencyManager.createTaskIfNotExists(parsed.title,
+ *     {due_date, due_time, due_datetime, recurring}, chatId)`——meta 对象
+ *     里**只有日期/时间/重复规则相关字段**（V4.7 起新增 due_time/
+ *     due_datetime，均由 09_TemporalParser.extractDateTime() 从同一段
+ *     自然语言里解析出来，属于同一类"时间解析"能力的延伸），不传
+ *     category、不传 priority。也就是说：**目前所有通过 Telegram 自然
+ *     语言创建的任务，category 永远落到默认值 GENERAL，priority 永远
+ *     落到默认值 MEDIUM**，系统不会从文本内容（比如出现"买"就归到
+ *     SHOPPING，或出现"紧急"就设成 CRITICAL）做任何推断。
+ *
+ *     **【已确认为 Known Limitation，2026-07-11，非 bug】**：这是刻意的
+ *     Clean Architecture 边界，不是遗漏——Productivity OS 的职责到"解析
+ *     时间/重复规则、落库、去重"为止，不应该承担"理解任务语义"这件事
+ *     （比如判断"下周找律师"该归哪个 category、该给多高 priority）。
+ *     那是上层调用方（Personal AI Core 这类 AI Agent）的职责，Productivity
+ *     OS 保持"傻瓜式" API 反而更稳。完整结论见
+ *     00_Known_Limitations.gs「Natural Language Parser Scope」一节。
+ */
+
+// ============================================================
+// 四、完成 / 取消指令
+// ============================================================
+
+/**
+ * D1. 完成任务
+ *     触发：`(done|完成|finish|finished|/done)\s+(TSK-[\w-]+)`（不分大小写，
+ *           task_id 统一转大写）
+ *     实现：20_TaskEngine.completeTask(taskId, chatId)，四种返回信号：
+ *       - not_found: true       → 回复"❓ 找不到任务 xxx"
+ *       - already_done: true    → 回复"✅ 之前已经完成过了（这次点击
+ *         没有重复处理）"（防止双击/Telegram 重试被误报成"又完成了一次"）
+ *       - invalid_state: true   → 回复"⚠️ 当前状态是 X，不能标记完成"
+ *       - 正常完成               → 回复"✅ 完成: xxx"；如果这个任务
+ *         recurring 非空，20_TaskEngine.completeTask 会调用
+ *         21_RecurringEngine.spawnNextIfNeeded 自动创建下一次实例（走
+ *         跟手动创建完全相同的 createTaskIfNotExists 路径，同样会
+ *         去重/幂等），成功则追加"🔁 已自动创建下一次: xxx（日期）"。
+ *
+ * D2. 取消任务
+ *     触发：`(cancel|取消|remove|delete|/cancel)\s+(TSK-[\w-]+)`
+ *     实现：20_TaskEngine.cancelTask(taskId, chatId)，返回信号跟 D1 对应
+ *           （not_found / already_cancelled / invalid_state / 正常取消）。
+ *
+ *     **产品性决定（非 bug）**：取消一个 recurring 任务**不会**触发
+ *     spawnNextIfNeeded——只有 completeTask 会自动续期。原因（继承自
+ *     V3.2 的产品判断，21_RecurringEngine.gs 文件头有完整论证）：
+ *     "取消"是用户主动表示"这一次不需要了"，但"未来所有次是否也要停掉"
+ *     是有歧义的（比如"每年生日提醒"取消一次，明年该不该继续提醒？），
+ *     系统选择不擅自决定，只处理"完成后没续上"这一种最明确的情况。如果
+ *     未来需要"暂停整条 recurring 规则"，需要单独设计，见
+ *     00_Project_State.gs「下一步」P2 第4条。
+ */
+
+// ============================================================
+// 五、后台批处理（归档与统计维护）
+// ============================================================
+
+/**
+ * B1. 每日冷归档 —— triggerDailyArchive（15_Setup.createTriggers()
+ *     挂的定时触发器，每天凌晨 2 点）→ 13_ActiveTasksEngine.
+ *     runDailyArchive()：
+ *       - 规则：status ∈ {DONE, CANCELLED} 且已经超过
+ *         DEFAULT_ARCHIVE_DAYS=7 天的任务，追加进 ArchiveTasks 表
+ *         （只增不删，append-only），Tasks 表原行不物理删除，只把
+ *         archived 列标记成 true（保留全量 Read Model 完整性，
+ *         供 rebuildAllProjections() 有据可重建）。
+ *       - 排重保护：追加前只读 ArchiveTasks 最近
+ *         ARCHIVE_DEDUP_LOOKBACK_ROWS=2000 行做去重校验（有界扫描，
+ *         不随 ArchiveTasks 总行数增长拖慢——排重真正需要覆盖的只是
+ *         "上次运行中断留下的半完成行"，必然产生于最近一次运行，2000行
+ *         窗口有几十倍安全余量）。
+ *
+ * B2. 每日统计重算 —— triggerDailyStatisticsRecompute（每天凌晨 3 点）
+ *     → 11_ProjectionRebuilder.recomputeStatisticsFromTasks_()：从
+ *     Tasks 表（不是 Events）按 chat_id 聚合重算 TaskStatistics 物理表。
+ *     这是 V4.6 起 TaskStatistics 的常规维护方式（10_ProjectionEngine
+ *     不再对它做同步增量维护，见 00_ADR.gs ADR-2026-07-06-005）。
+ *     **这张表目前没有任何 Telegram 查询路径读取**——/stats 永远是
+ *     26_AnalyticsEngine 现算，TaskStatistics 只是为未来"跨用户低成本
+ *     总览"场景预留的缓存。
+ */
+
+// ============================================================
+// 六、已实现但尚未通过 Telegram 暴露的能力
+// ============================================================
+
+/**
+ * 这一类内容（Weekly/Monthly Dashboard、suggestPriority()、updateTask()、
+ * 以及 category/priority 不做自然语言推断）从 2026-07-11 起统一移到
+ * 00_Known_Limitations.gs 的「Internal Capability / Internal API」两节，
+ * 不再放在本文件——它们不是"指令规则"，而是"刻意不做/暂未暴露"的边界，
+ * 归 Known Limitations 管，避免两份文件重复维护同一份清单。
+ */
+
+// ============================================================
+// 七、Design Clarifications（设计澄清）
+// ============================================================
+
+/**
+ * This section records intentional behaviors that are frequently mistaken
+ * for bugs. It documents the design rationale to avoid repeated
+ * architecture review discussions.
+ *
+ * 本节是"容易被误认为 bug、实际上是刻意设计"这类行为的永久记录处——每一条
+ * 都是常青的设计澄清（Design Clarification），不是"历史问答/审计记录"。
+ * Audit Trail（谁、什么时候、为什么改的）已经有 00_Project_State.gs / Git
+ * History / Changelog 承担，本节不重复那个职责，只回答一个问题："这是不是
+ * bug？"——不是，这是设计决定，理由如下。
+ *
+ * 以后再遇到类似情况（比如 /archive 要不要包含 CANCELLED、Priority Score
+ * 公式要不要调整、Reminder 的 overdue 要不要计算并展示），直接在本节按
+ * 7.2 / 7.3 / 7.4 顺次追加一条，格式跟 7.1 保持一致（一句话结论 + 
+ * Rationale + 必要的 Use/对照 + 实现位置引用），不要另起"疑点/待确认"
+ * 性质的章节。
+ */
+
+/**
+ * 7.1 /search Scope
+ *
+ * /search intentionally searches all task states
+ * (ACTIVE, DONE, CANCELLED).
+ *
+ * Rationale
+ *   Search is a retrieval command rather than an active task list.
+ *
+ * Use:
+ *   /tasks   → active tasks only
+ *   /history → completed tasks only
+ *   /search  → all task states
+ *
+ * 实现位置：23_SearchEngine.search()；12_TaskQueryEngine.searchTasks()
+ * 转发 Telegram 单关键字搜索时不带 status 过滤，见第一节 G2(d)。
+ */

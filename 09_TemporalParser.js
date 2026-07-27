@@ -1,0 +1,622 @@
+/**
+ * 09_TemporalParser.gs
+ * Personal AI Core — V3 共用日期/时间/重复规则解析层
+ *
+ * 【2026-07-17 新增，ADR-2026-07-17-009，本项目独有改动，Core 项目副本
+ * 不受影响】extractDateTime() 新增第 6 步：识别"提前N分钟/小时/天提醒"
+ * 这类短语（新函数 _extractReminderOffsets_()），返回对象新增
+ * reminder_policy 字段（null | {offsets:[]} | {offsets:[{value,unit}]}）。
+ * 沿用 00_Known_Limitations.gs"自然语言解析范围止于 due_date/due_time/
+ * due_datetime/recurring"这条既有边界的同一套判断标准——是否需要语义/
+ * 领域判断——offset 短语是确定性的时间表达式解析，跟 due_date/recurring
+ * 同一类，因此这次边界扩展记在 Known Limitations 而不是绕开它，具体
+ * 措辞比照 V4.7 新增 due_time 时的先例。跟 due_time 那次一样，这次改动
+ * 只影响本项目这一份拷贝，不动 Personal-AI-main 自己的同名文件——如果
+ * 那边以后也需要，需要单独重复这次改动。
+ *
+ * 【V4.7 新增，Due Time Support，本项目独有改动，Core 项目副本不受
+ * 影响——00_Architecture_Review.gs「七、Review #3」，Carson 2026-07-13
+ * 批准】extractDateTime() 返回对象新增 due_time（'HH:mm' 或 ''）、
+ * due_datetime（合并后的 ISO 字符串，没有具体时间时为 ''）两个字段；
+ * due_date 从此永远是纯日期，不再偶尔携带时间。computeNextDueDateFromLabel()
+ * 等内部函数未改一行——已有的"侦测输入是否带时间、保留同样格式输出"这套
+ * 逻辑对新的调用方式（外部先合并出 due_datetime 字符串再传进来）本来就
+ * 兼容，不需要跟着改。
+ *
+ * 【V4.4 修复 LOW RISK 1，本项目独有改动，Core 项目副本不受影响】
+ * RECURRENCE_TYPES / WEEKDAY_CHAR_MAP / WEEKDAY_NUM_TO_CHAR 三个裸全局
+ * 常量收进了 TemporalConfig 命名空间（见"重复规则解析"小节的完整说明）。
+ *
+ * 除以上两处（V4.4 命名空间收纳 + V4.7 due_time/due_datetime 返回字段）
+ * 之外的函数逻辑跟 Core 项目版本逐字一致，这是本文件跟 Core 项目副本
+ * 之间目前仅有的两处差异——Core 项目自己的 09_TemporalParser.gs（含
+ * 22_InventoryIntentParser.gs 消费的那一份）不会自动获得 due_time 能力，
+ * 如果 Core 项目以后也需要，需要在那一份拷贝里单独重复这次的改动。
+ *
+ * 来源：从 06_TaskIntentParser.gs 里抽出来的 _extractDateTime_() 及其内部
+ * 依赖函数，改名 extractDateTime()（去掉下划线，明确是公开给06/22共用的
+ * 函数，跟93_MemoryEngine.gs定的命名习惯一致），并新增重复规则
+ * (recurrence_rule) 解析。决策+依赖关系见 00_File_Map.gs，评审记录见
+ * 00_Project_State.gs。
+ *
+ * 06_TaskIntentParser.gs / 22_InventoryIntentParser.gs 都改成调用这里的
+ * extractDateTime()——其实之前只有06有实现，22是跨文件直接调06的
+ * _extractDateTime_()，现在统一改成调09，不再有"两份日期解析"的疑虑。
+ *
+ * recurrence_rule 输出格式（按calendar-anchored vs rolling-interval两类）：
+ *   {
+ *     type: 'DAILY'|'WEEKLY'|'MONTHLY'|'YEARLY'|'ND'|'NW',
+ *     interval: number,            // ND/NW的"每N天/N周"；MONTHLY/YEARLY
+ *                                  // 如果说"每2个月/每3年"也用这个字段，
+ *                                  // 否则固定1
+ *     anchor_weekday: number|null, // WEEKLY专用，0=周日...6=周六
+ *     anchor_day_of_month: number|null, // MONTHLY/YEARLY专用，1-31
+ *     anchor_month: number|null    // YEARLY专用，1-12
+ *   }
+ * "每2天/每2周"会被识别成ND/NW（不是DAILY/WEEKLY+interval=2）——
+ * DAILY/WEEKLY固定就是interval=1，这是calendar-anchored vs
+ * rolling-interval两类划分的直接体现：DAILY/WEEKLY/MONTHLY/YEARLY是
+ * "锚定在某个日历位置"（每天/每周X/每月X号/每年X月X号)，ND/NW是
+ * "滚动间隔"（从上次完成算起再过N天/N周，不锚定具体星期几或几号)。
+ *
+ * ⚠️ 范围说明（重要，v3.2 已部分收窄，见下方更新）：这里只解析"用户说了
+ * 什么重复规则 + 算出第一次due_date"，不负责"任务完成后自动生成下一次"——
+ * 那需要完整的recurring task engine，尤其是ND/NW和interval>1这些还没被
+ * legacy字符串承载的规则类型，要等Tasks schema真正存下完整recurrence_rule
+ * 之后才能接。
+ * 现在 20_ProductivityModule.createTask() 的 meta.recurring 还是只认
+ * ['', 'Daily', 'Weekly', 'Monthly', 'Yearly'] 这5个字符串（TASK_RECURRING
+ * 数组），把这里算出来的recurrence_rule对象直接塞进去，会被createTask的
+ * indexOf校验当成无效值吃掉变成''。所以06_TaskIntentParser.gs先只用
+ * extractDateTime()算出来的due_date，recurrence_rule留在
+ * parseTaskIntent()的返回值里没往下传。
+ *
+ * v3.2 新增（2026-07-01）：completeTask()自动生成下一次——不是上面说的
+ * "完整recurring task engine"，而是一个刻意收窄范围的子集：只用已经在
+ * 持久化的legacy字符串（Daily/Weekly/Monthly/Yearly，interval固定为1）
+ * +已完成任务自己的due_date，算出"下一次"。新增的公开函数
+ * computeNextDueDateFromLabel()就是这个子集的入口，给
+ * 20_ProductivityModule.completeTask()调用。ND/NW和interval>1这些从
+ * 06_TaskIntentParser.gs的_recurrenceRuleToLegacyString_那一步就已经被
+ * 丢成''、根本没被存下来的规则类型，这个函数天然覆盖不到——不是新引入的
+ * 限制，是承接现有存储边界，等真正的schema扩展做了再补。
+ *
+ * ⚠️ 已知限制（继承自原06的注释，没变，不是这次引入的新缺口）：
+ *   - 纯数字+点（比如"3点"不带"上午/下午"）按字面24小时制解析
+ *   - 不支持英文日期/重复说法（tomorrow / every day 等）
+ *   - MONTHLY/YEARLY 用 anchor_day_of_month=29/30/31 这种日期，遇到
+ *     没有那么多天的月份（比如2月没有30号），JS Date会自动溢出到下个月
+ *     初——没做"锁定到月末"的特殊处理，真遇到了再加
+ */
+
+// ============ 对外主函数 ============
+
+/**
+ * 解析自然语言里的日期/时间/重复规则/提醒偏移量。
+ * @param {string} rawText
+ * @returns {{ due_date: string, due_time: string, due_datetime: string,
+ *   recurrence_rule: (object|null), reminder_policy: (object|null),
+ *   cleanedText: string }}
+ *   【V4.7 变更，Due Time Support，00_Architecture_Review.gs「七、
+ *   Review #3」】due_date 从此永远是纯日期 'yyyy-MM-dd' 或 ''——此前
+ *   偶尔携带时间（'yyyy-MM-ddTHH:mm:ss'）的行为到此为止，时间改由
+ *   新增的 due_time（'HH:mm' 或 ''）和 due_datetime（合并后的 ISO
+ *   字符串，没有时间时为 ''）承载。计算逻辑本身未变，只是把原来
+ *   拼进 due_date 的同一个 base 时间对象，多格式化两遍。
+ *   【2026-07-17 新增，ADR-2026-07-17-009】reminder_policy：null 表示
+ *   原文没有提醒短语（沿用 Reminder OS 默认策略）；{offsets:[]} 表示
+ *   显式声明不要提前提醒；{offsets:[{value,unit}]} 表示显式覆盖，
+ *   unit 取值 'minutes'|'hours'|'days'。
+ */
+function extractDateTime(rawText) {
+  var text = rawText;
+  var now = new Date();
+  var targetDate = null;
+  var recurrenceRule = null;
+  var isRecurrenceToday = false; // 标记：recurrence算出来的targetDate正好是今天
+
+  // 0. 重复规则——必须在下面的一次性日期判断之前抓，否则"每周一"会被
+  //    第3步"本周/最近的周X"规则误吃掉"周一"那部分
+  var recurrenceMatch = _extractRecurrence_(text);
+  if (recurrenceMatch) {
+    recurrenceRule = recurrenceMatch.rule;
+    text = text.replace(recurrenceMatch.matchedStr, '');
+    targetDate = _computeNextOccurrenceFromRule_(recurrenceRule, now);
+    isRecurrenceToday = _startOfDay_(targetDate).getTime() === _startOfDay_(now).getTime();
+  }
+
+  // 1. 相对日：今天/明天/后天/大后天
+  var isPlainWeekday = false; // 标记这个日期是不是从"裸"星期几（没写"下周"）推出来的
+  if (!targetDate) {
+    var dayMap = [
+      { re: /大后天/, offset: 3 },
+      { re: /后天/, offset: 2 },
+      { re: /明天/, offset: 1 },
+      { re: /今天/, offset: 0 }
+    ];
+    for (var i = 0; i < dayMap.length; i++) {
+      if (dayMap[i].re.test(text)) {
+        targetDate = _addDays_(now, dayMap[i].offset);
+        text = text.replace(dayMap[i].re, '');
+        break;
+      }
+    }
+  }
+
+  // 2. 下周+星期X
+  if (!targetDate) {
+    var nextWeekMatch = text.match(/下(?:个)?周([一二三四五六日天])/);
+    if (nextWeekMatch) {
+      targetDate = _nextWeekWeekday_(now, nextWeekMatch[1]);
+      text = text.replace(nextWeekMatch[0], '');
+    }
+  }
+
+  // 3. 本周/最近的 周X / 星期X
+  if (!targetDate) {
+    var plainWeekMatch = text.match(/(?:星期|周)([一二三四五六日天])/);
+    if (plainWeekMatch) {
+      targetDate = _upcomingWeekday_(now, plainWeekMatch[1]);
+      isPlainWeekday = true;
+      text = text.replace(plainWeekMatch[0], '');
+    }
+  }
+
+  // 4. 显式日期：6月25日 / 6月25号 / 6-25 / 6/25
+  if (!targetDate) {
+    var explicitMatch = text.match(/(\d{1,2})[月\/-](\d{1,2})[日号]?/);
+    if (explicitMatch) {
+      var mo = parseInt(explicitMatch[1], 10);
+      var da = parseInt(explicitMatch[2], 10);
+      if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+        var d = new Date(now.getFullYear(), mo - 1, da);
+        if (d.getTime() < _startOfDay_(now).getTime()) {
+          d.setFullYear(d.getFullYear() + 1); // 已经过去的日期，按明年算
+        }
+        targetDate = d;
+        text = text.replace(explicitMatch[0], '');
+      }
+    }
+  }
+
+  // 5. 时间
+  var timeInfo = _extractTime_(text);
+  if (timeInfo) text = text.replace(timeInfo.matchedStr, '');
+
+  var dueDate = '';
+  var dueTime = '';
+  var dueDatetime = '';
+  if (targetDate || timeInfo) {
+    var base = targetDate ? new Date(targetDate) : _startOfDay_(now);
+    if (timeInfo) {
+      base.setHours(timeInfo.hour, timeInfo.minute, 0, 0);
+
+      // 没写明确日期（只说"10点"），如果今天这个时间点已经过了，
+      // 任务一建好就会被判定逾期。自动滚到明天。
+      if (!targetDate && base.getTime() < now.getTime()) {
+        base.setDate(base.getDate() + 1);
+      }
+
+      // "周一10点"这种裸星期+时间组合，已过 → 滚到下周（不是明天，
+      // 因为周一已经过了，下一个周一在7天后）
+      if (isPlainWeekday && base.getTime() < now.getTime()) {
+        base.setDate(base.getDate() + 7);
+      }
+
+      // 重复规则算出来正好是"今天"，但今天这个时间点已经过了
+      // （比如"每天早上8点"，现在已经9点）→ 按这个规则的周期滚到下一次
+      if (recurrenceRule && isRecurrenceToday && base.getTime() < now.getTime()) {
+        base = _rollForwardOneCycle_(base, recurrenceRule);
+      }
+
+      // 【V4.7】due_date 永远是纯日期；具体时间点分别落进 due_time /
+      // due_datetime，三者都从同一个已经算好的 base 格式化而来。
+      dueDate     = Utilities.formatDate(base, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      dueTime     = Utilities.formatDate(base, Session.getScriptTimeZone(), 'HH:mm');
+      dueDatetime = Utilities.formatDate(base, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
+    } else {
+      dueDate = Utilities.formatDate(base, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+  }
+
+  // 6. 提醒偏移量（reminder_policy，ADR-2026-07-17-009 新增）——必须在上面
+  //    的日期/时间提取之后做：这一步只处理"提前多久提醒"这类短语，跟
+  //    "任务本身什么时候到期"是两件独立的事，互不干扰，顺序不影响正确性，
+  //    放在最后只是让"日期/时间先决定 title 剩下什么"这条既有顺序不被打乱。
+  var reminderResult = _extractReminderOffsets_(text);
+  if (reminderResult.matchedStr) text = text.replace(reminderResult.matchedStr, '');
+
+  return {
+    due_date: dueDate,
+    due_time: dueTime,
+    due_datetime: dueDatetime,
+    recurrence_rule: recurrenceRule,
+    reminder_policy: reminderResult.reminderPolicy,
+    cleanedText: text
+  };
+}
+
+// ============ 提醒偏移量解析（新，reminder_policy，ADR-2026-07-17-009）============
+
+/**
+ * 识别"提前多久提醒"这类短语，支持中英文两种表达——中文匹配本文件其余
+ * 日期/重复解析一贯使用的语言；英文匹配原始需求文档举的例子（"remind me
+ * 30 minutes before"）。两者字符集不重叠，同时支持不冲突。
+ *
+ * 可以出现多个 offset（"提前3天和2小时提醒我" / "remind me 3 days before
+ * and 2 hours before"），也可以显式声明"不要提前提醒"（中）/
+ * "no advance reminder"（英）——offsets 为空数组，跟"完全没提到提醒"
+ * （reminderPolicy 为 null，交给 Reminder OS 默认策略）是两种不同结果，
+ * 语义见 00_Known_Limitations.gs 本次补充的条目。
+ *
+ * ⚠️ 已知限制（刻意收窄范围，不是遗漏，跟本文件其余部分"够用就好、不做
+ * 穷尽 NLU"的一贯风格一致，经过 Node 沙盒实测确认下列边界行为）：
+ *   - 英文形式要求"remind me"字面出现，不识别裸的"30 minutes before"——
+ *     "before"是常见词，裸匹配容易在无关文本里误伤（比如任务标题本身
+ *     恰好含有"...before the meeting"这类文字）。
+ *   - 中文形式不支持"N分钟前"这种不带"提前"二字的裸短语，同一个理由：
+ *     "提前"是比"…前"更强的显式信号，收窄成只认"提前"能大幅降低误伤。
+ *   - 不支持"提前半小时"这类中文数字/量词表达，只认阿拉伯数字。
+ *   - 多个 offset 之间必须有连接词（和/、/，/,／英文 and）——"提前3天
+ *     2小时提醒我"（没有连接词）只会识别出"3天"这一个，"2小时提醒我"
+ *     会原样留在清洗后的 title 里。原始需求文档举的例子都带连接词
+ *     （"3 days before and 2 hours before"），这个限制不影响需求本身。
+ *
+ * @param {string} text
+ * @returns {{ reminderPolicy: (object|null), matchedStr: string }}
+ *   matchedStr 是识别到的完整原文片段（没识别到任何提醒短语时为
+ *   空字符串），调用方从文本里把它剥离掉，不会在清洗后的 title 里
+ *   留下"提醒我"/"remind me"这类残渣。
+ */
+function _extractReminderOffsets_(text) {
+  var UNIT_MAP = {
+    '分钟': 'minutes', '小时': 'hours', '天': 'days',
+    'minute': 'minutes', 'minutes': 'minutes',
+    'hour': 'hours', 'hours': 'hours',
+    'day': 'days', 'days': 'days'
+  };
+
+  // 0. 显式关闭提前提醒——必须先查，不含数字，不会跟下面的规则冲突。
+  var noneMatch = text.match(/不(?:用|需要?)?提前提醒|无需提前提醒|no\s+advance\s+reminders?/i);
+  if (noneMatch) {
+    return { reminderPolicy: { offsets: [] }, matchedStr: noneMatch[0] };
+  }
+
+  // 1. 整段"提醒偏移"从句——先框出整个短语的边界（含"提醒我"/"remind me"
+  //    这类引导词，供第2步之后把整段一起从原文里剥离），中英文各一条：
+  //    中文："提前"开头，数字+单位可以重复，用 和/、/，/, 连接，前后可以
+  //          跟着可选的"提醒我"/"提醒"。
+  //    英文："remind me"必须出现，后面跟"数字 单位 before"，可以用 and
+  //          连接多个（原始需求文档的例子就是这个形式）。
+  var zhClauseRe = /(?:提醒我)?\s*提前\s*\d+\s*(?:分钟|小时|天)(?:\s*[和、，,]\s*\d+\s*(?:分钟|小时|天))*\s*(?:提醒我?)?/;
+  var enClauseRe = /remind me\s+\d+\s*(?:minutes?|hours?|days?)\s+before(?:\s+and\s+\d+\s*(?:minutes?|hours?|days?)\s+before)*/i;
+
+  var clauseMatch = text.match(zhClauseRe) || text.match(enClauseRe);
+  if (!clauseMatch) {
+    return { reminderPolicy: null, matchedStr: '' };
+  }
+
+  // 2. 从框出来的整段里，把每一个 (数值, 单位) 组合单独抠出来——这一步
+  //    不需要关心"提醒我"这类引导词，pairRe 本身只认数字+单位。
+  var offsets = [];
+  var pairRe = /(\d+)\s*(分钟|小时|天|minutes?|hours?|days?)/gi;
+  var m;
+  while ((m = pairRe.exec(clauseMatch[0])) !== null) {
+    offsets.push({ value: parseInt(m[1], 10), unit: UNIT_MAP[m[2].toLowerCase()] });
+  }
+
+  if (offsets.length === 0) {
+    // 理论上不会发生（能匹配到 clauseMatch 就一定至少有一组数字+单位），
+    // 防御性处理，不当成"提到了提醒但什么都没识别出来"去静默生成空策略。
+    return { reminderPolicy: null, matchedStr: '' };
+  }
+
+  return { reminderPolicy: { offsets: offsets }, matchedStr: clauseMatch[0] };
+}
+
+// ============ 重复规则解析（新） ============
+
+/**
+ * 【V4.4 修复 LOW RISK 1：扁平全局变量污染命名空间】原来这里和文件末尾
+ * （"星期计算"小节）分别声明了 RECURRENCE_TYPES / WEEKDAY_CHAR_MAP /
+ * WEEKDAY_NUM_TO_CHAR 三个裸全局变量。GAS 的全局作用域是扁平的，这类
+ * 通用名字如果被 Core 项目或引入本 Library 的其他项目意外声明了同名
+ * 变量，会被静默覆盖——不仅会破坏本文件自己的日期解析，还可能反过来
+ * 污染依赖这个 Library 的 Core 项目。
+ *
+ * 修复：把三个常量收进一个冻结的命名空间对象 TemporalConfig。本文件的
+ * 其他函数（extractDateTime/computeNextDueDateFromLabel 等）仍然保持
+ * 裸全局——它们是本文件对外的公开 API，被 06_TaskIntentParser.gs /
+ * 21_RecurringEngine.gs 等多个文件直接调用，这次审计明确要求"不改变
+ * 架构、不重构代码"，把这些函数也包进 IIFE 需要同步改掉所有调用方，
+ * 属于会改变调用方式的重构，超出本次"消除裸全局常量碰撞风险"这个
+ * 具体问题的范围，不在这次一并做。
+ */
+var TemporalConfig = Object.freeze({
+  RECURRENCE_TYPES:   ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY', 'ND', 'NW'],
+  WEEKDAY_CHAR_MAP:   { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 },
+  WEEKDAY_NUM_TO_CHAR: { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' }
+});
+
+/**
+ * 从文字里抓重复规则。按"先抓带数字的，再抓裸的"顺序——其实两者literal
+ * 前缀不同（每3天 vs 每天，中间隔着数字），天然不会互相误吃，这里排序
+ * 只是为了可读性上的"更具体的先判"，不是为了避免冲突。
+ */
+function _extractRecurrence_(text) {
+  // ND：每隔3天 / 每3天
+  var ndMatch = text.match(/每隔?\s*(\d+)\s*天/);
+  if (ndMatch) {
+    return {
+      rule: { type: 'ND', interval: _clampInterval_(ndMatch[1]), anchor_weekday: null, anchor_day_of_month: null, anchor_month: null },
+      matchedStr: ndMatch[0]
+    };
+  }
+
+  // NW：每隔2周 / 每2周 / 每2星期
+  var nwMatch = text.match(/每隔?\s*(\d+)\s*(?:周|星期)/);
+  if (nwMatch) {
+    return {
+      rule: { type: 'NW', interval: _clampInterval_(nwMatch[1]), anchor_weekday: null, anchor_day_of_month: null, anchor_month: null },
+      matchedStr: nwMatch[0]
+    };
+  }
+
+  // MONTHLY间隔：每2个月 / 每3月
+  var monthIntervalMatch = text.match(/每\s*(\d+)\s*个?月/);
+  if (monthIntervalMatch) {
+    return {
+      rule: { type: 'MONTHLY', interval: _clampInterval_(monthIntervalMatch[1]), anchor_weekday: null, anchor_day_of_month: null, anchor_month: null },
+      matchedStr: monthIntervalMatch[0]
+    };
+  }
+
+  // YEARLY间隔：每2年
+  var yearIntervalMatch = text.match(/每\s*(\d+)\s*年/);
+  if (yearIntervalMatch) {
+    return {
+      rule: { type: 'YEARLY', interval: _clampInterval_(yearIntervalMatch[1]), anchor_weekday: null, anchor_day_of_month: null, anchor_month: null },
+      matchedStr: yearIntervalMatch[0]
+    };
+  }
+
+  // DAILY：每天 / 每日
+  var dailyMatch = text.match(/每天|每日/);
+  if (dailyMatch) {
+    return {
+      rule: { type: 'DAILY', interval: 1, anchor_weekday: null, anchor_day_of_month: null, anchor_month: null },
+      matchedStr: dailyMatch[0]
+    };
+  }
+
+  // WEEKLY：每周 / 每星期 / 每个星期 + 可选星期X
+  var weeklyMatch = text.match(/每个?(?:周|星期)([一二三四五六日天])?/);
+  if (weeklyMatch) {
+    var anchorWeekday = weeklyMatch[1] ? TemporalConfig.WEEKDAY_CHAR_MAP[weeklyMatch[1]] : null;
+    return {
+      rule: { type: 'WEEKLY', interval: 1, anchor_weekday: anchorWeekday, anchor_day_of_month: null, anchor_month: null },
+      matchedStr: weeklyMatch[0]
+    };
+  }
+
+  // YEARLY：每年 + 可选X月X号
+  var yearlyMatch = text.match(/每年(?:(\d{1,2})月(\d{1,2})[号日]?)?/);
+  if (yearlyMatch) {
+    return {
+      rule: {
+        type: 'YEARLY',
+        interval: 1,
+        anchor_weekday: null,
+        anchor_month: yearlyMatch[1] ? parseInt(yearlyMatch[1], 10) : null,
+        anchor_day_of_month: yearlyMatch[2] ? parseInt(yearlyMatch[2], 10) : null
+      },
+      matchedStr: yearlyMatch[0]
+    };
+  }
+
+  // MONTHLY：每月 / 每个月 + 可选X号
+  var monthlyMatch = text.match(/每个?月(\d{1,2})?[号日]?/);
+  if (monthlyMatch) {
+    return {
+      rule: {
+        type: 'MONTHLY',
+        interval: 1,
+        anchor_weekday: null,
+        anchor_month: null,
+        anchor_day_of_month: monthlyMatch[1] ? parseInt(monthlyMatch[1], 10) : null
+      },
+      matchedStr: monthlyMatch[0]
+    };
+  }
+
+  return null;
+}
+
+function _clampInterval_(rawNumStr) {
+  var n = parseInt(rawNumStr, 10);
+  return (!n || n < 1) ? 1 : n; // 防御：每0天之类的无意义输入，按1处理
+}
+
+/**
+ * 根据重复规则算"第一次"due_date（不含时间，时间在extractDateTime()里
+ * 另外应用）。这只是"现在创建，下一次是什么时候"，不是"完成后下一次是
+ * 什么时候"——后者是recurring task engine的事，这里不管。
+ */
+function _computeNextOccurrenceFromRule_(rule, now) {
+  switch (rule.type) {
+    case 'DAILY':
+      return _startOfDay_(now);
+    case 'ND':
+      return _addDays_(now, rule.interval);
+    case 'WEEKLY':
+      if (rule.anchor_weekday != null) {
+        return _upcomingWeekday_(now, TemporalConfig.WEEKDAY_NUM_TO_CHAR[rule.anchor_weekday]);
+      }
+      return _addDays_(now, 7); // 没指定星期几，默认从现在起7天后
+    case 'NW':
+      return _addDays_(now, rule.interval * 7);
+    case 'MONTHLY':
+      return _nextMonthlyOccurrence_(now, rule);
+    case 'YEARLY':
+      return _nextYearlyOccurrence_(now, rule);
+  }
+  return _startOfDay_(now);
+}
+
+function _nextMonthlyOccurrence_(now, rule) {
+  var interval = rule.interval || 1;
+  if (rule.anchor_day_of_month) {
+    var d = new Date(now.getFullYear(), now.getMonth(), rule.anchor_day_of_month);
+    if (d.getTime() < _startOfDay_(now).getTime()) {
+      d.setMonth(d.getMonth() + interval);
+    }
+    return d;
+  }
+  // 没指定具体日期（比如裸"每个月"）：从今天开始，往后数interval个月，
+  // 日期跟今天一样
+  return new Date(now.getFullYear(), now.getMonth() + interval, now.getDate());
+}
+
+function _nextYearlyOccurrence_(now, rule) {
+  var interval = rule.interval || 1;
+  if (rule.anchor_month && rule.anchor_day_of_month) {
+    var d = new Date(now.getFullYear(), rule.anchor_month - 1, rule.anchor_day_of_month);
+    if (d.getTime() < _startOfDay_(now).getTime()) {
+      d.setFullYear(d.getFullYear() + interval);
+    }
+    return d;
+  }
+  return new Date(now.getFullYear() + interval, now.getMonth(), now.getDate());
+}
+
+/**
+ * recurrence算出来的targetDate正好是"今天"，但当天指定的时间点已经过了，
+ * 按这个规则的周期往前滚一次（保留已经设置好的时分秒，不会被重置成00:00）。
+ */
+function _rollForwardOneCycle_(date, rule) {
+  var d = new Date(date);
+  switch (rule.type) {
+    case 'DAILY':
+      d.setDate(d.getDate() + 1);
+      break;
+    case 'WEEKLY':
+    case 'NW':
+      d.setDate(d.getDate() + 7 * (rule.interval || 1));
+      break;
+    case 'ND':
+      d.setDate(d.getDate() + (rule.interval || 1));
+      break;
+    case 'MONTHLY':
+      d.setMonth(d.getMonth() + (rule.interval || 1));
+      break;
+    case 'YEARLY':
+      d.setFullYear(d.getFullYear() + (rule.interval || 1));
+      break;
+  }
+  return d;
+}
+
+/**
+ * 给定"上一次"的due_date + legacy重复字符串，算出"下一次"的due_date。
+ *
+ * v3.2 新增，公开给 20_ProductivityModule.gs 的 completeTask() 用——任务
+ * 标记完成时，如果原任务本身是recurring的，用这个算出下一次的due_date，
+ * 直接走 IdempotencyManager.createTaskIfNotExists() 建下一个实例（复用
+ * 现成的幂等创建路径：同一个due_date+title+recurring算出来的identity
+ * 完全一样，就算completeTask因为webhook重试之类的原因被调用两次，
+ * DeduplicationEngine也会把第二次识别成"已存在"直接跳过，不会重复生成，
+ * 不需要给"生成下一次"这个动作单独再做一层幂等保护）。
+ *
+ * ⚠️ 范围：只支持 interval=1 的四种legacy类型（Daily/Weekly/Monthly/
+ * Yearly），跟 TASK_RECURRING 数组现在能持久化的范围完全一致——"每2周"/
+ * "每3天"这种interval>1或ND/NW类型，在06_TaskIntentParser.gs的
+ * _recurrenceRuleToLegacyString_那一步就已经被转成''了（根本没被当成
+ * recurring存下来），不是这个函数引入的新限制，是承接现有边界。
+ *
+ * @param {string} prevDueDateStr  上一次的due_date（'yyyy-MM-dd' 或
+ *                                 'yyyy-MM-ddTHH:mm:ss'）
+ * @param {string} recurringLabel  'Daily'|'Weekly'|'Monthly'|'Yearly'
+ * @returns {string}  下一次的due_date，格式跟输入一致（纯日期→纯日期，
+ *                     带时间→带时间）；recurringLabel不是这4个值之一，或
+ *                     prevDueDateStr解析不出来，返回''
+ */
+function computeNextDueDateFromLabel(prevDueDateStr, recurringLabel) {
+  if (!prevDueDateStr) return '';
+
+  var typeMap = { 'Daily': 'DAILY', 'Weekly': 'WEEKLY', 'Monthly': 'MONTHLY', 'Yearly': 'YEARLY' };
+  var ruleType = typeMap[recurringLabel];
+  if (!ruleType) return '';
+
+  var prevDate = parseDueDate_(String(prevDueDateStr).trim()); // 05_SheetUtils.gs：纯日期/日期时间都能处理
+  if (!prevDate || isNaN(prevDate.getTime())) return '';
+
+  var nextDate = _rollForwardOneCycle_(prevDate, { type: ruleType, interval: 1 });
+
+  var tz = Session.getScriptTimeZone();
+  var hasTime = /T\d{2}:\d{2}:\d{2}/.test(prevDueDateStr);
+  return hasTime
+    ? Utilities.formatDate(nextDate, tz, "yyyy-MM-dd'T'HH:mm:ss")
+    : Utilities.formatDate(nextDate, tz, 'yyyy-MM-dd');
+}
+
+// ============ 时间提取（原06逻辑，原样搬过来） ============
+
+function _extractTime_(text) {
+  var periodWords = '(早上|上午|中午|下午|晚上|凌晨)?';
+
+  var mColon = text.match(new RegExp(periodWords + '\\s*(\\d{1,2})[:：](\\d{2})'));
+  if (mColon) {
+    return _buildTimeInfo_(mColon[1], mColon[2], mColon[3], mColon[0]);
+  }
+
+  var mDian = text.match(new RegExp(periodWords + '\\s*(\\d{1,2})点(\\d{1,2})?分?'));
+  if (mDian) {
+    return _buildTimeInfo_(mDian[1], mDian[2], mDian[3] || '0', mDian[0]);
+  }
+
+  return null;
+}
+
+function _buildTimeInfo_(period, hourStr, minuteStr, matchedStr) {
+  var hour = parseInt(hourStr, 10);
+  var minute = parseInt(minuteStr, 10) || 0;
+
+  if ((period === '下午' || period === '晚上') && hour < 12) hour += 12;
+  if (period === '中午' && hour < 12) hour += 12; // "中午1点"按13:00算
+
+  return { hour: hour, minute: minute, matchedStr: matchedStr };
+}
+
+// ============ 星期计算（原06逻辑，原样搬过来） ============
+// WEEKDAY_CHAR_MAP / WEEKDAY_NUM_TO_CHAR 已移到文件头的 TemporalConfig
+// 命名空间对象里（V4.4 LOW RISK 1 修复），这里不再重复声明。
+
+function _upcomingWeekday_(now, ch) {
+  var target = TemporalConfig.WEEKDAY_CHAR_MAP[ch];
+  var cur = now.getDay();
+  var diff = (target - cur + 7) % 7; // 今天就是这一天 → diff=0，算今天
+  return _addDays_(now, diff);
+}
+
+function _nextWeekWeekday_(now, ch) {
+  var cur = now.getDay();
+  var daysUntilNextMonday = (8 - cur) % 7;
+  if (daysUntilNextMonday === 0) daysUntilNextMonday = 7;
+  var nextMonday = _addDays_(now, daysUntilNextMonday);
+
+  var target = TemporalConfig.WEEKDAY_CHAR_MAP[ch];
+  var offsetFromMonday = (target === 0) ? 6 : (target - 1); // 周一=0偏移，周日=6偏移
+  return _addDays_(nextMonday, offsetFromMonday);
+}
+
+// ============ 通用工具（原06逻辑，原样搬过来） ============
+
+function _addDays_(date, n) {
+  var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function _startOfDay_(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
