@@ -734,4 +734,11 @@
  *   通过"的状态；Sprint 2 目前不属于本项目范围（属于 Life Execution
  *   OS），所以"Sprint 1 Gate 通过后才能进 Sprint 2"这条对本项目而言
  *   实际约束的是"Sprint 1 Gate 通过后才能进 Sprint 3"。
+ *
+ * Certification Record（2026-07-27 追加）
+ *   Sprint 1 Gate 已通过：Carson 在真实生产环境执行
+ *   runSprint1AcceptanceGate()，6/6 测试全部 PASS（2026-07-27
+ *   08:43:59–08:45:04）。按本 ADR (b) 条款，Sprint 1 Foundation
+ *   （Identity/Task/Project/Workflow/Timeline/Query/Projection）
+ *   正式生效为 Reference Certified。完整记录见 00_Project_State.gs。
  */

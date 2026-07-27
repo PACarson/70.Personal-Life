@@ -1,5 +1,5 @@
-# Personal Life OS — 设计 v5.2 冻结，Sprint 1 代码已交付，Acceptance
-# Gate 待跑
+# Personal Life OS — 设计 v5.2 冻结，Sprint 1 已交付并通过 Acceptance
+# Gate（Reference Certified，2026-07-27）
 
 正式定名：**Personal Life OS**（GAS Library Identifier:
 `PersonalLifeOS`，取代 `ProductivityOS`，见 `00_ADR.js`
@@ -12,9 +12,11 @@ ADR-2026-07-24-018）。
         │
 Sprint 1 代码交付（完成，见 personal-life-os-sprint1-code/）
         │
-Sprint 1 Acceptance Gate（待跑——见下方，需要 Carson 在真实环境执行）
+Sprint 1 Acceptance Gate（✅ 已通过，2026-07-27，6/6，见
+                           00_Project_State.js）
         │
-Sprint 3（Integration：Reminder/BusinessRule/Conversion，未开始）
+Sprint 3（Integration：Reminder/BusinessRule/Conversion，待 Carson
+          确认是否/何时开始）
 ```
 
 Sprint 2（Goal/Vision/Today-Week View/Review/Waiting）不属于本项目，
@@ -61,12 +63,11 @@ Sprint 1 代码里没有这两个模块的任何实现，无法测试一个不�
 这两项验收挪到 Sprint 3 自己的 Gate（那两个模块真正落地的时候），
 不在 Sprint 1 Gate 里空跑。完整论证见 `00_ADR.js` ADR-2026-07-24-019。
 
-### 重要：Gate 是否通过需要 Carson 亲自跑
+### ✅ Gate 结果（2026-07-27）
 
-这份测试代码不能被这次交付自称"已通过"——没有直接执行 Carson 真实
-Spreadsheet 的能力。请在 Apps Script 编辑器里跑一次
-`runSprint1AcceptanceGate()`，把 Logger 输出（尤其任何 ❌）贴回来，
-再决定要不要正式进 Sprint 3。
+Carson 在真实生产 Apps Script 环境执行 `runSprint1AcceptanceGate()`，
+6/6 全部 PASS（08:43:59–08:45:04）。Sprint 1 Foundation 正式
+Reference Certified，完整记录见 `00_Project_State.js`。
 
 ## v5.2 Architecture Freeze 变更摘要（不变，见上一版）
 
@@ -75,9 +76,11 @@ ADR-018（定名）——三条均 Accepted，完整内容见 `00_ADR.js`。
 
 ## 阅读顺序
 
-设计文档：10 份 `00_*.js` + README + 两份 Mermaid 图，见
-`00_ADR.js` 完整决策清单（现有 19 条：15 条 v5.0/v5.1 + 3 条 v5.2 +
-1 条 Sprint 1 实现阶段追加的 ADR-019）。
+设计文档：10 份 `00_*.js` + README + 两份 Mermaid 图（设计阶段产物，
+不变）+ `00_Project_State.js`（Sprint 1 通过后新增，记录当前实现
+状态，不是设计文档，随实现进度更新）。决策记录见 `00_ADR.js`
+（现有 19 条：15 条 v5.0/v5.1 + 3 条 v5.2 + 1 条 Sprint 1 实现阶段
+追加的 ADR-019）。
 
 Sprint 1 代码：`personal-life-os-sprint1-code/` 目录，14 个功能文件 +
 1 个验收测试文件，部署顺序见下。
