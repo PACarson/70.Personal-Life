@@ -17,8 +17,9 @@
 // ============================================================
 
 /**
- *   设计：v5.2（Architecture Freeze，已冻结，见 00_ADR.gs 全部 19 条）
- *   实现：Sprint 1（Foundation）已交付，Acceptance Gate 已通过
+ *   设计：v5.2（Architecture Freeze，已冻结，见 00_ADR.gs 全部 20 条）
+ *   实现：Sprint 1（Foundation）Reference Certified；Sprint 3
+ *   （Integration）代码已交付，Gate 待跑
  *   最后更新：2026-07-27
  */
 
@@ -63,13 +64,48 @@
  *   Sprint 2（Execution）—— 不属于本项目，属于 Life Execution OS，见
  *   00_Domain_Boundary.gs
  *
- *   Sprint 3（Integration）—— 待 Carson 确认是否/何时开始。范围：
- *   41_BusinessRuleEngine / 42_ConversionEngine / 43_ReminderConnector，
- *   以及 v5.0 需求原文列出、但 Carson 的 Sprint 3 清单没有逐字重复的
- *   29_NoteEngine / 40_ReviewEngine（这两个模块最自然的归属仍是
- *   Sprint 3——不是 AI 特定功能（Sprint 4），也不是 Execution 范围
- *   （Sprint 2），本状态文件先记录这个归类判断，供 Sprint 3 正式开始
- *   前 Carson 确认或调整）
- *
  *   Sprint 4（AI）—— 未开始
  */
+
+// ============================================================
+// 四、七张新表去掉 LIFE_ 前缀（2026-07-27，ADR-2026-07-24-020）
+// ============================================================
+
+/**
+ *   LIFE_PROJECTS/LIFE_WORKFLOWS/LIFE_TIMELINE/LIFE_NOTES/
+ *   LIFE_REVIEWS/LIFE_BUSINESS_RULES/LIFE_WORKFLOW_TEMPLATES 改为
+ *   Projects/Workflows/Timeline/Notes/Reviews/BusinessRules/
+ *   WorkflowTemplates（PascalCase，跟既有 Tasks/ActiveTasks 一致）。
+ *   已跨约 15 个代码文件 + 10 份设计文档全局替换完成。真实环境需要
+ *   先跑 renameSheetsToPascalCase()（11_ProjectionRebuilder.gs）才能
+ *   让改名后的代码找到正确的分页。
+ */
+
+// ============================================================
+// 五、Sprint 3（Integration）—— 代码已交付，Acceptance Gate 待跑
+// ============================================================
+
+/**
+ *   状态：🟡 代码已交付（2026-07-27），Reference Certified 待
+ *   Carson 在真实环境跑 runSprint3AcceptanceGate() 后确认（同
+ *   Sprint 1 流程，见 ADR-2026-07-24-019）
+ *
+ *   交付范围：Note（新增 29_NoteEngine + 17_NoteQueryEngine）、
+ *   Review（新增 40_ReviewEngine + 18_ReviewQueryEngine）、
+ *   BusinessRule 三层模型（新增 41_BusinessRuleEngine +
+ *   19_BusinessRuleQueryEngine，覆盖 capture/deprecate/instantiate/
+ *   suggest）、Conversion 双向（新增 42_ConversionEngine，
+ *   Task↔Project 双向 + Note→Task/Project/GoalCandidate；
+ *   20_TaskEngine/27_ProjectEngine 补上 Sprint 1 时预留但未落地的
+ *   markTaskConverted_/createTaskFromConversion_/
+ *   checkEligibleForTaskDemotion_/markProjectConvertedToTask_）、
+ *   ReminderConnector（新增 43_ReminderConnector）、
+ *   10_ProjectionEngine 扩展全部对应投影、验收测试（新增
+ *   36_Tests_Sprint3Acceptance，补上 Sprint 1 Gate 明确挪出去的
+ *   Business Rule/Workflow Template 场景 + Task⇄Project Test，见
+ *   ADR-2026-07-24-019 (c)）。
+ *
+ *   Note/Review 归属判断（见「三」原有讨论）：Carson 未明确反对，
+ *   按已记录的判断纳入 Sprint 3 交付。
+ */
+

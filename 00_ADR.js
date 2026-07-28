@@ -62,7 +62,10 @@
  * ADR Number      : ADR-2026-07-24-003
  * Status          : Accepted（v5.1 不变）
  * Decision Date   : 2026-07-24
- * Related ADR      : ADR-2026-07-24-001
+ * Related ADR      : ADR-2026-07-24-001, ADR-2026-07-24-020（2026-07-27
+ *                   追加——新表本身"要不要带 LIFE_ 前缀"这件事后来改了，
+ *                   见该 ADR；本 ADR"不碰 Tasks/ActiveTasks/
+ *                   ArchiveTasks"这个核心决定不受影响）
  *
  * Context/Decision/Consequences：内容不变，见 v5.0。
  */
@@ -309,9 +312,9 @@
  *   实例"又是另外一回事。
  *
  * Decision
- *   BusinessRule（LIFE_BUSINESS_RULES，最顶层，只是具名类别+标签，
- *   如"验屋"）→ WorkflowTemplate（LIFE_WORKFLOW_TEMPLATES，具体版本，
- *   如"验屋 v1.0"）→ Workflow Instance（即既有 LIFE_WORKFLOWS 表，
+ *   BusinessRule（BusinessRules，最顶层，只是具名类别+标签，
+ *   如"验屋"）→ WorkflowTemplate（WorkflowTemplates，具体版本，
+ *   如"验屋 v1.0"）→ Workflow Instance（即既有 Workflows 表，
  *   如"Property Est8 用的这次验屋"）。一个 BusinessRule 下可以有多个
  *   版本的 WorkflowTemplate；一个 WorkflowTemplate 可以被实例化出
  *   多个互不干扰的 Workflow Instance。完整实体关系见
@@ -418,8 +421,8 @@
  *   正面：把"AI Suggests, Human Confirms"这条既有 Architecture
  *   Principle 从"行为准则"变成"数据结构里可查询、可审计的字段"，
  *   不再只依赖行为上的约定。
- *   需要接受的代价：既有四张表（Tasks/LIFE_PROJECTS/LIFE_WORKFLOWS/
- *   LIFE_NOTES）各新增两列，历史存量数据需要一次性回填默认值
+ *   需要接受的代价：既有四张表（Tasks/Projects/Workflows/
+ *   Notes）各新增两列，历史存量数据需要一次性回填默认值
  *   （approval_status 统一置为 'APPROVED'，见
  *   00_Sheets_Structure.gs「十」迁移说明）。
  */
@@ -590,7 +593,7 @@
  *
  * Decision
  *   两层处理：
- *     (a) LIFE_PROJECTS.status / LIFE_WORKFLOWS.status（v5.2 之前
+ *     (a) Projects.status / Workflows.status（v5.2 之前
  *         这两张表都还没有写过任何生产数据，改动零成本）直接原生
  *         采用规范词汇，取代 v5.0/v5.1 临时选用的 PENDING/ACTIVE/
  *         ON_HOLD/FINISHED 等值：
@@ -742,3 +745,71 @@
  *   （Identity/Task/Project/Workflow/Timeline/Query/Projection）
  *   正式生效为 Reference Certified。完整记录见 00_Project_State.gs。
  */
+
+// ============================================================
+// ADR-2026-07-24-020：新表去掉 LIFE_ 前缀，改用跟既有 Tasks/
+//                      ActiveTasks 一致的 PascalCase（Sprint 3
+//                      开始前追加）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-020
+ * Status          : Accepted
+ * Decision Date   : 2026-07-27
+ * Supersedes      : ADR-2026-07-24-003 的"新表用 LIFE_ 前缀"这一部分
+ *                   （该 ADR"既有 Tasks/ActiveTasks/ArchiveTasks 不
+ *                   改名"的决定本身不受影响，继续有效——见 Notes）
+ * Superseded By   : (none)
+ * Affected Modules: 全部涉及 Projects/Workflows/Timeline/Notes/
+ *                   Reviews/BusinessRules/WorkflowTemplates 七张表的
+ *                   模块（14/16/44_XxxQueryEngine、27_ProjectEngine、
+ *                   28_WorkflowEngine、08_DeduplicationEngine、
+ *                   09_IdempotencyManager、10_ProjectionEngine、
+ *                   15_Setup、11_ProjectionRebuilder、
+ *                   35_Tests_Sprint1Acceptance）
+ * Related ADR      : ADR-2026-07-24-003
+ *
+ * Context
+ *   v5.0 设计阶段给新增的七张表统一加了 LIFE_ 前缀（LIFE_PROJECTS 等），
+ *   跟既有 Tasks/ActiveTasks/ArchiveTasks/TaskStatistics/TaskFilters/
+ *   Events 六张表的命名风格（PascalCase，无前缀、无下划线）不一致。
+ *   Carson 在 Sprint 1 通过验收后要求统一：去掉 LIFE_ 前缀，改成跟
+ *   既有表一样的 PascalCase 风格。
+ *
+ * Decision
+ *   七张表改名：
+ *     LIFE_PROJECTS            → Projects
+ *     LIFE_WORKFLOWS            → Workflows
+ *     LIFE_TIMELINE               → Timeline
+ *     LIFE_NOTES                    → Notes
+ *     LIFE_REVIEWS                     → Reviews
+ *     LIFE_BUSINESS_RULES                 → BusinessRules
+ *     LIFE_WORKFLOW_TEMPLATES                → WorkflowTemplates
+ *   列名（column headers）不受影响——本项目全部表格的列名沿用既有
+ *   snake_case 风格（project_id/due_date 这类），这条本来就跟表名
+ *   风格是两套独立的既有惯例，不在本次改动范围内。
+ *   已在真实环境创建过这七张表的（Carson 已经跑过 Sprint 1
+ *   Acceptance Gate），需要执行新增的 renameSheetsToPascalCase()
+ *   （11_ProjectionRebuilder.gs 新函数，见下）把已存在的 Sheet 分页
+ *   改名——Google Sheets 改分页名不影响其中的数据，纯粹是标签文字
+ *   变化。
+ *
+ * Consequences
+ *   正面：七张新表跟原有六张表风格统一，以后新读者不需要记两套
+ *   命名规则；Sprint 3 新增的 Note/Review/BusinessRule/Conversion/
+ *   ReminderConnector 涉及的表从一开始就用统一风格，不会又制造一次
+ *   需要事后清理的不一致。
+ *   需要接受的代价：Sprint 1 代码交付时已经内嵌了 LIFE_ 前缀的字符串
+ *   常量，本次要跨约 15 个代码文件 + 10 份设计文档做一次全局替换——
+ *   全部已完成核对（不影响任何已写入的实际数据，只改 Sheet 分页标签
+ *   和代码里引用这些标签的字符串常量）。
+ *
+ * Notes
+ *   ADR-2026-07-24-003 的核心决定（"不给 Tasks/ActiveTasks/
+ *   ArchiveTasks 这三张已有生产数据的表改名"）完全不受本 ADR 影响、
+ *   继续有效——本 ADR 只处理"新表要不要带 LIFE_ 前缀"这一件事，跟
+ *   "要不要碰旧表"是两个独立问题，答案也不同（旧表：不碰；新表命名
+ *   风格：统一成跟旧表一致，但这不等于把新表也叫"Tasks"之类，只是
+ *   风格对齐，各表名字本身仍然各自独立）。
+ */
+

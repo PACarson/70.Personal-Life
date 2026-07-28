@@ -1,5 +1,5 @@
-# Personal Life OS — 设计 v5.2 冻结，Sprint 1 已交付并通过 Acceptance
-# Gate（Reference Certified，2026-07-27）
+# Personal Life OS — 设计 v5.2 冻结，Sprint 1 已 Certified，Sprint 3
+# 代码已交付（Gate 待跑）
 
 正式定名：**Personal Life OS**（GAS Library Identifier:
 `PersonalLifeOS`，取代 `ProductivityOS`，见 `00_ADR.js`
@@ -10,13 +10,16 @@ ADR-2026-07-24-018）。
 ```
 设计阶段 v5.0→v5.1→v5.2（完成）
         │
-Sprint 1 代码交付（完成，见 personal-life-os-sprint1-code/）
+Sprint 1 代码交付 → Acceptance Gate ✅ 已通过（2026-07-27，6/6）
         │
-Sprint 1 Acceptance Gate（✅ 已通过，2026-07-27，6/6，见
-                           00_Project_State.js）
+七张新表去掉 LIFE_ 前缀，统一为 PascalCase（ADR-2026-07-24-020，
+真实环境需先跑 renameSheetsToPascalCase()）
         │
-Sprint 3（Integration：Reminder/BusinessRule/Conversion，待 Carson
-          确认是否/何时开始）
+Sprint 3 代码交付（完成：Note/Review/BusinessRule/Conversion/Reminder
+Connector，见 personal-life-os-sprint1-code/ 目录——沿用同一个代码
+交付目录，未另开新目录）
+        │
+Sprint 3 Acceptance Gate（待跑——见下方）
 ```
 
 Sprint 2（Goal/Vision/Today-Week View/Review/Waiting）不属于本项目，
@@ -63,11 +66,20 @@ Sprint 1 代码里没有这两个模块的任何实现，无法测试一个不�
 这两项验收挪到 Sprint 3 自己的 Gate（那两个模块真正落地的时候），
 不在 Sprint 1 Gate 里空跑。完整论证见 `00_ADR.js` ADR-2026-07-24-019。
 
-### ✅ Gate 结果（2026-07-27）
+### ✅ Sprint 1 Gate 结果（2026-07-27）
 
 Carson 在真实生产 Apps Script 环境执行 `runSprint1AcceptanceGate()`，
 6/6 全部 PASS（08:43:59–08:45:04）。Sprint 1 Foundation 正式
 Reference Certified，完整记录见 `00_Project_State.js`。
+
+### Sprint 3 Gate（待跑）
+
+`runSprint3AcceptanceGate()`（36_Tests_Sprint3Acceptance.js）补上
+Sprint 1 Gate 明确挪出去的两项：Business Rule Full Cycle Test
+（验屋流程：capture v1 → instantiate → capture v2 自动 FROZEN
+旧版本 → 已实例化的 Workflow 不受影响）、Bidirectional Conversion
+Test（Task→Project、Project→Task 双向 + 幂等 + 前置条件拒绝案例）；
+另加 Note Lifecycle Test、Reminder Connector Smoke Test。
 
 ## v5.2 Architecture Freeze 变更摘要（不变，见上一版）
 
@@ -77,26 +89,30 @@ ADR-018（定名）——三条均 Accepted，完整内容见 `00_ADR.js`。
 ## 阅读顺序
 
 设计文档：10 份 `00_*.js` + README + 两份 Mermaid 图（设计阶段产物，
-不变）+ `00_Project_State.js`（Sprint 1 通过后新增，记录当前实现
-状态，不是设计文档，随实现进度更新）。决策记录见 `00_ADR.js`
-（现有 19 条：15 条 v5.0/v5.1 + 3 条 v5.2 + 1 条 Sprint 1 实现阶段
-追加的 ADR-019）。
+不变）+ `00_Project_State.js`（记录当前实现状态，不是设计文档，随
+实现进度更新）。决策记录见 `00_ADR.js`（现有 20 条：15 条
+v5.0/v5.1 + 3 条 v5.2 + 2 条实现阶段追加的 ADR-019/ADR-020）。
 
-Sprint 1 代码：`personal-life-os-sprint1-code/` 目录，14 个功能文件 +
-1 个验收测试文件，部署顺序见下。
+代码：`personal-life-os-sprint1-code/` 目录（Sprint 1 + Sprint 3
+都在这一个目录里，未另开新目录）——共 24 个文件：Sprint 1 的 14 个
+（Foundation）+ Sprint 3 新增/扩展的 10 个（Note/Review/BusinessRule/
+Conversion/ReminderConnector + 两个验收测试文件）。
 
 ## 部署顺序
 
-1. `setupSheets()`（15_Setup.js）
-2. `migrateSchemaPersonalLifeOS()`（11_ProjectionRebuilder 新函数，
-   **已有生产数据必须跑这一步**，见 15_Setup.js 文件头说明）
-3. Core 项目 Library 引用改指向 `PersonalLifeOS`，`04_Main.gs` 调用点
-   同步改名
-4. `createTriggers()`
-5. `runDiagnostics()`（15_Setup.js，基础冒烟测试）
-6. `runSprint1AcceptanceGate()`（35_Tests_Sprint1Acceptance.js，
-   **正式验收，见上）
-7. 全部通过 → 回报结果 → 讨论是否正式进 Sprint 3
+1. `renameSheetsToPascalCase()`（11_ProjectionRebuilder 新函数，
+   已跑过 Sprint 1 Gate 的环境必须先跑这一步，ADR-2026-07-24-020）
+2. `setupSheets()`（15_Setup.js）
+3. `migrateSchemaPersonalLifeOS()`（**已有生产数据必须跑这一步**，
+   见 15_Setup.js 文件头说明）
+4. Core 项目 Library 引用改指向 `PersonalLifeOS`，`04_Main.gs`
+   调用点同步改名
+5. `createTriggers()`
+6. `runDiagnostics()`（15_Setup.js，基础冒烟测试）
+7. `runSprint1AcceptanceGate()`（已过，如需重新确认可再跑一次）
+8. `runSprint3AcceptanceGate()`（36_Tests_Sprint3Acceptance.js，
+   **本轮正式验收**）
+9. 全部通过 → 回报结果 → 讨论是否正式进 Sprint 4（AI）
 
 ## 本包的生命周期
 

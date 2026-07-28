@@ -2,13 +2,18 @@
  * 11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs
  *
  * ⚠️ 这不是一个完整文件——这是要插入到你现有 11_ProjectionRebuilder.gs
- * 里的三个新函数。我没有你这个文件的完整内容（既有的
+ * 里的四个新函数（Sprint 1 时三个 + ADR-2026-07-24-020 追加的
+ * renameSheetsToPascalCase 一个）。我没有你这个文件的完整内容（既有的
  * migrateSchemaV4/migrateSchemaDueTime/migrateSchemaReminderPolicy/
  * rebuildAllProjections/recomputeStatisticsFromTasks_ 等），所以不重新
  * 生成整个文件（那样风险是我凭印象编出根本不存在、或跟你实际实现不一致
- * 的内容）。请把下面三个函数原样粘贴进你现有文件（放在其它 migrateSchemaXxx
+ * 的内容）。请把下面四个函数原样粘贴进你现有文件（放在其它 migrateSchemaXxx
  * 函数附近即可，任意位置都行，函数之间没有顺序依赖），并把
  * rebuildAllProjections() 里追加两行调用（见文件底部说明）。
+ *
+ * 【运行顺序，Sprint 3 开始前】renameSheetsToPascalCase() 要最先跑
+ * （处理已经用旧 LIFE_ 名字建好的分页），再跑 migrateSchemaPersonalLifeOS()
+ * /其它——顺序颠倒会导致后者按新名字找 Sheet 找不到。
  *
  * ============================================================
  * migrateSchemaPersonalLifeOS()
@@ -28,10 +33,10 @@ function migrateSchemaPersonalLifeOS() {
   Logger.log('=== migrateSchemaPersonalLifeOS 开始 ===');
 
   ['Tasks', 'ActiveTasks', 'ArchiveTasks'].forEach(function (sheetName) {
-    _appendMissingColumns_(sheetName, LIFE_TASK_NEW_COLUMNS);
+    _appendMissingColumns_(sheetName, NEW_TASK_COLUMNS);
   });
 
-  // LIFE_ 开头的七张新表全部是全新表（不存在旧数据问题），直接调用既有
+  // 七张新表全部是全新表（不存在旧数据问题），直接调用既有
   // setupSheets() 里的建表逻辑就够了——这里额外调用一次 setupSheets()
   // 本身是幂等的（_ensureSheet_ 对已存在的表不会重复处理），不会有副作用。
   setupSheets();
@@ -77,7 +82,7 @@ function _appendMissingColumns_(sheetName, newColumns) {
  *
  * 【Everything Rebuildable，见既有 Architecture Principle】跟既有
  * rebuildTasksSheet_ 同一个模式——从 Events 表全量重放，重建
- * LIFE_PROJECTS / LIFE_WORKFLOWS。用于灾难恢复或怀疑 Read Model 跟
+ * Projects / Workflows。用于灾难恢复或怀疑 Read Model 跟
  * Events 不一致时手动执行。
  *
  * 请在你既有的 rebuildAllProjections() 函数体里追加这两行调用（放在
@@ -111,4 +116,68 @@ function rebuildWorkflowsProjection() {
   });
 
   Logger.log('✅ rebuildWorkflowsProjection 完成，共重建 ' + Object.keys(state).length + ' 个 Workflow');
+}
+
+/**
+ * ============================================================
+ * renameSheetsToPascalCase()
+ * ============================================================
+ *
+ * 【ADR-2026-07-24-020，Sprint 3 开始前必须先跑一次】你已经跑过
+ * Sprint 1 Acceptance Gate，真实 Spreadsheet 里已经有
+ * LIFE_PROJECTS/LIFE_WORKFLOWS/LIFE_TIMELINE/LIFE_NOTES/LIFE_REVIEWS/
+ * LIFE_BUSINESS_RULES/LIFE_WORKFLOW_TEMPLATES 这七个分页（含验收测试
+ * 留下的数据）。本函数把这七个分页改名成 Projects/Workflows/Timeline/
+ * Notes/Reviews/BusinessRules/WorkflowTemplates——纯改分页标签，不
+ * 改、不删任何一行数据。
+ *
+ * 幂等：可以放心重复运行。如果旧名字（LIFE_XXX）已经不存在（比如已经
+ * 手动改过、或者已经跑过一次本函数），对应那一项会跳过并打印说明，
+ * 不会报错。
+ *
+ * ⚠️ 运行这个之后，再运行一次代码里已经不带 LIFE_ 前缀的
+ * migrateSchemaPersonalLifeOS()/setupSheets() 之类函数才会找到正确的
+ * 分页——顺序：先跑 renameSheetsToPascalCase()，再跑其它。
+ */
+function renameSheetsToPascalCase() {
+  Logger.log('=== renameSheetsToPascalCase 开始 ===');
+
+  var id = SecureConfig.getKey('SPREADSHEET_ID');
+  var ss = SpreadsheetApp.openById(id);
+
+  var renameMap = {
+    'LIFE_PROJECTS':           'Projects',
+    'LIFE_WORKFLOWS':          'Workflows',
+    'LIFE_TIMELINE':           'Timeline',
+    'LIFE_NOTES':              'Notes',
+    'LIFE_REVIEWS':            'Reviews',
+    'LIFE_BUSINESS_RULES':     'BusinessRules',
+    'LIFE_WORKFLOW_TEMPLATES': 'WorkflowTemplates'
+  };
+
+  Object.keys(renameMap).forEach(function (oldName) {
+    var newName = renameMap[oldName];
+    var oldSheet = ss.getSheetByName(oldName);
+    var newSheetAlreadyExists = !!ss.getSheetByName(newName);
+
+    if (!oldSheet) {
+      if (newSheetAlreadyExists) {
+        Logger.log('✅ ' + oldName + ' 不存在，' + newName + ' 已经存在——看起来已经改过名了，跳过');
+      } else {
+        Logger.log('⚠️ ' + oldName + ' 和 ' + newName + ' 都不存在，跳过（可能还没跑过 setupSheets()）');
+      }
+      return;
+    }
+
+    if (newSheetAlreadyExists) {
+      Logger.log('❌ ' + oldName + ' 和 ' + newName + ' 同时存在，无法自动改名（会产生同名冲突）——' +
+        '请手动检查这两个分页，确认哪个是你要保留的数据，再手动处理');
+      return;
+    }
+
+    oldSheet.setName(newName);
+    Logger.log('✅ ' + oldName + ' → ' + newName + '（数据行数不变: ' + oldSheet.getLastRow() + '）');
+  });
+
+  Logger.log('=== renameSheetsToPascalCase 完成 ===');
 }
