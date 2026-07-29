@@ -7,8 +7,8 @@
  * 只是终态集合从 Task 的 DONE/CANCELLED 换成各自实体的终态集合（见
  * 各函数注释）。
  *
- * 职责：检查某个业务对象是否已存在于 Read Model（Tasks / LIFE_PROJECTS /
- * LIFE_WORKFLOWS）。只读 Sheet，不读 Events，不写任何东西。
+ * 职责：检查某个业务对象是否已存在于 Read Model（Tasks / Projects /
+ * Workflows）。只读 Sheet，不读 Events，不写任何东西。
  *
  * 依赖：07_IdentityEngine（外部调用方生成 identity），05_SheetUtils（Sheet 工具）
  */
@@ -18,7 +18,7 @@
  *   Responsibilities      : 判断某个 identity 对应的业务对象是否已存在于
  *                           Read Model
  *   Owns                  : "已存在"的判定规则（只有非终态状态算重复）
- *   Reads                 : Tasks / LIFE_PROJECTS / LIFE_WORKFLOWS Sheet
+ *   Reads                 : Tasks / Projects / Workflows Sheet
  *   Writes                : none
  *   Public API            : findExistingTask, findExistingProject
  *                           （Sprint 1 新增）, findExistingWorkflow
@@ -33,8 +33,10 @@
 var DeduplicationEngine = (function () {
 
   var TASKS_SHEET         = 'Tasks';
-  var PROJECTS_SHEET      = 'LIFE_PROJECTS';
-  var WORKFLOWS_SHEET     = 'LIFE_WORKFLOWS';
+  var PROJECTS_SHEET      = 'Projects';
+  var WORKFLOWS_SHEET     = 'Workflows';
+  var NOTES_SHEET         = 'Notes';
+  var BUSINESS_RULES_SHEET = 'BusinessRules';
 
   // Task 的非终态集合（沿用既有定义：只有 PENDING 算"已存在"，跟
   // Sprint 1 新增的 WAITING/BLOCKED 状态一样，本来就不是 CREATE 路径
@@ -160,7 +162,34 @@ var DeduplicationEngine = (function () {
     if (sheetName === TASKS_SHEET) return findExistingTask(identity) !== null;
     if (sheetName === PROJECTS_SHEET) return findExistingProject(identity) !== null;
     if (sheetName === WORKFLOWS_SHEET) return findExistingWorkflow(identity) !== null;
+    if (sheetName === NOTES_SHEET) return findExistingNote(identity) !== null;
+    if (sheetName === BUSINESS_RULES_SHEET) return findExistingBusinessRule(identity) !== null;
     return _findRowByIdentity_(sheetName, identity) !== null;
+  }
+
+  /**
+   * 【Sprint 3 新增】查找匹配 identity 且处于 OPEN 状态的 Note。已
+   * CONVERTED/ARCHIVED 的 Note 不会拦截新建同样内容的 Note——一条
+   * Note 转化过之后，再记一条完全一样的内容不算重复，是用户又想起
+   * 同一件事、值得再记一次。
+   */
+  function findExistingNote(identity) {
+    var row = _findRowByIdentity_(NOTES_SHEET, identity);
+    if (!row) return null;
+    if (String(row.status || '').toUpperCase() !== 'OPEN') return null;
+    return row;
+  }
+
+  /**
+   * 【Sprint 3 新增】查找匹配 identity 且状态为 ACTIVE 的 BusinessRule
+   * （顶层分类）。已 DEPRECATED 的分类不拦截重建同名分类——理由同
+   * Project/Workflow 的非终态判断。
+   */
+  function findExistingBusinessRule(identity) {
+    var row = _findRowByIdentity_(BUSINESS_RULES_SHEET, identity);
+    if (!row) return null;
+    if (String(row.status || '').toUpperCase() !== 'ACTIVE') return null;
+    return row;
   }
 
   // ============ 开发者测试 ============
@@ -186,6 +215,8 @@ var DeduplicationEngine = (function () {
     findPendingTask:       findPendingTask,
     findExistingProject:   findExistingProject,
     findExistingWorkflow:  findExistingWorkflow,
+    findExistingNote:      findExistingNote,
+    findExistingBusinessRule: findExistingBusinessRule,
     findExistingInventory: findExistingInventory,
     exists:                exists,
     testDuplicateTask:     testDuplicateTask,

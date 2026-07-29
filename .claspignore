@@ -4,15 +4,20 @@
 
 # Governance Files
 00_Architecture.js
+00_Architecture_Review.js
 00_Business_Rules.js
+00_Command_Reference.js
 00_Data_Ownership.js
 00_Domain_Boundary.js
 00_Entity_Relationship.js
 00_Event_Flow.js
 00_File_Map.js
+00_Known_Limitations.js
 00_Module_Responsibility.js
+00_Project_Constitution.js
+00_Project_State.js
+00_Roadmap.js
 00_Sheets_Structure.js
-
 
 
 #Readme

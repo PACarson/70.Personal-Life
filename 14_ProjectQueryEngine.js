@@ -2,7 +2,7 @@
  * 14_ProjectQueryEngine.gs
  * Personal Life OS v5.2 — Project Query Engine
  *
- * 本模块是本 OS 里 LIFE_PROJECTS 表唯一允许直接读取的模块（跟
+ * 本模块是本 OS 里 Projects 表唯一允许直接读取的模块（跟
  * 12_TaskQueryEngine.gs 之于 Tasks 表是同一条铁律，只是按实体分别
  * 唯一，见设计包 00_Domain_Boundary.gs「二」对这条延伸的论证）。
  *
@@ -16,7 +16,7 @@
  * ── Engine Contract ──────────────────────────────────────────────────
  *   Responsibilities      : Project 的唯一对外查询入口
  *   Owns                  : Project 的查询过滤/排序逻辑
- *   Reads                 : LIFE_PROJECTS Sheet
+ *   Reads                 : Projects Sheet
  *   Writes                : none
  *   Public API            : getProject, getProjects, getActiveProjects,
  *                           getProjectsByParent
@@ -27,7 +27,7 @@
 
 var ProjectQueryEngine = (function () {
 
-  var PROJECTS_SHEET = 'LIFE_PROJECTS';
+  var PROJECTS_SHEET = 'Projects';
   var NON_TERMINAL = ['DRAFT', 'READY', 'IN_PROGRESS', 'WAITING', 'BLOCKED'];
 
   function _readAllRows_(sheetName) {

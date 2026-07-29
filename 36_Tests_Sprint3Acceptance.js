@@ -78,9 +78,11 @@ function testBusinessRuleFullCycle_() {
 
     // 2. Capture 成 WorkflowTemplate（v1）
     var template1 = BusinessRuleEngine.captureAsWorkflowTemplate(sourceProject.project_id, '验收测试-验屋流程', ['property', 'inspection']);
-    if (!template1 || template1.version !== 1 || template1.status !== 'ACTIVE') {
-      Logger.log('❌ 第一次 capture 结果不对: ' + JSON.stringify(template1));
-      pass = false;
+    if (!template1 || template1.not_found || template1.version !== 1 || template1.status !== 'ACTIVE') {
+      Logger.log('❌ 第一次 capture 结果不对（可能是 Projects/Tasks 相关文件不是最新版本，' +
+        '建议先跑 runPreflightCheck()）: ' + JSON.stringify(template1));
+      Logger.log('❌ testBusinessRuleFullCycle_ FAIL（提前终止，避免后续步骤基于无效数据继续崩溃）');
+      return false;
     }
 
     var shape1 = JSON.parse(template1.workflow_shape);
@@ -92,14 +94,14 @@ function testBusinessRuleFullCycle_() {
     // 3. 从这个模板实例化出一个全新 Project（不影响源 Project）
     var instantiated = BusinessRuleEngine.instantiateFromTemplate(template1.template_id,
       { title: '验收测试-验屋-Est99' }, testChatId);
-    if (!instantiated.project || !instantiated.workflow || instantiated.tasks.length !== 2) {
+    if (!instantiated || !instantiated.project || !instantiated.workflow || !instantiated.tasks || instantiated.tasks.length !== 2) {
       Logger.log('❌ instantiateFromTemplate 结果不对: ' + JSON.stringify(instantiated));
+      Logger.log('❌ testBusinessRuleFullCycle_ FAIL（提前终止）');
+      return false;
+    }
+    if (instantiated.workflow.instantiated_from_template_id !== template1.template_id) {
+      Logger.log('❌ 新 Workflow 没有正确绑定 instantiated_from_template_id');
       pass = false;
-    } else {
-      if (instantiated.workflow.instantiated_from_template_id !== template1.template_id) {
-        Logger.log('❌ 新 Workflow 没有正确绑定 instantiated_from_template_id');
-        pass = false;
-      }
     }
 
     var templateAfterUse = BusinessRuleQueryEngine.getWorkflowTemplate(template1.template_id);
@@ -250,6 +252,18 @@ function testReminderConnectorSmoke_() {
 
   try {
     var project = ProjectEngine.createProject('验收测试-Reminder项目', {}, testChatId);
+
+    // 【2026-07-29 加固】只检查 createProject 没抛异常是不够的——
+    // EventBus.publish 内部会吞掉 Projection 失败（不重新抛出，见
+    // 02_EventBus.gs 设计），所以哪怕 Sheet 实际没写成功，
+    // project 这个内存对象看起来仍然完全正常。这里额外查询回
+    // ProjectQueryEngine 确认真的落盘了，不能只信"没报错"。
+    var persistedProject = ProjectQueryEngine.getProject(project.project_id, testChatId);
+    if (!persistedProject) {
+      Logger.log('❌ Project 创建后查询不到——很可能是 Projects 表不存在或相关文件不是最新版本，' +
+        '建议先跑 runPreflightCheck() 和 renameSheetsToPascalCase()');
+      pass = false;
+    }
 
     // 不抛错就算基本通过——ReminderConnector 只是格式转换 + 发布事件，
     // 本项目这一侧无法验证 Reminder OS 是否真的收到并处理（那是

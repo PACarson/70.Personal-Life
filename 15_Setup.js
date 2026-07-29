@@ -2,12 +2,19 @@
  * 15_Setup.gs
  * Personal Life OS v5.2 — 一键初始化
  *
+ * 【新增 runPreflightCheck()，2026-07-29】起因：真实环境报过
+ * "NEW_TASK_COLUMNS is not defined"/"markTaskConverted_ is not a
+ * function" 这类"部分文件没同步到最新版本"的错误，报错信息本身很
+ * 难一眼看出是哪个文件没更新。runPreflightCheck() 一次性检查全部
+ * 24 个文件各自应该存在的关键函数/变量，在跑任何迁移/测试之前先跑
+ * 这个，全部 ✅ 才继续。
+ *
  * 【Sprint 1 新增】
  *  - setupSheets()：Tasks/ActiveTasks/ArchiveTasks 表头追加 21 个 v5.1/
  *    v5.2 新列（project_id 起，见下方数组，完整定义见设计包
- *    00_Sheets_Structure.gs「一」）；新增 LIFE_PROJECTS/LIFE_WORKFLOWS/
- *    LIFE_TIMELINE 三张表（Sprint 1 实际使用）+ LIFE_NOTES/LIFE_REVIEWS/
- *    LIFE_BUSINESS_RULES/LIFE_WORKFLOW_TEMPLATES 四张表（Sprint 3 才会
+ *    00_Sheets_Structure.gs「一」）；新增 Projects/Workflows/
+ *    Timeline 三张表（Sprint 1 实际使用）+ Notes/Reviews/
+ *    BusinessRules/WorkflowTemplates 四张表（Sprint 3 才会
  *    有 Engine 写入，这里提前建表——Schema 先行于代码，零风险，见设计包
  *    00_Sheets_Structure.gs「十」迁移说明）
  *  - repairSheetHeaders()：同步新增 7 张新表 + Tasks 系三表新列的检查
@@ -31,7 +38,7 @@
 // 追加在各自既有表头最后。三张表结构本来就高度一致（ActiveTasks 没有
 // 'archived'，ArchiveTasks 用 'archived_at' 取代 'archived'），新列
 // 三张表保持完全一致，方便以后维护。
-var LIFE_TASK_NEW_COLUMNS = [
+var NEW_TASK_COLUMNS = [
   'project_id', 'workflow_id', 'sequence_index', 'parent_task_id',
   'depends_on_task_ids', 'branch_group', 'branch_resolution_policy',
   'converted_to_project_id', 'source_project_id', 'priority_ai_recommended',
@@ -59,21 +66,21 @@ function setupSheets() {
     'due_time', 'due_datetime', 'recurring', 'reminder_policy', 'priority',
     'context', 'budget', 'notes', 'description', 'tags', 'chat_id',
     'completed_at', 'reminder_count', 'identity', 'archived'
-  ].concat(LIFE_TASK_NEW_COLUMNS));
+  ].concat(NEW_TASK_COLUMNS));
 
   _ensureSheet_(ss, 'ActiveTasks', [
     'task_id', 'timestamp', 'title', 'category', 'status', 'due_date',
     'due_time', 'due_datetime', 'recurring', 'reminder_policy', 'priority',
     'context', 'budget', 'notes', 'description', 'tags', 'chat_id',
     'completed_at', 'reminder_count', 'identity'
-  ].concat(LIFE_TASK_NEW_COLUMNS));
+  ].concat(NEW_TASK_COLUMNS));
 
   _ensureSheet_(ss, 'ArchiveTasks', [
     'task_id', 'timestamp', 'title', 'category', 'status', 'due_date',
     'due_time', 'due_datetime', 'recurring', 'reminder_policy', 'priority',
     'context', 'budget', 'notes', 'description', 'tags', 'chat_id',
     'completed_at', 'reminder_count', 'identity', 'archived_at'
-  ].concat(LIFE_TASK_NEW_COLUMNS));
+  ].concat(NEW_TASK_COLUMNS));
 
   _ensureSheet_(ss, 'TaskStatistics', [
     'chat_id', 'total_count', 'pending_count', 'done_count', 'cancelled_count',
@@ -86,7 +93,7 @@ function setupSheets() {
 
   // ============ 【Sprint 1 新增】Personal Life OS 新表 ============
 
-  _ensureSheet_(ss, 'LIFE_PROJECTS', [
+  _ensureSheet_(ss, 'Projects', [
     'project_id', 'identity', 'title', 'description', 'status',
     'execution_mode', 'parent_project_id', 'depends_on_project_ids',
     'source_task_id', 'converted_to_task_id', 'instantiated_from_template_id',
@@ -96,7 +103,7 @@ function setupSheets() {
     'decision_owner', 'approval_status'
   ]);
 
-  _ensureSheet_(ss, 'LIFE_WORKFLOWS', [
+  _ensureSheet_(ss, 'Workflows', [
     'workflow_id', 'identity', 'project_id', 'title', 'workflow_type',
     'status', 'recurrence_rule', 'loop_max_iterations', 'chat_id',
     'instantiated_from_template_id', 'template_version_at_instantiation',
@@ -105,14 +112,14 @@ function setupSheets() {
     'decision_owner', 'approval_status'
   ]);
 
-  _ensureSheet_(ss, 'LIFE_TIMELINE', [
+  _ensureSheet_(ss, 'Timeline', [
     'timeline_id', 'entity_type', 'entity_id', 'event_type', 'timestamp',
     'actor', 'detail', 'source_event_id'
   ]);
 
   // 以下三张表 Sprint 1 只建表（Schema 先行），实际写入要等 Sprint 3 的
   // 29_NoteEngine.gs / 40_ReviewEngine.gs / 41_BusinessRuleEngine.gs 落地。
-  _ensureSheet_(ss, 'LIFE_NOTES', [
+  _ensureSheet_(ss, 'Notes', [
     'note_id', 'identity', 'content', 'category', 'status',
     'converted_to_type', 'converted_to_id', 'chat_id',
     'creator', 'suggested_by', 'source_domain', 'source_module',
@@ -120,19 +127,19 @@ function setupSheets() {
     'updated_time', 'decision_owner', 'approval_status'
   ]);
 
-  _ensureSheet_(ss, 'LIFE_REVIEWS', [
+  _ensureSheet_(ss, 'Reviews', [
     'review_id', 'review_type', 'period_start', 'period_end',
     'summary_stats', 'ai_review_notes', 'created_time'
   ]);
 
-  _ensureSheet_(ss, 'LIFE_BUSINESS_RULES', [
+  _ensureSheet_(ss, 'BusinessRules', [
     'rule_id', 'name', 'tags', 'status',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
     'updated_time', 'decision_owner', 'approval_status'
   ]);
 
-  _ensureSheet_(ss, 'LIFE_WORKFLOW_TEMPLATES', [
+  _ensureSheet_(ss, 'WorkflowTemplates', [
     'template_id', 'business_rule_id', 'version', 'status', 'workflow_shape',
     'captured_from_project_id', 'usage_count', 'last_used_at',
     'creator', 'suggested_by', 'source_domain', 'source_module',
@@ -141,8 +148,8 @@ function setupSheets() {
   ]);
 
   Logger.log('✅ Sheets 就位: Events, Tasks, ActiveTasks, ArchiveTasks, TaskStatistics, TaskFilters,');
-  Logger.log('   LIFE_PROJECTS, LIFE_WORKFLOWS, LIFE_TIMELINE, LIFE_NOTES, LIFE_REVIEWS,');
-  Logger.log('   LIFE_BUSINESS_RULES, LIFE_WORKFLOW_TEMPLATES');
+  Logger.log('   Projects, Workflows, Timeline, Notes, Reviews,');
+  Logger.log('   BusinessRules, WorkflowTemplates');
   Logger.log('   （Events 表如果 Core 项目已经建过，上面这行只是确认存在，不会动它的数据）');
   Logger.log('下一步: 如果 Tasks 已有旧数据（v5.1 之前的部署）→ migrateSchemaPersonalLifeOS()（11_ProjectionRebuilder.gs）；然后 createTriggers()');
 }
@@ -189,19 +196,19 @@ function repairSheetHeaders() {
     'due_time', 'due_datetime', 'recurring', 'reminder_policy', 'priority',
     'context', 'budget', 'notes', 'description', 'tags', 'chat_id',
     'completed_at', 'reminder_count', 'identity', 'archived'
-  ].concat(LIFE_TASK_NEW_COLUMNS));
+  ].concat(NEW_TASK_COLUMNS));
   _repairOneSheetHeader_('ActiveTasks', [
     'task_id', 'timestamp', 'title', 'category', 'status', 'due_date',
     'due_time', 'due_datetime', 'recurring', 'reminder_policy', 'priority',
     'context', 'budget', 'notes', 'description', 'tags', 'chat_id',
     'completed_at', 'reminder_count', 'identity'
-  ].concat(LIFE_TASK_NEW_COLUMNS));
+  ].concat(NEW_TASK_COLUMNS));
   _repairOneSheetHeader_('ArchiveTasks', [
     'task_id', 'timestamp', 'title', 'category', 'status', 'due_date',
     'due_time', 'due_datetime', 'recurring', 'reminder_policy', 'priority',
     'context', 'budget', 'notes', 'description', 'tags', 'chat_id',
     'completed_at', 'reminder_count', 'identity', 'archived_at'
-  ].concat(LIFE_TASK_NEW_COLUMNS));
+  ].concat(NEW_TASK_COLUMNS));
   _repairOneSheetHeader_('TaskStatistics', [
     'chat_id', 'total_count', 'pending_count', 'done_count', 'cancelled_count',
     'recurring_count', 'reminder_count_total', 'last_updated_at'
@@ -211,7 +218,7 @@ function repairSheetHeaders() {
   ]);
 
   // 【Sprint 1 新增】
-  _repairOneSheetHeader_('LIFE_PROJECTS', [
+  _repairOneSheetHeader_('Projects', [
     'project_id', 'identity', 'title', 'description', 'status',
     'execution_mode', 'parent_project_id', 'depends_on_project_ids',
     'source_task_id', 'converted_to_task_id', 'instantiated_from_template_id',
@@ -220,7 +227,7 @@ function repairSheetHeaders() {
     'source_event_id', 'created_method', 'created_time', 'updated_time',
     'decision_owner', 'approval_status'
   ]);
-  _repairOneSheetHeader_('LIFE_WORKFLOWS', [
+  _repairOneSheetHeader_('Workflows', [
     'workflow_id', 'identity', 'project_id', 'title', 'workflow_type',
     'status', 'recurrence_rule', 'loop_max_iterations', 'chat_id',
     'instantiated_from_template_id', 'template_version_at_instantiation',
@@ -228,28 +235,28 @@ function repairSheetHeaders() {
     'source_event_id', 'created_method', 'created_time', 'updated_time',
     'decision_owner', 'approval_status'
   ]);
-  _repairOneSheetHeader_('LIFE_TIMELINE', [
+  _repairOneSheetHeader_('Timeline', [
     'timeline_id', 'entity_type', 'entity_id', 'event_type', 'timestamp',
     'actor', 'detail', 'source_event_id'
   ]);
-  _repairOneSheetHeader_('LIFE_NOTES', [
+  _repairOneSheetHeader_('Notes', [
     'note_id', 'identity', 'content', 'category', 'status',
     'converted_to_type', 'converted_to_id', 'chat_id',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
     'updated_time', 'decision_owner', 'approval_status'
   ]);
-  _repairOneSheetHeader_('LIFE_REVIEWS', [
+  _repairOneSheetHeader_('Reviews', [
     'review_id', 'review_type', 'period_start', 'period_end',
     'summary_stats', 'ai_review_notes', 'created_time'
   ]);
-  _repairOneSheetHeader_('LIFE_BUSINESS_RULES', [
+  _repairOneSheetHeader_('BusinessRules', [
     'rule_id', 'name', 'tags', 'status',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
     'updated_time', 'decision_owner', 'approval_status'
   ]);
-  _repairOneSheetHeader_('LIFE_WORKFLOW_TEMPLATES', [
+  _repairOneSheetHeader_('WorkflowTemplates', [
     'template_id', 'business_rule_id', 'version', 'status', 'workflow_shape',
     'captured_from_project_id', 'usage_count', 'last_used_at',
     'creator', 'suggested_by', 'source_domain', 'source_module',
@@ -330,8 +337,8 @@ function runDiagnostics() {
 
   [
     'Events', 'Tasks', 'ActiveTasks', 'ArchiveTasks', 'TaskStatistics', 'TaskFilters',
-    'LIFE_PROJECTS', 'LIFE_WORKFLOWS', 'LIFE_TIMELINE',
-    'LIFE_NOTES', 'LIFE_REVIEWS', 'LIFE_BUSINESS_RULES', 'LIFE_WORKFLOW_TEMPLATES'
+    'Projects', 'Workflows', 'Timeline',
+    'Notes', 'Reviews', 'BusinessRules', 'WorkflowTemplates'
   ].forEach(function (name) {
     if (!ss) return;
     var sheet = ss.getSheetByName(name);
@@ -431,4 +438,69 @@ function runDiagnostics() {
   Logger.log('   配置正确要去 Core 项目那边测：PersonalLifeOS.handleTaskIntent(...)——注意 Library');
   Logger.log('   Identifier 已从 ProductivityOS 改名，见 00_ADR.gs ADR-2026-07-24-018）。');
   Logger.log('========== 诊断结束 ==========');
+}
+
+// ============ Preflight Check：全部文件是否都是最新版本 ============
+
+/**
+ * 【新增，起因见 2026-07-29 的真实报错】runDiagnostics()/
+ * migrateSchemaPersonalLifeOS() 等一旦某个文件不是最新版本，报错信息
+ * 是"某某函数不是 function"或"某某表不存在"这类间接线索，需要连蒙带
+ * 猜才能定位到底哪个文件没同步。本函数直接检查全部 24 个 Sprint 1 +
+ * Sprint 3 文件各自应该存在的关键函数/变量，一次性列出所有过期/缺失
+ * 的文件，不用再看报错信息猜。
+ *
+ * 使用方式：**在跑 renameSheetsToPascalCase()/setupSheets()/
+ * migrateSchemaPersonalLifeOS() 之前，先跑这个**。全部 ✅ 才继续。
+ */
+function runPreflightCheck() {
+  Logger.log('========== Preflight Check 开始 ==========');
+  Logger.log('检查 24 个 Sprint 1 + Sprint 3 文件是否都已粘贴/更新为最新版本');
+  Logger.log('');
+
+  var checks = [
+    { file: '02_EventBus.gs',      test: function () { return typeof EventBus !== 'undefined' && typeof EventBus.publish === 'function'; } },
+    { file: '05_SheetUtils.gs',     test: function () { return typeof getSheet_ === 'function' && typeof getHeaderMap_ === 'function' && typeof upsertRowByKey_ === 'function'; } },
+    { file: '07_IdentityEngine.gs（需含 Sprint 3 的 generateNoteIdentity）', test: function () { return typeof IdentityEngine !== 'undefined' && typeof IdentityEngine.generateNoteIdentity === 'function' && typeof IdentityEngine.generateProjectIdentity === 'function'; } },
+    { file: '08_DeduplicationEngine.gs（需含 Sprint 3 的 findExistingNote）', test: function () { return typeof DeduplicationEngine !== 'undefined' && typeof DeduplicationEngine.findExistingNote === 'function'; } },
+    { file: '09_IdempotencyManager.gs（需含 Sprint 3 的 createNoteIfNotExists）', test: function () { return typeof IdempotencyManager !== 'undefined' && typeof IdempotencyManager.createNoteIfNotExists === 'function' && typeof IdempotencyManager.createBusinessRuleIfNotExists === 'function'; } },
+    { file: '10_ProjectionEngine.gs（需含 Sprint 3 dispatch，含 Projects/Workflows 等新表名）', test: function () { return typeof ProjectionEngine !== 'undefined' && typeof ProjectionEngine.dispatch === 'function'; } },
+    { file: '11_ProjectionRebuilder.gs 追加的函数（含 renameSheetsToPascalCase）', test: function () { return typeof migrateSchemaPersonalLifeOS === 'function' && typeof renameSheetsToPascalCase === 'function' && typeof rebuildProjectsProjection === 'function' && typeof rebuildWorkflowsProjection === 'function'; } },
+    { file: '12_TaskQueryEngine.gs（需含 getTasksByProject/getTasksByWorkflow）', test: function () { return typeof TaskQueryEngine !== 'undefined' && typeof TaskQueryEngine.getTasksByProject === 'function' && typeof TaskQueryEngine.getTasksByWorkflow === 'function'; } },
+    { file: '14_ProjectQueryEngine.gs', test: function () { return typeof ProjectQueryEngine !== 'undefined' && typeof ProjectQueryEngine.getProject === 'function'; } },
+    { file: '15_Setup.gs（本文件自己，需含 NEW_TASK_COLUMNS）', test: function () { return typeof NEW_TASK_COLUMNS !== 'undefined' && NEW_TASK_COLUMNS.length > 0; } },
+    { file: '16_WorkflowQueryEngine.gs', test: function () { return typeof WorkflowQueryEngine !== 'undefined' && typeof WorkflowQueryEngine.getWorkflow === 'function'; } },
+    { file: '17_NoteQueryEngine.gs', test: function () { return typeof NoteQueryEngine !== 'undefined'; } },
+    { file: '18_ReviewQueryEngine.gs', test: function () { return typeof ReviewQueryEngine !== 'undefined'; } },
+    { file: '19_BusinessRuleQueryEngine.gs', test: function () { return typeof BusinessRuleQueryEngine !== 'undefined'; } },
+    { file: '20_TaskEngine.gs（需含 Sprint 3 的 markTaskConverted_）', test: function () { return typeof TaskEngine !== 'undefined' && typeof TaskEngine.markTaskConverted_ === 'function' && typeof TaskEngine.markTaskNotSelected_ === 'function' && typeof TaskEngine.createTaskFromConversion_ === 'function'; } },
+    { file: '27_ProjectEngine.gs（需含 Sprint 3 的 checkEligibleForTaskDemotion_）', test: function () { return typeof ProjectEngine !== 'undefined' && typeof ProjectEngine.checkEligibleForTaskDemotion_ === 'function' && typeof ProjectEngine.markProjectConvertedToTask_ === 'function'; } },
+    { file: '28_WorkflowEngine.gs', test: function () { return typeof WorkflowEngine !== 'undefined' && typeof WorkflowEngine.handleBranchResolution_ === 'function'; } },
+    { file: '29_NoteEngine.gs', test: function () { return typeof NoteEngine !== 'undefined'; } },
+    { file: '40_ReviewEngine.gs', test: function () { return typeof ReviewEngine !== 'undefined'; } },
+    { file: '41_BusinessRuleEngine.gs', test: function () { return typeof BusinessRuleEngine !== 'undefined'; } },
+    { file: '42_ConversionEngine.gs', test: function () { return typeof ConversionEngine !== 'undefined'; } },
+    { file: '43_ReminderConnector.gs', test: function () { return typeof ReminderConnector !== 'undefined'; } },
+    { file: '44_TimelineQueryEngine.gs', test: function () { return typeof TimelineQueryEngine !== 'undefined'; } },
+    { file: '45_CanonicalRepresentation.gs', test: function () { return typeof CanonicalRepresentation !== 'undefined' && typeof CanonicalRepresentation.composeCanonicalIdentity_ === 'function'; } }
+  ];
+
+  var allOk = true;
+  checks.forEach(function (c) {
+    var ok = false;
+    try { ok = !!c.test(); } catch (e) { ok = false; }
+    Logger.log((ok ? '✅ ' : '❌ 过期/缺失: ') + c.file);
+    if (!ok) allOk = false;
+  });
+
+  Logger.log('');
+  if (allOk) {
+    Logger.log('✅✅✅ 全部文件都是最新版本，可以继续跑 renameSheetsToPascalCase() 等');
+  } else {
+    Logger.log('❌ 上面标"过期/缺失"的文件，请用最新交付的内容整份替换（不是追加），');
+    Logger.log('   替换完重新跑一次本函数（runPreflightCheck），全部 ✅ 才继续下一步。');
+  }
+  Logger.log('========== Preflight Check 结束 ==========');
+
+  return allOk;
 }

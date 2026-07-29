@@ -2,7 +2,7 @@
  * 44_TimelineQueryEngine.gs
  * Personal Life OS v5.2 — Timeline Query Engine
  *
- * LIFE_TIMELINE 是 Events 表的投影（Projection），由
+ * Timeline 是 Events 表的投影（Projection），由
  * 10_ProjectionEngine 在处理任何属于本项目的事件时无条件追加一行，
  * 见设计包 00_ADR.gs ADR-2026-07-24-004。本模块只负责读，不负责写。
  */
@@ -10,7 +10,7 @@
 /**
  * ── Engine Contract ──────────────────────────────────────────────────
  *   Responsibilities      : Timeline 的唯一对外查询入口
- *   Reads                 : LIFE_TIMELINE Sheet
+ *   Reads                 : Timeline Sheet
  *   Writes                : none
  *   Public API            : getTimelineForEntity
  *   Dependencies           : 05_SheetUtils.gs
@@ -20,7 +20,7 @@
 
 var TimelineQueryEngine = (function () {
 
-  var TIMELINE_SHEET = 'LIFE_TIMELINE';
+  var TIMELINE_SHEET = 'Timeline';
 
   /**
    * 某个实体的完整历史，按时间正序返回。

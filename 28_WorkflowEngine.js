@@ -41,7 +41,7 @@
  */
 
 var LifeWorkflowConfig = Object.freeze({
-  WORKFLOWS_SHEET_NAME: 'LIFE_WORKFLOWS',
+  WORKFLOWS_SHEET_NAME: 'Workflows',
   WORKFLOW_TYPES: ['SEQUENTIAL', 'PARALLEL', 'BRANCH', 'LOOP', 'RECURRING'],
   // Workflow 本身不原生使用 WAITING/BLOCKED——那是它下面具体 Task 的事，
   // 见 00_Sheets_Structure.gs「四」。

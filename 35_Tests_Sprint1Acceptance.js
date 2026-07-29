@@ -43,7 +43,7 @@ function testMigration_() {
         return;
       }
       var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-      LIFE_TASK_NEW_COLUMNS.forEach(function (col) {
+      NEW_TASK_COLUMNS.forEach(function (col) {
         if (headers.indexOf(col) === -1) {
           Logger.log('❌ ' + sheetName + ' 缺少新列: ' + col);
           pass = false;
@@ -51,8 +51,8 @@ function testMigration_() {
       });
     });
 
-    ['LIFE_PROJECTS', 'LIFE_WORKFLOWS', 'LIFE_TIMELINE', 'LIFE_NOTES',
-      'LIFE_REVIEWS', 'LIFE_BUSINESS_RULES', 'LIFE_WORKFLOW_TEMPLATES'].forEach(function (name) {
+    ['Projects', 'Workflows', 'Timeline', 'Notes',
+      'Reviews', 'BusinessRules', 'WorkflowTemplates'].forEach(function (name) {
       if (!ss.getSheetByName(name)) {
         Logger.log('❌ 找不到 Sheet: ' + name);
         pass = false;

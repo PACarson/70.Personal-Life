@@ -412,6 +412,71 @@ var TaskEngine = (function () {
     return {};
   }
 
+  // ============ Conversion（Sprint 3，仅供 42_ConversionEngine.gs 调用）====
+
+  /**
+   * 【Sprint 3 落地，Sprint 1 时已预留字段】把一个 Task 标记为
+   * CONVERTED（终态）——Task→Project 转换的源侧收尾。只允许从非终态
+   * 转换；已是任何终态的 Task 拒绝重复转换，但如果已经转换到*同一个*
+   * 目标 Project，返回既有结果而不是报错（幂等，见
+   * 00_Business_Rules.gs「一」）。
+   *
+   * @param {string} taskId
+   * @param {string} newProjectId
+   * @param {string} chatId
+   */
+  function markTaskConverted_(taskId, newProjectId, chatId) {
+    var existing = TaskQueryEngine.getTask(taskId, chatId);
+    if (!existing) return { not_found: true };
+
+    var currentStatus = String(existing.status || '').toUpperCase();
+    if (currentStatus === 'CONVERTED') {
+      if (existing.converted_to_project_id === newProjectId) {
+        return { already_converted: true, task: existing }; // 幂等
+      }
+      return { invalid_state: true, current_status: currentStatus,
+        reason: 'Task 已经转换到另一个 Project（' + existing.converted_to_project_id + '），不能再转换一次' };
+    }
+    var terminalStatuses = ['DONE', 'CANCELLED', 'NOT_SELECTED'];
+    if (terminalStatuses.indexOf(currentStatus) !== -1) {
+      return { invalid_state: true, current_status: currentStatus,
+        reason: '只有非终态的 Task 才能转换为 Project' };
+    }
+
+    var payload = { task_id: taskId, status: 'CONVERTED', converted_to_project_id: newProjectId,
+      updated_time: new Date().toISOString() };
+    var event = EventBus.publish('TASK_CONVERTED_TO_PROJECT', payload, chatId || existing.chat_id, 'TaskEngine');
+
+    if (event && event.projection_ok === false) {
+      materializeTaskRow_(taskId, { status: 'CONVERTED', converted_to_project_id: newProjectId });
+    }
+
+    return {};
+  }
+
+  /**
+   * 【Sprint 3 落地】Project→Task 转换时，创建目标侧的新 Task——仅供
+   * 42_ConversionEngine.gs 调用。字段映射规则见
+   * 00_Business_Rules.gs「一」：Project.title → Task.title，
+   * Project.description → Task.notes，新 Task.project_id = 源
+   * Project.parent_project_id（新 Task"接替"源 Project 在其父级下的
+   * 位置）。
+   *
+   * @param {object} sourceProject
+   * @param {string} chatId
+   * @returns {object}  新 Task
+   */
+  function createTaskFromConversion_(sourceProject, chatId) {
+    return createTask(sourceProject.title, {
+      notes:              sourceProject.description || '',
+      project_id:         sourceProject.parent_project_id || '',
+      source_project_id:  sourceProject.project_id,
+      creator:            'User',
+      source_module:      'ConversionEngine.convertProjectToTask',
+      created_method:      'Converted'
+    }, chatId);
+  }
+
   function getPendingTasks(chatId) {
     return TaskQueryEngine.getTasks(chatId, { status: 'PENDING' });
   }
@@ -453,6 +518,14 @@ var TaskEngine = (function () {
       case 'TASK_NOT_SELECTED':
         if (stateMap[p.task_id]) {
           stateMap[p.task_id].status = 'NOT_SELECTED';
+        }
+        break;
+
+      // 【Sprint 3 新增】
+      case 'TASK_CONVERTED_TO_PROJECT':
+        if (stateMap[p.task_id]) {
+          stateMap[p.task_id].status = 'CONVERTED';
+          stateMap[p.task_id].converted_to_project_id = p.converted_to_project_id;
         }
         break;
 
@@ -525,6 +598,8 @@ var TaskEngine = (function () {
     completeTask:          completeTask,
     cancelTask:            cancelTask,
     markTaskNotSelected_:   markTaskNotSelected_,
+    markTaskConverted_:      markTaskConverted_,
+    createTaskFromConversion_: createTaskFromConversion_,
     getPendingTasks:         getPendingTasks,
     deriveFromEvent:          deriveFromEvent,
     deriveTaskState_:          deriveTaskState_,

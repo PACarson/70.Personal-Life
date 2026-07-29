@@ -8,7 +8,7 @@
  *
  * 架构铁律（跟 20_TaskEngine.gs 同构）：
  *  - 真相来源是 EVENTS 表
- *  - LIFE_PROJECTS Sheet 是 Read Model（由 10_ProjectionEngine 维护）
+ *  - Projects Sheet 是 Read Model（由 10_ProjectionEngine 维护）
  *  - 只有 EventBus.publish 能写 Events
  *  - createProjectDirect_ 只允许 09_IdempotencyManager 调用，外部代码
  *    一律走 createProject()（内部会经过幂等+锁）
@@ -38,7 +38,7 @@
  */
 
 var LifeProjectConfig = Object.freeze({
-  PROJECTS_SHEET_NAME: 'LIFE_PROJECTS',
+  PROJECTS_SHEET_NAME: 'Projects',
   // Canonical Entity Lifecycle（v5.2，见 ADR-2026-07-24-017）+ Project 专属
   // 的 CONVERTED_TO_TASK（见 ADR-2026-07-24-015）。
   PROJECT_STATUSES: [
@@ -320,7 +320,79 @@ var ProjectEngine = (function () {
     return {};
   }
 
+  // ============ Conversion（Sprint 3，仅供 42_ConversionEngine.gs 调用）====
+
+  /**
+   * 【Sprint 3 落地，Sprint 1 时已预留】纯查询：判断某个 Project 是否
+   * 够格被降级转换为 Task。两个条件必须同时满足（见
+   * 00_Business_Rules.gs「一」）：
+   *   (a) 没有其它 Project 的 parent_project_id 指向本 Project
+   *   (b) 本 Project 名下的 Task 全部已是终态，或者压根没有任何 Task
+   * 不满足时返回明确原因，不是笼统拒绝。
+   *
+   * @param {string} projectId
+   * @returns {{eligible: boolean, reason: (string|undefined)}}
+   */
+  function checkEligibleForTaskDemotion_(projectId) {
+    var subProjects = getProjectsByParent(projectId).filter(function (p) {
+      return TERMINAL_STATUSES.indexOf(String(p.status || '').toUpperCase()) === -1;
+    });
+    if (subProjects.length > 0) {
+      return { eligible: false, reason: '还有 ' + subProjects.length + ' 个 Sub-Project 未处理' };
+    }
+
+    var tasks = (typeof TaskQueryEngine !== 'undefined') ? TaskQueryEngine.getTasksByProject(projectId) : [];
+    var openTasks = tasks.filter(function (t) {
+      var s = String(t.status || '').toUpperCase();
+      return ['DONE', 'CANCELLED', 'CONVERTED', 'NOT_SELECTED'].indexOf(s) === -1;
+    });
+    if (openTasks.length > 0) {
+      return { eligible: false, reason: '还有 ' + openTasks.length + ' 个未完成的 Task' };
+    }
+
+    return { eligible: true };
+  }
+
+  /**
+   * 【Sprint 3 落地】把一个 Project 标记为 CONVERTED_TO_TASK（终态）——
+   * Project→Task 转换的源侧收尾。仅供 42_ConversionEngine.gs 调用，
+   * 调用前必须已经过 checkEligibleForTaskDemotion_ 校验。幂等：已经
+   * 转换到*同一个*目标 Task，返回既有结果而不是报错。
+   *
+   * @param {string} projectId
+   * @param {string} newTaskId
+   * @param {string} chatId
+   */
+  function markProjectConvertedToTask_(projectId, newTaskId, chatId) {
+    var existing = ProjectQueryEngine.getProject(projectId, chatId);
+    if (!existing) return { not_found: true };
+
+    var currentStatus = String(existing.status || '').toUpperCase();
+    if (currentStatus === 'CONVERTED_TO_TASK') {
+      if (existing.converted_to_task_id === newTaskId) {
+        return { already_converted: true, project: existing }; // 幂等
+      }
+      return { invalid_state: true, current_status: currentStatus,
+        reason: 'Project 已经转换到另一个 Task（' + existing.converted_to_task_id + '），不能再转换一次' };
+    }
+    if (TERMINAL_STATUSES.indexOf(currentStatus) !== -1) {
+      return { invalid_state: true, current_status: currentStatus,
+        reason: '只有非终态的 Project 才能转换为 Task' };
+    }
+
+    var payload = { project_id: projectId, status: 'CONVERTED_TO_TASK', converted_to_task_id: newTaskId,
+      updated_time: new Date().toISOString() };
+    var event = EventBus.publish('PROJECT_CONVERTED_TO_TASK', payload, chatId || existing.chat_id, 'ProjectEngine');
+
+    if (event && event.projection_ok === false) {
+      materializeProjectRow_(projectId, { status: 'CONVERTED_TO_TASK', converted_to_task_id: newTaskId });
+    }
+
+    return {};
+  }
+
   // ============ 派生引擎（保留供 11_ProjectionRebuilder 使用） ============
+
 
   function deriveFromEvent(event, stateMap) {
     stateMap = stateMap || {};
@@ -345,6 +417,12 @@ var ProjectEngine = (function () {
         if (stateMap[p.project_id]) {
           stateMap[p.project_id].status = 'ARCHIVED';
           stateMap[p.project_id].archived_at = event.timestamp;
+        }
+        break;
+      case 'PROJECT_CONVERTED_TO_TASK':
+        if (stateMap[p.project_id]) {
+          stateMap[p.project_id].status = 'CONVERTED_TO_TASK';
+          stateMap[p.project_id].converted_to_task_id = p.converted_to_task_id;
         }
         break;
     }
@@ -374,6 +452,8 @@ var ProjectEngine = (function () {
     completeProject:           completeProject,
     cancelProject:             cancelProject,
     archiveProject:            archiveProject,
+    checkEligibleForTaskDemotion_: checkEligibleForTaskDemotion_,
+    markProjectConvertedToTask_:   markProjectConvertedToTask_,
     deriveFromEvent:           deriveFromEvent,
     materializeProjectRow_:    materializeProjectRow_
   };

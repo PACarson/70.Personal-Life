@@ -1,6 +1,10 @@
 /**
  * 09_IdempotencyManager.gs
- * Personal Life OS v5.2 — 幂等性管理器（Task / Project / Workflow）
+ * Personal Life OS v5.2 — 幂等性管理器（Task / Project / Workflow /
+ * Note / BusinessRule）
+ *
+ * 【Sprint 3 新增】createNoteIfNotExists() / createBusinessRuleIfNotExists()，
+ * 同一套 Gate + per-chatId Soft Lock 方案。
  *
  * 【Sprint 1 新增】createProjectIfNotExists() / createWorkflowIfNotExists()，
  * 跟既有 createTaskIfNotExists() 同一套 Gate + per-chatId Soft Lock 方案，
@@ -194,6 +198,82 @@ var IdempotencyManager = (function () {
     }
   }
 
+  // ============ Note（Sprint 3 新增） ============
+
+  /**
+   * 创建 Note（幂等，并发安全）。
+   * @param {string} content
+   * @param {object} meta   { category, creator, suggested_by,
+   *                          source_domain, source_module,
+   *                          source_event_id, source_task_id,
+   *                          created_method, decision_owner }
+   * @param {string} chatId
+   * @returns {{ note: object, created: boolean }}
+   */
+  function createNoteIfNotExists(content, meta, chatId) {
+    meta = meta || {};
+
+    var identity = IdentityEngine.generateNoteIdentity(chatId, content, meta.category || '');
+
+    var acquired = _acquireSoftLock_(chatId);
+    if (!acquired) {
+      throw new Error('SYSTEM_BUSY_RETRY_IN_PROGRESS: 你刚才的请求还在处理中，请稍等几秒再看看，不需要马上重发。');
+    }
+
+    try {
+      var existing = DeduplicationEngine.findExistingNote(identity);
+      if (existing) {
+        Logger.log('[IdempotencyManager] Note 已存在（并发安全），跳过创建: identity=' + identity.slice(0, 12) + '... note_id=' + existing.note_id);
+        return { note: existing, created: false };
+      }
+
+      var note = NoteEngine.createNoteDirect_(content, meta, chatId, identity);
+      return { note: note, created: true };
+
+    } finally {
+      _releaseSoftLock_(chatId);
+    }
+  }
+
+  // ============ BusinessRule（顶层分类，Sprint 3 新增） ============
+
+  /**
+   * 创建 BusinessRule 顶层分类（幂等，并发安全）。绝大多数情况下不需要
+   * 调用方直接调用这个——41_BusinessRuleEngine.captureAsWorkflowTemplate
+   * 内部在发现同名分类不存在时会自动调用它，调用方通常只需要调
+   * captureAsWorkflowTemplate 一个函数。
+   * @param {string} name
+   * @param {object} meta   { tags, creator, suggested_by, source_domain,
+   *                          source_module, source_event_id,
+   *                          created_method, decision_owner }
+   * @param {string} chatId
+   * @returns {{ businessRule: object, created: boolean }}
+   */
+  function createBusinessRuleIfNotExists(name, meta, chatId) {
+    meta = meta || {};
+
+    var identity = IdentityEngine.generateBusinessRuleIdentity(chatId, name);
+
+    var acquired = _acquireSoftLock_(chatId);
+    if (!acquired) {
+      throw new Error('SYSTEM_BUSY_RETRY_IN_PROGRESS: 你刚才的请求还在处理中，请稍等几秒再看看，不需要马上重发。');
+    }
+
+    try {
+      var existing = DeduplicationEngine.findExistingBusinessRule(identity);
+      if (existing) {
+        Logger.log('[IdempotencyManager] BusinessRule 已存在（并发安全），跳过创建: identity=' + identity.slice(0, 12) + '... rule_id=' + existing.rule_id);
+        return { businessRule: existing, created: false };
+      }
+
+      var businessRule = BusinessRuleEngine.createBusinessRuleDirect_(name, meta, chatId, identity);
+      return { businessRule: businessRule, created: true };
+
+    } finally {
+      _releaseSoftLock_(chatId);
+    }
+  }
+
   // ============ 开发者测试 ============
 
   function testWebhookRetry() {
@@ -226,6 +306,8 @@ var IdempotencyManager = (function () {
     createTaskIfNotExists:       createTaskIfNotExists,
     createProjectIfNotExists:    createProjectIfNotExists,
     createWorkflowIfNotExists:   createWorkflowIfNotExists,
+    createNoteIfNotExists:       createNoteIfNotExists,
+    createBusinessRuleIfNotExists: createBusinessRuleIfNotExists,
     testWebhookRetry:            testWebhookRetry,
     testProjectIdempotency:      testProjectIdempotency
   };

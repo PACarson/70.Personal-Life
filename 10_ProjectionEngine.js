@@ -2,14 +2,22 @@
  * 10_ProjectionEngine.gs
  * Personal Life OS v5.2 — Projection Engine（Events → Read Model）
  *
+ * 【Sprint 3 新增】dispatch() 新增 case：TASK_CONVERTED_TO_PROJECT/
+ * PROJECT_CONVERTED_TO_TASK（双向转换，两者都只更新"源"侧，"目标"侧
+ * 已经在各自正常的 CREATED 事件里创建过）、NOTE_CREATED/ARCHIVED/
+ * CONVERTED、REVIEW_GENERATED、BUSINESS_RULE_CREATED、
+ * WORKFLOW_TEMPLATE_CAPTURED/FROZEN/DEPRECATED、
+ * WORKFLOW_INSTANCE_CREATED（只更新模板 usage_count，不重复创建
+ * 实体）。
+ *
  * 【Sprint 1 新增，其余全部既有逻辑原样保留、逐行核对未改动】
  *  - dispatch() 的 switch 新增 case：PROJECT_CREATED/UPDATED/COMPLETED/
  *    CANCELLED/ARCHIVED、WORKFLOW_STARTED/UPDATED/FINISHED/CANCELLED、
  *    TASK_NOT_SELECTED，各自委托给对应新 projector 函数
- *  - dispatch() 末尾新增无条件的 LIFE_TIMELINE 追加（见设计包
+ *  - dispatch() 末尾新增无条件的 Timeline 追加（见设计包
  *    00_ADR.gs ADR-2026-07-24-004：Timeline 是 Projection，不是
  *    第二个 Write Model）——处理完任何一个属于本项目、且在
- *    TIMELINE_ENTITY_MAP 里注册过的事件后，都会追加一行 LIFE_TIMELINE
+ *    TIMELINE_ENTITY_MAP 里注册过的事件后，都会追加一行 Timeline
  *    记录。放在 switch 外层、trycatch 内层，任何一个 case 处理完（或
  *    default 情况被跳过）都会走到这一步。
  *
@@ -17,8 +25,8 @@
  * _getRowByKey_ 等全部原样保留，不做任何改动。
  *
  * 架构铁律（不变）：
- *  - 唯一允许写 Tasks/ActiveTasks/TaskFilters/LIFE_PROJECTS/
- *    LIFE_WORKFLOWS/LIFE_TIMELINE 等 Read Model 表的模块（Operations
+ *  - 唯一允许写 Tasks/ActiveTasks/TaskFilters/Projects/
+ *    Workflows/Timeline 等 Read Model 表的模块（Operations
  *    层的 rebuildAllProjections 除外——那是同一份逻辑的批量重放，不是
  *    另一个写入方）
  *  - dispatch() 必须是幂等消费——同一个 event_id 重复处理不能产生
@@ -31,11 +39,11 @@
  *   Responsibilities      : 把 Events 表的每一条事件"投影"成对应的
  *                           Read Model 表变化
  *   Owns                  : event.type → 具体投影函数的路由表；
- *                           LIFE_TIMELINE 无条件追加这条规则本身
+ *                           Timeline 无条件追加这条规则本身
  *   Reads                 : none（只接收 EventBus.publish 传入的
  *                           event 对象，不自己读 Events 表）
  *   Writes                : Tasks, ActiveTasks, TaskFilters,
- *                           LIFE_PROJECTS, LIFE_WORKFLOWS, LIFE_TIMELINE
+ *                           Projects, Workflows, Timeline
  *   Public API            : dispatch
  *   Dependencies           : 05_SheetUtils.gs
  *   Forbidden Dependencies  : 02_EventBus.gs 之外的任何"发起写请求"的
@@ -64,12 +72,17 @@ var ProjectionEngine = (function () {
   var TASK_FILTERS_SHEET = 'TaskFilters';
 
   // 【Sprint 1 新增】
-  var PROJECTS_SHEET  = 'LIFE_PROJECTS';
-  var WORKFLOWS_SHEET = 'LIFE_WORKFLOWS';
-  var TIMELINE_SHEET  = 'LIFE_TIMELINE';
+  var PROJECTS_SHEET  = 'Projects';
+  var WORKFLOWS_SHEET = 'Workflows';
+  var TIMELINE_SHEET  = 'Timeline';
+  // 【Sprint 3 新增】
+  var NOTES_SHEET             = 'Notes';
+  var REVIEWS_SHEET           = 'Reviews';
+  var BUSINESS_RULES_SHEET    = 'BusinessRules';
+  var WORKFLOW_TEMPLATES_SHEET = 'WorkflowTemplates';
 
   // 【Sprint 1 新增】event.type → { entityType, idField }，供 dispatch()
-  // 末尾统一生成 LIFE_TIMELINE 记录，避免在每个 case 分支里各自重复写一遍
+  // 末尾统一生成 Timeline 记录，避免在每个 case 分支里各自重复写一遍
   // 映射关系（见 ADR-2026-07-24-004 Consequences 段落的建议）。
   var TIMELINE_ENTITY_MAP = {
     'TASK_CREATED':       { entityType: 'TASK',     idField: 'task_id' },
@@ -85,7 +98,20 @@ var ProjectionEngine = (function () {
     'WORKFLOW_STARTED':   { entityType: 'WORKFLOW', idField: 'workflow_id' },
     'WORKFLOW_UPDATED':   { entityType: 'WORKFLOW', idField: 'workflow_id' },
     'WORKFLOW_FINISHED':  { entityType: 'WORKFLOW', idField: 'workflow_id' },
-    'WORKFLOW_CANCELLED': { entityType: 'WORKFLOW', idField: 'workflow_id' }
+    'WORKFLOW_CANCELLED': { entityType: 'WORKFLOW', idField: 'workflow_id' },
+
+    // 【Sprint 3 新增】
+    'TASK_CONVERTED_TO_PROJECT':    { entityType: 'TASK',             idField: 'task_id' },
+    'PROJECT_CONVERTED_TO_TASK':    { entityType: 'PROJECT',          idField: 'project_id' },
+    'NOTE_CREATED':                 { entityType: 'NOTE',             idField: 'note_id' },
+    'NOTE_ARCHIVED':                { entityType: 'NOTE',             idField: 'note_id' },
+    'NOTE_CONVERTED':               { entityType: 'NOTE',             idField: 'note_id' },
+    'REVIEW_GENERATED':             { entityType: 'REVIEW',           idField: 'review_id' },
+    'BUSINESS_RULE_CREATED':        { entityType: 'BUSINESS_RULE',    idField: 'rule_id' },
+    'WORKFLOW_TEMPLATE_CAPTURED':   { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' },
+    'WORKFLOW_TEMPLATE_FROZEN':     { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' },
+    'WORKFLOW_TEMPLATE_DEPRECATED': { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' },
+    'WORKFLOW_INSTANCE_CREATED':    { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' }
   };
 
   // ============ 入口 ============
@@ -112,12 +138,25 @@ var ProjectionEngine = (function () {
         case 'WORKFLOW_FINISHED':  projectWorkflowFinished_(event); break;
         case 'WORKFLOW_CANCELLED': projectWorkflowCancelled_(event); break;
 
+        // 【Sprint 3 新增】
+        case 'TASK_CONVERTED_TO_PROJECT':    projectTaskConvertedToProject_(event);    break;
+        case 'PROJECT_CONVERTED_TO_TASK':    projectProjectConvertedToTask_(event);    break;
+        case 'NOTE_CREATED':                 projectNoteCreated_(event);               break;
+        case 'NOTE_ARCHIVED':                projectNoteArchived_(event);              break;
+        case 'NOTE_CONVERTED':               projectNoteConverted_(event);             break;
+        case 'REVIEW_GENERATED':             projectReviewGenerated_(event);           break;
+        case 'BUSINESS_RULE_CREATED':        projectBusinessRuleCreated_(event);       break;
+        case 'WORKFLOW_TEMPLATE_CAPTURED':   projectWorkflowTemplateCaptured_(event);  break;
+        case 'WORKFLOW_TEMPLATE_FROZEN':     projectWorkflowTemplateFrozen_(event);    break;
+        case 'WORKFLOW_TEMPLATE_DEPRECATED': projectWorkflowTemplateDeprecated_(event); break;
+        case 'WORKFLOW_INSTANCE_CREATED':    projectWorkflowInstanceCreated_(event);   break;
+
         default:
           break;
       }
 
       // 【Sprint 1 新增】不论上面走的是哪个 case，只要这个事件类型出现在
-      // TIMELINE_ENTITY_MAP 里，就无条件追加一行 LIFE_TIMELINE，放在
+      // TIMELINE_ENTITY_MAP 里，就无条件追加一行 Timeline，放在
       // switch 之后、外层 catch 之前——任何一个 case 抛出的异常都会跳过
       // 这一步（被下面的 catch 统一捕获记录），保证"主 Read Model 没写
       // 成功却仍然记了一条 Timeline"这种不一致不会发生。
@@ -422,6 +461,115 @@ var ProjectionEngine = (function () {
     upsertRowByKey_(WORKFLOWS_SHEET, 'workflow_id', p.workflow_id, { status: 'CANCELLED' });
   }
 
+  // ============ Conversion Projectors（Sprint 3 新增） ============
+  //
+  // 两个转换事件都只更新"源"侧一张表——"目标"侧（新 Project/新 Task）
+  // 已经在各自的 PROJECT_CREATED / TASK_CREATED 事件里正常创建过了
+  // （42_ConversionEngine.gs 是先调用正常的 createProject/
+  // createTaskFromConversion_，再发布这个转换事件收尾），这里不需要
+  // 重复插入目标行。
+
+  function projectTaskConvertedToProject_(event) {
+    var p = event.payload || {};
+    if (!p.task_id) return;
+    upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, {
+      status: 'CONVERTED',
+      converted_to_project_id: p.converted_to_project_id
+    });
+    try {
+      deleteRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id);
+    } catch (e) {
+      Logger.log('[ProjectionEngine] ActiveTasks 删除失败: ' + e.message);
+    }
+  }
+
+  function projectProjectConvertedToTask_(event) {
+    var p = event.payload || {};
+    if (!p.project_id) return;
+    upsertRowByKey_(PROJECTS_SHEET, 'project_id', p.project_id, {
+      status: 'CONVERTED_TO_TASK',
+      converted_to_task_id: p.converted_to_task_id
+    });
+  }
+
+  // ============ Note Projectors（Sprint 3 新增） ============
+
+  function projectNoteCreated_(event) {
+    var p = event.payload || {};
+    if (!p.note_id) return;
+    upsertRowByKey_(NOTES_SHEET, 'note_id', p.note_id, p);
+  }
+
+  function projectNoteArchived_(event) {
+    var p = event.payload || {};
+    if (!p.note_id) return;
+    upsertRowByKey_(NOTES_SHEET, 'note_id', p.note_id, { status: 'ARCHIVED' });
+  }
+
+  function projectNoteConverted_(event) {
+    var p = event.payload || {};
+    if (!p.note_id) return;
+    upsertRowByKey_(NOTES_SHEET, 'note_id', p.note_id, {
+      status: 'CONVERTED',
+      converted_to_type: p.target_type,
+      converted_to_id: p.target_id
+    });
+  }
+
+  // ============ Review Projector（Sprint 3 新增） ============
+
+  function projectReviewGenerated_(event) {
+    var p = event.payload || {};
+    if (!p.review_id) return;
+    upsertRowByKey_(REVIEWS_SHEET, 'review_id', p.review_id, p);
+  }
+
+  // ============ BusinessRule / WorkflowTemplate Projectors（Sprint 3 新增）===
+
+  function projectBusinessRuleCreated_(event) {
+    var p = event.payload || {};
+    if (!p.rule_id) return;
+    upsertRowByKey_(BUSINESS_RULES_SHEET, 'rule_id', p.rule_id, p);
+  }
+
+  function projectWorkflowTemplateCaptured_(event) {
+    var p = event.payload || {};
+    if (!p.template_id) return;
+    upsertRowByKey_(WORKFLOW_TEMPLATES_SHEET, 'template_id', p.template_id, p);
+  }
+
+  function projectWorkflowTemplateFrozen_(event) {
+    var p = event.payload || {};
+    if (!p.template_id) return;
+    upsertRowByKey_(WORKFLOW_TEMPLATES_SHEET, 'template_id', p.template_id, { status: 'FROZEN' });
+  }
+
+  function projectWorkflowTemplateDeprecated_(event) {
+    var p = event.payload || {};
+    if (!p.template_id) return;
+    upsertRowByKey_(WORKFLOW_TEMPLATES_SHEET, 'template_id', p.template_id, { status: 'DEPRECATED' });
+  }
+
+  /**
+   * 只更新 WorkflowTemplates 的 usage_count/last_used_at——新
+   * Workflow/新 Project 已经在各自的 WORKFLOW_STARTED/PROJECT_CREATED
+   * 事件里正常创建过了（41_BusinessRuleEngine.instantiateFromTemplate
+   * 复用既有 WorkflowEngine/ProjectEngine/TaskEngine 创建路径，不重新
+   * 实现一遍实体创建逻辑）。
+   */
+  function projectWorkflowInstanceCreated_(event) {
+    var p = event.payload || {};
+    if (!p.template_id) return;
+
+    var current = _getRowByKey_(WORKFLOW_TEMPLATES_SHEET, 'template_id', p.template_id);
+    var newUsageCount = (current ? (Number(current.usage_count) || 0) : 0) + 1;
+
+    upsertRowByKey_(WORKFLOW_TEMPLATES_SHEET, 'template_id', p.template_id, {
+      usage_count: newUsageCount,
+      last_used_at: event.timestamp
+    });
+  }
+
   // ============ Timeline 投影（Sprint 1 新增，见 ADR-2026-07-24-004） ====
 
   function _appendTimelineEntry_(event) {
@@ -447,7 +595,7 @@ var ProjectionEngine = (function () {
         event.event_id || ''
       ]);
     } catch (e) {
-      Logger.log('[ProjectionEngine] LIFE_TIMELINE 追加失败（不影响主 Read Model 已经写入成功的事实）: ' + e.message);
+      Logger.log('[ProjectionEngine] Timeline 追加失败（不影响主 Read Model 已经写入成功的事实）: ' + e.message);
     }
   }
 

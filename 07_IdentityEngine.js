@@ -198,6 +198,49 @@ var IdentityEngine = (function () {
     Logger.log('=== IdentityEngine Test DONE ===');
   }
 
+  /**
+   * 【Sprint 3 新增】Note Identity。组合字段：chat_id | normalized_content
+   * | category——Note 没有"标题"，用内容本身（标准化后）参与去重，
+   * category 纳入是因为同样的文字内容标成"Idea"还是"Reference"，
+   * 语义不同，不该被去重系统认成同一条。
+   */
+  function generateNoteIdentity(chatId, content, category) {
+    var parts = [
+      String(chatId || ''),
+      normalizeTitle(content),
+      String(category || '')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  /**
+   * 【Sprint 3 新增】BusinessRule（顶层分类）Identity。组合字段：
+   * chat_id | normalized_name——不含 tags（tags 会变化，不应该影响
+   * "这是不是同一个规则类别"的判断）。
+   */
+  function generateBusinessRuleIdentity(chatId, name) {
+    var parts = [
+      String(chatId || ''),
+      normalizeTitle(name)
+    ];
+    return sha256_(parts.join('|'));
+  }
+
+  /**
+   * 【Sprint 3 新增】WorkflowTemplate（具体版本）Identity。组合字段：
+   * business_rule_id | version——同一个 BusinessRule 下，version 号
+   * 本身就唯一标识一个版本，不需要再纳入其它字段；business_rule_id
+   * 纳入是为了让不同 BusinessRule 下"版本 1"不会被误判成同一个
+   * identity（版本号本身在不同 BusinessRule 之间是可以重复的）。
+   */
+  function generateWorkflowTemplateIdentity(businessRuleId, version) {
+    var parts = [
+      String(businessRuleId || ''),
+      String(version || '')
+    ];
+    return sha256_(parts.join('|'));
+  }
+
   return {
     sha256: sha256_,
     normalizeTitle: normalizeTitle,
@@ -208,6 +251,9 @@ var IdentityEngine = (function () {
     resolveIdentityDueValue: resolveIdentityDueValue,
     generateProjectIdentity: generateProjectIdentity,
     generateWorkflowIdentity: generateWorkflowIdentity,
+    generateNoteIdentity: generateNoteIdentity,
+    generateBusinessRuleIdentity: generateBusinessRuleIdentity,
+    generateWorkflowTemplateIdentity: generateWorkflowTemplateIdentity,
     testIdentity: testIdentity
   };
 })();

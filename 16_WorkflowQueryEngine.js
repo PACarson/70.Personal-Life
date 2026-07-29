@@ -2,14 +2,14 @@
  * 16_WorkflowQueryEngine.gs
  * Personal Life OS v5.2 — Workflow Query Engine
  *
- * 本模块是本 OS 里 LIFE_WORKFLOWS 表唯一允许直接读取的模块。需要
+ * 本模块是本 OS 里 Workflows 表唯一允许直接读取的模块。需要
  * Task 数据（联查）时调用 TaskQueryEngine，不直接读 Tasks 表。
  */
 
 /**
  * ── Engine Contract ──────────────────────────────────────────────────
  *   Responsibilities      : Workflow 的唯一对外查询入口
- *   Reads                 : LIFE_WORKFLOWS Sheet（+ 联查时经由
+ *   Reads                 : Workflows Sheet（+ 联查时经由
  *                           TaskQueryEngine 读 Tasks）
  *   Writes                : none
  *   Public API            : getWorkflow, getWorkflows,
@@ -21,7 +21,7 @@
 
 var WorkflowQueryEngine = (function () {
 
-  var WORKFLOWS_SHEET = 'LIFE_WORKFLOWS';
+  var WORKFLOWS_SHEET = 'Workflows';
 
   function _readAllRows_(sheetName) {
     try {
