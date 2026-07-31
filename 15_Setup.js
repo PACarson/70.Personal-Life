@@ -136,7 +136,7 @@ function setupSheets() {
     'rule_id', 'name', 'tags', 'status',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
-    'updated_time', 'decision_owner', 'approval_status'
+    'updated_time', 'decision_owner', 'approval_status', 'identity'
   ]);
 
   _ensureSheet_(ss, 'WorkflowTemplates', [
@@ -144,7 +144,7 @@ function setupSheets() {
     'captured_from_project_id', 'usage_count', 'last_used_at',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
-    'updated_time', 'decision_owner', 'approval_status'
+    'updated_time', 'decision_owner', 'approval_status', 'identity'
   ]);
 
   Logger.log('✅ Sheets 就位: Events, Tasks, ActiveTasks, ArchiveTasks, TaskStatistics, TaskFilters,');
@@ -254,14 +254,14 @@ function repairSheetHeaders() {
     'rule_id', 'name', 'tags', 'status',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
-    'updated_time', 'decision_owner', 'approval_status'
+    'updated_time', 'decision_owner', 'approval_status', 'identity'
   ]);
   _repairOneSheetHeader_('WorkflowTemplates', [
     'template_id', 'business_rule_id', 'version', 'status', 'workflow_shape',
     'captured_from_project_id', 'usage_count', 'last_used_at',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
-    'updated_time', 'decision_owner', 'approval_status'
+    'updated_time', 'decision_owner', 'approval_status', 'identity'
   ]);
 }
 

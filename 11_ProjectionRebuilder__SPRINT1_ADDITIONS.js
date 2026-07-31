@@ -36,6 +36,21 @@ function migrateSchemaPersonalLifeOS() {
     _appendMissingColumns_(sheetName, NEW_TASK_COLUMNS);
   });
 
+  // 【2026-07-29 修复】BusinessRules/WorkflowTemplates 建表定义原本漏了
+  // identity 列（15_Setup.gs 的疏漏，设计文档 00_Sheets_Structure.gs
+  // 也同样漏写），导致 DeduplicationEngine.findExistingBusinessRule 永远
+  // 找不到已存在的 BusinessRule（因为 identity 列压根不存在），第二次
+  // capture 同名规则时会创建出一个"从未真正落盘"的幻影 rule_id（EventBus
+  // 自己的执行内去重会拦截住重复的 BUSINESS_RULE_CREATED 事件，但
+  // captureAsWorkflowTemplate 后续逻辑已经在用这个幻影 rule_id 去查
+  // WorkflowTemplate 版本，查到的自然是空的，版本号/FROZEN 判断因此全部
+  // 出错）。用 _appendMissingColumns_（只在末尾追加，不改动/不重排现有
+  // 列，不会弄乱已有数据）修复，不用 _repairOneSheetHeader_（那个函数
+  // 会整行覆写表头，如果目标列表把 identity 插在中间会导致现有数据跟
+  // 表头错位——见 15_Setup.gs 对应位置的说明，这里只在末尾追加是安全的）。
+  _appendMissingColumns_('BusinessRules', ['identity']);
+  _appendMissingColumns_('WorkflowTemplates', ['identity']);
+
   // 七张新表全部是全新表（不存在旧数据问题），直接调用既有
   // setupSheets() 里的建表逻辑就够了——这里额外调用一次 setupSheets()
   // 本身是幂等的（_ensureSheet_ 对已存在的表不会重复处理），不会有副作用。

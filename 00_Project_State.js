@@ -109,3 +109,43 @@
  *   按已记录的判断纳入 Sprint 3 交付。
  */
 
+// ============================================================
+// 六、Sprint 3 Gate 第一次真实运行（2026-07-29）—— 发现并修复两处真实
+//     Bug（不是文件同步问题，是代码本身的错误）
+// ============================================================
+
+/**
+ *   跑分：Note Lifecycle Test ✅、Reminder Connector Smoke Test ✅、
+ *   Business Rule Full Cycle Test ❌、Bidirectional Conversion Test ❌
+ *   （前一轮"部分文件没同步"的问题已解决——这两个测试能跑起来本身
+ *   就证明了那一点）。
+ *
+ *   Bug 1：BusinessRules / WorkflowTemplates 建表定义（15_Setup.gs）
+ *   漏了 identity 列（本设计包 00_Sheets_Structure.gs 也同样漏写）。
+ *   后果：DeduplicationEngine 永远找不到已存在的 BusinessRule，第二次
+ *   capture 同名规则时会在一个从未真正落盘的"幻影" rule_id 上继续
+ *   操作，版本号/FROZEN 判断因此全错。修复：15_Setup.gs 两处建表
+ *   定义补上 identity（放在最后一列，不插入中间——中间插入会让已有
+ *   数据跟表头错位）；41_BusinessRuleEngine.createBusinessRuleDirect_
+ *   补上 identity 字段赋值（原来也漏了）；
+ *   11_ProjectionRebuilder.migrateSchemaPersonalLifeOS() 新增两行
+ *   _appendMissingColumns_ 调用，修复 Carson 已经建好的旧表。
+ *
+ *   Bug 2：27_ProjectEngine.checkEligibleForTaskDemotion_ 调用
+ *   getProjectsByParent(projectId) 漏了 ProjectQueryEngine. 前缀
+ *   （同一文件另一处 archiveProject 里的调用是对的，这里是纯粹的
+ *   复制/编写疏漏）。修复：加上前缀。
+ *
+ *   同时给 36_Tests_Sprint3Acceptance.gs 的
+ *   testBusinessRuleFullCycle_ 加了提前 return（原本一个环节失败后
+ *   还会继续往下跑，导致真正原因被后面的 JSON.parse 崩溃盖掉）；
+ *   testReminderConnectorSmoke_ 加了"创建后查询回来确认真的落盘"的
+ *   检查（原来只看 createProject 有没有抛异常，但 EventBus 会吞掉
+ *   投影失败，不抛错不等于真的写进表里）。
+ *
+ *   状态：这一轮修复后的四个文件（15_Setup.gs、
+ *   11_ProjectionRebuilder 追加函数、41_BusinessRuleEngine.gs、
+ *   27_ProjectEngine.gs）已重新交付，等 Carson 重新跑
+ *   runSprint3AcceptanceGate() 确认。
+ */
+

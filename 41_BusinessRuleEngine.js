@@ -97,6 +97,7 @@ var BusinessRuleEngine = (function () {
 
     var rule = {
       rule_id:          generateRuleId_(),
+      identity:         identity || '', // 【2026-07-29 修复】原来漏掉了，导致 DeduplicationEngine 永远找不到已存在的规则，见 11_ProjectionRebuilder migrateSchemaPersonalLifeOS 的说明
       name:             name,
       tags:             meta.tags || '',
       status:           'ACTIVE',

@@ -334,7 +334,7 @@ var ProjectEngine = (function () {
    * @returns {{eligible: boolean, reason: (string|undefined)}}
    */
   function checkEligibleForTaskDemotion_(projectId) {
-    var subProjects = getProjectsByParent(projectId).filter(function (p) {
+    var subProjects = ProjectQueryEngine.getProjectsByParent(projectId).filter(function (p) {
       return TERMINAL_STATUSES.indexOf(String(p.status || '').toUpperCase()) === -1;
     });
     if (subProjects.length > 0) {
