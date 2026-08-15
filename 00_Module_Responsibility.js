@@ -3,6 +3,12 @@
  * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
  * Module Responsibility
  *
+ * 【2026-08-14 补充，Sprint 4 Recovery，见 00_ADR.gs ADR-2026-07-24-021】
+ * 新增「十一」46_AIConnector.gs、「十二」47_AIPlanningEngine.gs、
+ * 「十三」22_PriorityEngine.gs 的 Sprint 4 增量。不是版本号变化——三个
+ * 文件在一次会话崩溃前已经写好，这次是把它们补录进本文件（详见对应的
+ * Recovery Audit 报告）。
+ *
  * Changelog: v5.1 → v5.2——新增 45_CanonicalRepresentation.gs（见
  * 本文件末尾「十」），承载 Canonical Identity 组装 + Task 状态到
  * Canonical Lifecycle 的映射（ADR-016/017）。27_ProjectEngine.gs /
@@ -358,4 +364,131 @@
  *                           未来其它 Domain OS 都能安全调用的基础
  *                           设施，依赖越少越不容易被其它模块的变化
  *                           连累
+ */
+
+// ============================================================
+// 十一、46_AIConnector.gs（Sprint 4 新增，Recovered → Contract
+//      Verified → Integration Pending，见 00_ADR.gs ADR-2026-07-24-021）
+// ============================================================
+
+/**
+ * ── Engine Contract ──────────────────────────────────────────────────
+ *   Responsibilities      : 把"给我一段文字回复"这个请求路由到已配置
+ *                           的 AI Provider（Anthropic/OpenAI/Gemini/
+ *                           DeepSeek 四选一），处理各家请求/响应格式
+ *                           差异
+ *   Owns                  : 各 Provider 的请求体/响应体格式转换、
+ *                           JSON 回复的代码块清洗（去 ```json 标记）
+ *   Reads                 : SecureConfig（AI_PROVIDER/AI_API_KEY/
+ *                           AI_MODEL）
+ *   Writes                : none（AI 调用本身不留痕；调用方拿到结果后
+ *                           如果要落地成业务对象，走各自正常的创建/
+ *                           发布 Event 流程）
+ *   Public API            : callAI_(prompt, options) → string,
+ *                           callAIForJSON_(prompt, options) → object
+ *   Dependencies           : 01_SecureConfig.gs、GAS 内建 UrlFetchApp
+ *   Forbidden Dependencies  : Sheet, Events——纯外部 I/O 桥接层，全项目
+ *                           唯一允许发起真实 AI 请求的模块，
+ *                           22/40/47 一律经这里调用，不允许各自直接
+ *                           写 UrlFetchApp.fetch()
+ *   Pure Function            : NO（发起真实网络请求）
+ *   Replay Events              : NO
+ *   Projection                  : NO
+ *   Thread Safety                 : 不需要（无共享可变状态，每次调用
+ *                           是独立无状态的 HTTP 请求）
+ *   Side Effects                    : YES（网络请求本身，不涉及本项目
+ *                           任何数据读写）
+ *   Notes                              : Sprint 4 开发中途会话崩溃后
+ *                           successfully 救回的三个文件之一——Recovery
+ *                           Audit（2026-08-14）核实：语法有效、
+ *                           01_SecureConfig 依赖存在、UrlFetchApp 在
+ *                           03_Output.gs 已有先例（外部请求授权大概率
+ *                           已具备）。错误信息统一三种前缀
+ *                           AI_NOT_CONFIGURED / AI_API_ERROR(Provider,
+ *                           HTTP code) / AI_PROVIDER_UNKNOWN /
+ *                           AI_RESPONSE_NOT_JSON，调用方可以据此做
+ *                           针对性处理，不需要解析自由文本错误信息。
+ *                           当前状态标记 Integration Pending——还没有
+ *                           任何 Telegram 指令间接触达本文件，见
+ *                           00_Known_Limitations.gs 新增条目。
+ */
+
+// ============================================================
+// 十二、47_AIPlanningEngine.gs（Sprint 4 新增，Recovered → Contract
+//      Verified → Integration Pending，见 ADR-2026-07-24-021）
+// ============================================================
+
+/**
+ * ── Engine Contract ──────────────────────────────────────────────────
+ *   Responsibilities      : AI Project Suggestion（给一批开放中的
+ *                           Note，建议要不要开一个新 Project）、AI
+ *                           Workflow Generation（给一段自然语言描述，
+ *                           生成一份建议的 Task 结构）——"AI Goal
+ *                           Planning" 明确不在范围内，Goal 属于 Life
+ *                           Execution OS（见 00_Domain_Boundary.gs
+ *                           「一」）
+ *   Owns                  : 两个 Prompt 的设计、AI 回复的校验/解析
+ *   Reads                 : 17_NoteQueryEngine.getOpenNotes（Project
+ *                           Suggestion 参考开放中的 Note）——Domain 层
+ *                           读 QueryEngine 的常规模式，跟
+ *                           40_ReviewEngine/41_BusinessRuleEngine 已有
+ *                           的 QueryEngine 依赖同类，不是新的
+ *                           Known Exception（见 00_File_Map.gs 二、
+ *                           2026-08-14 补充说明）
+ *   Writes                : none——只返回建议，不创建任何实体、不发布
+ *                           任何 Event；建议被人确认后，调用方走既有
+ *                           27_ProjectEngine.createProject /
+ *                           28_WorkflowEngine.startWorkflow /
+ *                           20_TaskEngine.createTask 完成创建（三者
+ *                           签名已在 Recovery Audit 核实存在且一致）
+ *   Public API            : suggestNewProject_(chatId),
+ *                           generateWorkflowSuggestion_(description)
+ *   Dependencies           : 46_AIConnector.gs、17_NoteQueryEngine.gs
+ *   Forbidden Dependencies  : 自动创建 Project/Workflow/Task
+ *   Pure Function            : NO（发起真实 AI 调用）
+ *   Replay Events              : NO
+ *   Projection                    : NO
+ *   Thread Safety                    : 不需要
+ *   Side Effects                       : YES（网络请求，不涉及本项目
+ *                           任何数据读写）
+ *   Notes                                 : Sprint 4 开发中途会话崩溃
+ *                           后 successfully 救回的三个文件之一——
+ *                           Recovery Audit（2026-08-14）逐字段核实
+ *                           generateWorkflowSuggestion_ 的输出跟
+ *                           41_BusinessRuleEngine.captureAsWorkflowTemplate
+ *                           的 workflow_shape 完全一致（包括容易混淆的
+ *                           parent_local_id/branch_group_label 两个
+ *                           字段，不是原始 Task 的 parent_task_id/
+ *                           branch_group）。当前状态标记 Integration
+ *                           Pending——同 46，还没有 Telegram 指令，见
+ *                           00_Known_Limitations.gs 新增条目。
+ */
+
+// ============================================================
+// 十三、22_PriorityEngine.gs（Sprint 4 增量：新增 AI 建议）
+// ============================================================
+
+/**
+ * ── Engine Contract（Sprint 3 基础上的增量）──────────────────────────
+ *   Sprint 3 既有的 computeUrgencyScore/computePriorityScore/
+ *   suggestPriority/rankByPriority 四个函数全部保留，本次不改动（见
+ *   00_ADR.gs ADR-2026-07-24-009 的 priority_user/priority_ai_recommended
+ *   双轨设计）。
+ *
+ *   新增 Public API           : suggestPriorityWithAI_(task,
+ *                           relatedContext) → {priority, reasoning}
+ *   新增 Reads                : 无新增（沿用既有输入，task 对象本身）
+ *   新增 Dependencies          : 46_AIConnector.gs（仅
+ *                           suggestPriorityWithAI_ 使用，既有四个
+ *                           函数不受影响，继续零外部依赖）
+ *   Pure Function（新函数）      : NO（发起真实 AI 调用）；既有四个
+ *                           函数保持 Pure Function: YES 不变
+ *   Notes                          : suggestPriorityWithAI_ 内部先调用
+ *                           既有 suggestPriority(task) 取规则版参考值
+ *                           一并放进 Prompt，AI 可以同意也可以给出不同
+ *                           判断——不是用 AI 结果替换规则版，两者都
+ *                           保留、调用方自行决定展示/采用哪一个。
+ *                           priority 字段严格校验必须是 HIGH/MEDIUM/
+ *                           LOW 之一，不是则抛 AI_RESPONSE_INVALID；
+ *                           reasoning 缺失时容错为空字符串，不报错。
  */

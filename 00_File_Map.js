@@ -3,6 +3,13 @@
  * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
  * File Map
  *
+ * 【2026-08-14 补充，Sprint 4 Recovery，见 ADR-2026-07-24-021】
+ * 46_AIConnector.gs / 47_AIPlanningEngine.gs 补录进「一」「二」「三」
+ * 三节；22_PriorityEngine.gs 的依赖列表补上 Sprint 4 新增的
+ * 46_AIConnector 依赖。不是版本号变化（仍是 v5.2），是治理文档补录之前
+ * 遗漏的两个文件——文件本身在一次会话崩溃前就已经写好，只是没有同步
+ * 进本文件（详见该次 Recovery Audit 报告）。
+ *
  * Changelog: v5.1 → v5.2——新增 45_CanonicalRepresentation.gs
  * （Foundation 层，见下方「一」）。
  *
@@ -154,12 +161,35 @@
  *   10_ProjectionEngine
  *     → 05_SheetUtils（读写全部 LIFE_ 表 + Tasks）
  *
+ *   46_AIConnector（Sprint 4，Recovered → Contract Verified →
+ *   Integration Pending，见 00_ADR.gs ADR-2026-07-24-021）
+ *     → 01_SecureConfig, GAS 内建 UrlFetchApp（唯二依赖，Forbidden：
+ *       Sheet/Events，见文件自身 Engine Contract）
+ *
+ *   47_AIPlanningEngine（Sprint 4，Recovered → Contract Verified →
+ *   Integration Pending，见 ADR-2026-07-24-021）
+ *     → 46_AIConnector, 17_NoteQueryEngine（读，不写；跟下面 22 的新
+ *       依赖一样，属于 G2 说明的 Domain→QueryEngine 常规读取，不是
+ *       Known Exception）
+ *
+ *   22_PriorityEngine（Sprint 4 增量，见十三、Module_Responsibility）
+ *     → 新增 46_AIConnector（仅 suggestPriorityWithAI_ 使用）
+ *
  * 依赖方向铁律不变（见 00_Project_Constitution.gs 零之四）：一律从
- * Runtime/Intelligence 指向 Integration，禁止反向；本次唯一的
- * Domain→Application 例外沿用既有模式（28_WorkflowEngine 依赖
+ * Runtime/Intelligence 指向 Integration，禁止反向。
+ *
+ * G2（2026-08-14 补充，见 ADR-2026-07-24-021）：Domain 引擎依赖
+ * Application 层 QueryEngine（例如 40_ReviewEngine → 12/14、
+ * 41_BusinessRuleEngine → 14/19、现在的 47_AIPlanningEngine → 17）
+ * 属于常规读取模式——QueryEngine 本来就是设计给"任何需要只读数据的层"
+ * 用的（见 00_Command_Reference.gs G1），不计入下面这条"已知例外，
+ * 不再新增"的名单。真正的 Known Exception 专指 Domain 直接依赖
+ * Application 层"非 QueryEngine"的工具/编排逻辑（判重、日期解析这类），
+ * 目前仍然只有两条，唯一沿用既有模式（28_WorkflowEngine 依赖
  * 09_TemporalParser 属于同一类"复用日期计算，不重新实现"的已记录例外，
  * 跟 21_RecurringEngine 那条是同一条例外原则的第二次应用，不是新开
- * 一类例外）。
+ * 一类例外）——47_AIPlanningEngine 不构成第三条，因为它依赖的是
+ * QueryEngine，不是同一类问题。
  */
 
 // ============================================================
@@ -189,11 +219,16 @@
  *                    45_CanonicalRepresentation.gs（v5.2 新增，跟
  *                    07_IdentityEngine.gs 归同一层——纯函数、承载
  *                    跨实体的规范定义，符合 Domain 层"承载业务能力"
- *                    的定义，不是通用读写基础设施）
+ *                    的定义，不是通用读写基础设施）,
+ *                    47_AIPlanningEngine.gs（Sprint 4 新增——两个
+ *                    Public API 都只产出建议、不落地任何实体，跟同层
+ *                    其它"只读输入、只出建议/衍生数据"的 Engine 同类）
  *
  *   Infrastructure : 01_SecureConfig.gs, 02_EventBus.gs, 03_Output.gs,
  *                    05_SheetUtils.gs, 10_ProjectionEngine.gs,
- *                    13_ActiveTasksEngine.gs
+ *                    13_ActiveTasksEngine.gs,
+ *                    46_AIConnector.gs（Sprint 4 新增——不碰 Sheet/
+ *                    Events，纯外部 I/O 桥接，跟 01_SecureConfig.gs 同类）
  *
  * 规则不变：低层不导入高层（Infrastructure 不知道 Domain 的存在）；
  * 每个文件恰好属于一层，不跨层（对照 UEF Checklist A3）。

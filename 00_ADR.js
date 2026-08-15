@@ -813,3 +813,83 @@
  *   风格对齐，各表名字本身仍然各自独立）。
  */
 
+/**
+ * ADR Number      : ADR-2026-07-24-021
+ * Status          : Accepted
+ * Decision Date   : 2026-08-14
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 46_AIConnector.gs, 22_PriorityEngine.gs,
+ *                   47_AIPlanningEngine.gs, 00_File_Map.gs,
+ *                   00_Module_Responsibility.gs,
+ *                   00_Known_Limitations.gs
+ * Related ADR      : ADR-2026-07-24-009（priority_ai_recommended 字段
+ *                   分裂设计，本次 suggestPriorityWithAI_ 正是填这个
+ *                   坑）
+ *
+ * Context
+ *   Sprint 4（AI）开发中途，执行环境用量耗尽、容器文件系统被重置。
+ *   仅 46_AIConnector.gs / 22_PriorityEngine.gs（AI 增量部分）/
+ *   47_AIPlanningEngine.gs 三个文件成功从会话记录中救回；
+ *   40_ReviewEngine.gs 和 00_Project_State.gs 的 Sprint 4 修改确认丢失，
+ *   两者现存内容均为干净的 Sprint 3 baseline，无残缺痕迹。2026-08-14
+ *   完成一次 Recovery + Architecture Audit，核实三个救回文件的语法、
+ *   依赖、契约、引用的治理依据（ADR-009、Architecture Principle 9、
+ *   Domain Boundary 里 Goal 归属判断、workflow_shape 字段名）均真实
+ *   准确，未发现 P0 级问题。
+ *
+ *   审计过程中发现一处需要澄清的架构问题：47_AIPlanningEngine.gs
+ *   （Domain 层）直接依赖 17_NoteQueryEngine.gs（Application 层）。
+ *   初步判断这可能构成第三次"Domain→Application 例外"（此前只有
+ *   21_RecurringEngine→09_IdempotencyManager、28_WorkflowEngine→
+ *   09_TemporalParser 两条，Constitution 原文明确"不再新增第二个"）。
+ *   进一步核对 00_File_Map.gs 后发现：40_ReviewEngine.gs 早就依赖
+ *   12_TaskQueryEngine/14_ProjectQueryEngine，41_BusinessRuleEngine.gs
+ *   早就依赖 14_ProjectQueryEngine/19_BusinessRuleQueryEngine——两者都是
+ *   Domain 依赖 Application 层 QueryEngine，且从未被当作"例外"记录过，
+ *   说明 Known Exception 名单实际上专指 Domain 依赖 Application 层
+ *   "非 QueryEngine"的工具/编排逻辑（判重、日期解析），QueryEngine
+ *   读取本身是 QueryEngine 存在的目的（见 00_Command_Reference.gs
+ *   G1："所有对外查询都经由 QueryEngine"），不是需要特批的例外。
+ *
+ * Decision
+ *   1. 三个救回文件正式接回 Sprint 3 baseline，标记状态
+ *      "Recovered → Contract Verified → Integration Pending"（不是
+ *      Stable）——契约已核实，但尚未经过 Telegram 集成测试、失败态/
+ *      负向测试、真实运行验证。
+ *   2. 47_AIPlanningEngine.gs → 17_NoteQueryEngine.gs 确认为常规
+ *      Domain→QueryEngine 读取模式，比照 40/41 已有先例，不计入
+ *      Known Exception 名单，不需要重构。00_File_Map.gs 二、三两节
+ *      同步补充这条澄清，避免以后重新被误判成需要处理的例外。
+ *   3. 三个新函数（suggestPriorityWithAI_/suggestNewProject_/
+ *      generateWorkflowSuggestion_）目前没有任何 Telegram 指令能触达
+ *      ——00_Command_Reference.gs / 06_TaskIntentParser.gs 核实过，
+ *      不存在任何指令入口，并且这不是 Sprint 4 特有的缺口：
+ *      Personal Life OS V2 整个 Domain 层（Note/Project/Workflow/
+ *      Review/BusinessRule）目前都还没有 Telegram 指令，
+ *      06_TaskIntentParser.gs 仍然只处理 Task 域。既有先例是
+ *      22_PriorityEngine.suggestPriority()——功能已实现、已验证，
+ *      但 Carson 在 2026-07-11 明确决定暂缓接指令，记录在
+ *      00_Known_Limitations.gs「三」，理由是"避免为了接一个函数临时
+ *      拍板一套指令格式"。三个新函数比照同一先例处理：记入
+ *      00_Known_Limitations.gs，不在本次仓促设计指令格式。
+ *
+ * Consequences
+ *   正面：baseline 恢复为可信状态，不需要靠猜测判断"代码在但 contract
+ *   是否已经断裂"；Known Exception 名单保持"不再新增"的原意，没有被
+ *   一次误判扩大；Telegram 指令设计留给后续跟 Note/Project/Workflow/
+ *   Review 指令一起统筹设计，不会因为 AI 功能先落地就仓促定型格式，
+ *   以后要改指令风格时改动面更小。
+ *   需要接受的代价：三个函数在指令层面暂时"存在但不可达"，跟
+ *   suggestPriority() 目前的处境一样——这是刻意暂缓，不是遗漏，后续
+ *   排期时从 00_Known_Limitations.gs 挪到 00_Command_Reference.gs
+ *   即可，不需要现在补决定。
+ *
+ * Notes
+ *   完整审计过程、逐文件核对证据见 2026-08-14 Recovery Audit 报告
+ *   （Sprint4_Recovery_Audit.md）。00_Project_State.gs 尚未写入正式
+ *   Sprint 4 章节——等 Integration Tests / Failure Tests / Regression
+ *   Tests 跑完、Sprint 3 Recovery & Integration Gate 通过后再写，本
+ *   ADR 不代表 Sprint 3 或 Sprint 4 已经验收完成。
+ */
+

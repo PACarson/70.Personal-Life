@@ -13,7 +13,11 @@
  * 存在的直接目的是让 Claude/外部审计在做 Architecture Review 时，看到
  * 这里列出的行为，不要当成 bug 或遗漏去提修复建议。
  *
- * LAST_UPDATED: 2026-07-17 — Reminder Policy Override 落地后同步措辞：
+ * LAST_UPDATED: 2026-08-14 — 新增「四、Sprint 4 AI 建议函数」，记录
+ * Recovery Audit 后确认的三个 AI 函数 Not Yet Exposed 状态，见
+ * 00_ADR.gs ADR-2026-07-24-021。
+ *
+ * 2026-07-17 — Reminder Policy Override 落地后同步措辞：
  * Natural Language Parser Scope 补充 reminder_policy（ADR-2026-07-17-009，
  * Carson 批准，判断标准沿用 V4.7 那次的同一套测试——确定性时间表达式
  * 解析 vs. 语义/领域判断——不是新引入一条）。
@@ -165,4 +169,52 @@
  * 避免为了接一个函数临时拍板一套指令格式）。真正要接的时候，在
  * 00_Roadmap.gs 排期，接完之后把对应条目从本文件挪到
  * 00_Command_Reference.gs 第二/六节。
+ */
+
+// ============================================================
+// 四、Sprint 4 AI 建议函数——Internal Capability, Not Yet Exposed
+//    （2026-08-14 新增，见 00_ADR.gs ADR-2026-07-24-021）
+// ============================================================
+
+/**
+ * Internal capability. Not yet exposed to users.
+ *
+ * 1. 22_PriorityEngine.suggestPriorityWithAI_(task, relatedContext)
+ * 2. 47_AIPlanningEngine.suggestNewProject_(chatId)
+ * 3. 47_AIPlanningEngine.generateWorkflowSuggestion_(description)
+ *
+ * Status: Implemented（Sprint 4 开发中途会话崩溃，三个函数所在的文件
+ * 成功从会话记录救回，2026-08-14 Recovery Audit 核实语法/依赖/契约均
+ * 通过），06_TaskIntentParser.gs 里没有任何 intent 路由到这三个函数，
+ * 00_Command_Reference.gs 也没有对应指令记录。
+ *
+ * 跟本节「三」的 suggestPriority() 是完全同一类处境，处理方式沿用同一条
+ * 先例：暂缓设计 Telegram 指令，不是遗漏。额外理由（比「三」更进一步）：
+ * 目前 Personal Life OS V2 整个 Domain 层——Note/Project/Workflow/
+ * Review/BusinessRule——都还没有任何 Telegram 指令，06_TaskIntentParser.gs
+ * 至今仍然只处理 Task 域（V1-V12/D1-D2 全部是 Task 相关，见
+ * 00_Command_Reference.gs）。也就是说，这三个 AI 函数不是"AI 功能比同层
+ * 其它功能慢一步"，而是"整层都还没有指令化"——如果现在单独为这三个 AI
+ * 函数设计指令格式，会变成整个 Domain 层第一批指令只服务 AI 建议、
+ * 不服务 Note/Project/Workflow 本身的创建/查询，形状会很奇怪。指令层
+ * 什么时候设计、按什么顺序（Note/Project/Workflow 先，还是 AI 建议先，
+ * 还是一起设计）留给 00_Roadmap.gs 排期决定，本文件只负责如实记录"现在
+ * 还没有"，不预先替未来的指令设计做决定。
+ *
+ * 三个函数各自的失败模式（供未来设计指令时参考，也是当前测试覆盖的
+ * 依据，见 48_Tests_AIEngines.gs）：
+ *   - AI 未配置 / API 报错 / 回复不是合法 JSON：三个函数都不吞掉这些
+ *     错误，原样从 46_AIConnector.gs 抛出（AI_NOT_CONFIGURED /
+ *     AI_API_ERROR / AI_RESPONSE_NOT_JSON 前缀），调用方（未来的指令
+ *     处理层）需要自己 catch 并转成用户可读的回复，参考
+ *     06_TaskIntentParser.gs 现有 TASK_CREATE 分支处理 SYSTEM_BUSY 前缀
+ *     错误的方式。
+ *   - JSON 合法但关键字段缺失/类型不对：suggestPriorityWithAI_ 和
+ *     generateWorkflowSuggestion_ 会显式校验并抛
+ *     AI_RESPONSE_INVALID；suggestNewProject_ 对次要字段（title/
+ *     reasoning/related_note_ids）容错为默认值，不抛错。
+ *   - 三个函数都不创建/修改任何实体，所以不存在"中途失败留下 orphan
+ *     entity"的风险——这个风险只会出现在未来"人类确认后，调用方拿着
+ *     建议去调 27/28/20 走创建流程"那一步的编排逻辑里，那部分逻辑目前
+ *     还不存在（属于 Telegram 指令层的一部分，见上）。
  */
