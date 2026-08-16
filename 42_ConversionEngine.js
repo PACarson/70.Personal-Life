@@ -133,7 +133,15 @@ var ConversionEngine = (function () {
       creator:         'User',
       source_module:   'ConversionEngine.convertNoteToTask',
       source_task_id:  '', // Note 不是 Task，没有 source_task_id 可填；血缘走 NOTE_CONVERTED 事件本身
-      created_method:  'Converted'
+      created_method:  'Converted',
+      decision_owner:  taskMeta.decision_owner // 2026-08-16 修复：此前没有转发这个字段，
+                                                 // 转换出来的 Task 会静默丢失调用方传入的
+                                                 // decision_owner，回退成 chat_id（Bug 由
+                                                 // UI Slice 1 测试发现）。不传 || '' 兜底——
+                                                 // 保持 taskMeta.decision_owner 为 undefined
+                                                 // 时，原有 fallback（createTask 内部
+                                                 // meta.decision_owner || String(chatId)）
+                                                 // 行为不变，向后兼容。
     }, chatId || sourceNote.chat_id);
 
     NoteEngine.markNoteConverted_(noteId, 'TASK', task.task_id, chatId || sourceNote.chat_id);
