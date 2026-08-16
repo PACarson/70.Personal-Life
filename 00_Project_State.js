@@ -17,10 +17,13 @@
 // ============================================================
 
 /**
- *   设计：v5.2（Architecture Freeze，已冻结，见 00_ADR.gs 全部 20 条）
+ *   设计：v5.2（Architecture Freeze，已冻结，见 00_ADR.gs 全部 21 条，
+ *   新增 ADR-2026-07-24-021）
  *   实现：Sprint 1（Foundation）Reference Certified；Sprint 3
- *   （Integration）代码已交付，Gate 待跑
- *   最后更新：2026-07-27
+ *   （Integration）Reference Certified；Sprint 4（AI）Recovery →
+ *   Contract Verified，Integration Pending（UI Entry Point 未定）；
+ *   UI Phase 0（Architecture Audit）进行中
+ *   最后更新：2026-08-16
  */
 
 // ============================================================
@@ -64,7 +67,8 @@
  *   Sprint 2（Execution）—— 不属于本项目，属于 Life Execution OS，见
  *   00_Domain_Boundary.gs
  *
- *   Sprint 4（AI）—— 未开始
+ *   （Sprint 4 已移到「八」，不再是"未开始"——Recovery 后 Contract
+ *   Verified，Integration 待做）
  */
 
 // ============================================================
@@ -86,9 +90,8 @@
 // ============================================================
 
 /**
- *   状态：🟡 代码已交付（2026-07-27），Reference Certified 待
- *   Carson 在真实环境跑 runSprint3AcceptanceGate() 后确认（同
- *   Sprint 1 流程，见 ADR-2026-07-24-019）
+ *   状态：✅ CERTIFIED（2026-08-16 第二次真实运行全部通过，详见「七」；
+ *   同 Sprint 1 流程，见 ADR-2026-07-24-019）
  *
  *   交付范围：Note（新增 29_NoteEngine + 17_NoteQueryEngine）、
  *   Review（新增 40_ReviewEngine + 18_ReviewQueryEngine）、
@@ -147,5 +150,109 @@
  *   11_ProjectionRebuilder 追加函数、41_BusinessRuleEngine.gs、
  *   27_ProjectEngine.gs）已重新交付，等 Carson 重新跑
  *   runSprint3AcceptanceGate() 确认。
+ */
+
+// ============================================================
+// 七、Sprint 1 + Sprint 3 Gate 重新运行（2026-08-16）—— 全部通过，
+//     「六」的待确认状态解除
+// ============================================================
+
+/**
+ *   背景：Sprint 4（AI）开发中途会话崩溃、容器重置后，2026-08-14 做了
+ *   一次 Recovery + Architecture Audit（见「八」），审计发现「六」记录
+ *   的"等 Carson 确认"这一步一直没有被正式确认过（Finding F1）。
+ *   2026-08-16 在真实生产 Apps Script 环境把 Sprint 1 和 Sprint 3 两个
+ *   Gate 都重新跑了一遍。
+ *
+ *   Sprint 1 Gate（runSprint1AcceptanceGate()，08:43:40–08:45:01）：
+ *   6/6 通过（跟 2026-07-27 那次结果一致，没有回归）。
+ *
+ *   Sprint 3 Gate（runSprint3AcceptanceGate()，08:47:19–08:48:59）：
+ *   4/4 通过（对比「六」记录的第一次真实运行 2/4——Bug 1/Bug 2 的修复
+ *   这次得到真实环境验证，不再只是"代码交付了但没确认"）：
+ *     ✅ Note Lifecycle Test
+ *     ✅ Business Rule Full Cycle Test（过程中 IdempotencyManager 正确
+ *        拦截了一次重复创建："BusinessRule 已存在（并发安全），跳过
+ *        创建"——这不是失败，是判重机制按设计生效的证据）
+ *     ✅ Bidirectional Conversion Test
+ *     ✅ Reminder Connector Smoke Test
+ *
+ *   结论：Sprint 1 与 Sprint 3 均可视为 Reference Certified。「六」
+ *   的待确认状态到此解除。
+ */
+
+// ============================================================
+// 八、Sprint 4（AI）—— Recovery → Contract Verified →
+//     Integration Pending（2026-08-14 起，见 ADR-2026-07-24-021）
+// ============================================================
+
+/**
+ *   背景：Sprint 4 开发中途，执行环境用量耗尽、容器文件系统被重置。
+ *   仅 46_AIConnector.gs / 22_PriorityEngine.gs（AI 增量）/
+ *   47_AIPlanningEngine.gs 三个文件成功救回；40_ReviewEngine.gs 和
+ *   本文件（00_Project_State.gs）的 Sprint 4 修改确认丢失（两者现存
+ *   内容均为干净的 Sprint 3 baseline，无残缺痕迹）。
+ *
+ *   2026-08-14 Recovery + Architecture Audit：核实三个救回文件语法、
+ *   依赖、契约、引用的治理依据（ADR-009、Architecture Principle 9、
+ *   Domain Boundary、workflow_shape 字段名）均真实准确，未发现 P0
+ *   问题。审计中一处初判为"新架构例外"的问题（47→17_NoteQueryEngine）
+ *   经进一步核实，确认属于 40/41 已有的 Domain→QueryEngine 常规读取
+ *   模式，不是新例外，详见 ADR-2026-07-24-021。
+ *
+ *   Governance Registration（2026-08-14）：00_File_Map.gs、
+ *   00_Module_Responsibility.gs 补录三个文件；00_Known_Limitations.gs
+ *   新增「四」，把三个新 AI 函数记为 Internal Capability, Not Yet
+ *   Exposed（跟既有 suggestPriority() 先例同一处理方式，不是遗漏）。
+ *
+ *   Contract-level Tests（2026-08-16 真实环境运行，
+ *   37_Tests_AIEngines.gs）：12/12 通过——覆盖 AI 合法/非法/缺字段
+ *   响应、AIConnector 报错原样传播、46 自身对非 200 响应与 ```json
+ *   代码块的处理。
+ *
+ *   当前状态：Contract Verified、真实环境 Unit 级测试通过。仍然
+ *   Integration Pending——没有任何 Telegram 或其它入口能触达这三个
+ *   AI 函数，也没有 Integration/Failure/Regression Tests 覆盖"人类
+ *   确认后走 27/28/20 创建实体"这条完整链路（这条链路本身也还不
+ *   存在）。指令/入口设计留给「九」UI Phase 决定，不在 Sprint 4
+ *   范围内单独仓促决定。
+ */
+
+// ============================================================
+// 九、UI Phase 0（Architecture Audit）—— 2026-08-16 启动
+// ============================================================
+
+/**
+ *   Sprint 1、Sprint 3 均已 Certified，Sprint 4 三个 AI 文件 Contract
+ *   Verified 之后，Carson 决定先做 UI，而不是先补 Telegram 指令层——
+ *   方向是 Google Apps Script HtmlService Web App（responsive，
+ *   desktop/tablet/mobile browser），明确排除 Telegram Command UI
+ *   作为第一阶段方案。
+ *
+ *   Phase 0 范围：只做 Architecture Audit，不写任何 UI 代码。先验证
+ *   Note → Task 这一个 Vertical Slice 能不能走通 UI → Command/Engine →
+ *   Event → Projection → UI 完整闭环，其余（Task→Project、
+ *   Project→Workflow→Task、Priority+AI Recommendation）留到 Slice 1
+ *   稳定之后。
+ *
+ *   状态：Phase 0 Audit 完成（UI_Architecture_Audit_Phase0.md）。部署
+ *   位置决定：Option A——UI 归属并部署在 Personal Life OS 自己项目里，
+ *   不放 Personal AI Core（避免过早引入跨项目复杂度，Core 保留为 AI
+ *   Infrastructure / Coordination Layer，Personal Life OS 通过既有
+ *   approved 集成机制调用它，不是反过来）。身份决定：核实过
+ *   07_IdentityEngine.gs 只是内容去重哈希生成器，没有 Actor/User
+ *   Identity 概念——不复用 Telegram chatId 当 Web Identity，改用
+ *   Session.getEffectiveUser().getEmail() 作为 decision_owner；chat_id
+ *   参数位继续传真实 SecureConfig 'TELEGRAM_CHAT_ID'（因为
+ *   03_Output.sendMessage/43_ReminderConnector 把 chat_id 当真实
+ *   Telegram 投递地址用，混入非 Telegram 值会导致提醒静默送不出去——
+ *   这是核实过的真实风险）。
+ *
+ *   Slice 1（Note → Task）代码已写完：50_UIBridge.gs（3 个 Public API
+ *   + doGet 入口）+ ui_index.html（Notes 面板，其余导航项禁用/标 soon）
+ *   + 38_Tests_UIBridge.gs（8 个 Positive/Negative/Integrity 测试）。
+ *   状态：Written，尚未在真实环境跑测试、尚未部署 Web App、尚未真实
+ *   浏览器点击验证——三者都需要 Carson 在 Apps Script 编辑器里操作后
+ *   才能确认。
  */
 
