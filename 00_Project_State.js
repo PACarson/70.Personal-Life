@@ -301,7 +301,11 @@
  *   chat_id，跟另外两个方向不对称。没有动它——那是它自己文档里说好
  *   留到以后再决定的行为，不是这次 Slice 2 该顺手改的范围。
  *
- *   状态：Written，尚未在真实环境跑 runUIBridgeSlice2Gate()、尚未真实
- *   浏览器点击验证 Tasks/Projects 两个面板。
+ *   状态：Bridge 层 Contract Verified（7/7，真实环境，2026-08-16 跑
+ *   runUIBridgeSlice2Gate() 全过，含两个 ADR-015 降级拦截场景）。
+ *   Slice 1 的 8 个测试同时重跑确认无回归。真实浏览器点击验证 Tasks/
+ *   Projects 两个面板——尚未收到确认，尤其是 blocked 状态那条暖色
+ *   提示文字的展示效果，自动化测试只能确认后端返回了正确的
+ *   code/message，没法确认前端样式对不对。
  */
 
