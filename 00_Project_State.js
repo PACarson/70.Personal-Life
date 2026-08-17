@@ -251,8 +251,37 @@
  *   Slice 1（Note → Task）代码已写完：50_UIBridge.gs（3 个 Public API
  *   + doGet 入口）+ ui_index.html（Notes 面板，其余导航项禁用/标 soon）
  *   + 38_Tests_UIBridge.gs（8 个 Positive/Negative/Integrity 测试）。
- *   状态：Written，尚未在真实环境跑测试、尚未部署 Web App、尚未真实
- *   浏览器点击验证——三者都需要 Carson 在 Apps Script 编辑器里操作后
- *   才能确认。
+ *
+ *   2026-08-16 第一次真实环境跑 38_Tests_UIBridge：7/8 通过，
+ *   testUIBridge_ConvertNoteToTask_Success_ 失败——发现一个既有 Bug（不
+ *   在这次新写的文件里）：42_ConversionEngine.convertNoteToTask 内部
+ *   拼 TaskEngine.createTask 的 meta 时用的是写死的对象，没有转发
+ *   decision_owner，转换出来的 Task 会静默丢失调用方传入的
+ *   decision_owner、回退成 chat_id。已修复（补一行字段转发，不影响
+ *   其它调用方的既有 fallback 行为），2026-08-16 重新跑
+ *   38_Tests_UIBridge：8/8 通过。这处修改碰的是 Sprint 3 已 Certified
+ *   的文件，建议之后找机会重新跑一次 Sprint 3 Gate 确认没有回归（目前
+ *   还没有专门为这一处改动重新跑过，只跑了 UI Bridge 自己的 Gate）。
+ *   同一 Bug 模式在 convertTaskToProject 里也存在，Slice 2 用到时再
+ *   处理，这次没动。
+ *
+ *   Carson 手动通过真实浏览器界面测试时报告：第 1 条 Note 转换正常
+ *   （Sheet 里有对应 Task），第 2、3 条转换后 UI 显示完成，但 Sheet
+ *   里没看到对应 Task 行。自动化 Gate（含专门测"连续转换两次会不会
+ *   产生 duplicate"的 Integrity Test）没有重现这个现象——不代表问题
+ *   不存在，只代表自动化测试目前覆盖不到这个具体场景。已经问了 Carson
+ *   第 2/3 条 Note 具体输入的内容、UI 上的具体表现，用于判断是不是
+ *   TaskEngine.createTask 自己的内容去重（identity hash 碰撞）在起
+ *   作用——回复前，这一项按"未确认，不代表已解决"处理，不假设已经
+ *   随着 decision_owner 那个 Bug 一起被修好。
+ *
+ *   治理文档已补齐：00_File_Map.gs「二」「三」、
+ *   00_Module_Responsibility.gs「十四」、00_Data_Ownership.gs「六」。
+ *
+ *   状态：Bridge 层 Engine Contract 测试 Contract Verified（8/8，真实
+ *   环境）。真实浏览器手动验证：部分完成，有一项未确认的疑似问题
+ *   （见上）。尚未部署确认（Carson 已经在用真实 URL 测试，视为已部署，
+ *   未收到部署失败的反馈）。Slice 1 在"未确认项"解决之前，不算完全
+ *   Stable，不建议开始 Slice 2。
  */
 

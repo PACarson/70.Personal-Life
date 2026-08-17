@@ -199,3 +199,31 @@
  * "悬空引用"风险——这是刻意的设计取舍：只增不删，用状态字段表达
  * "结束"，不用物理删除表达。
  */
+
+// ============================================================
+// 六、UI Identity & Ownership（2026-08-16 新增，UI Phase 0 → Slice 1，
+//     见 00_Project_State.gs「九」、00_Module_Responsibility.gs「十四」）
+// ============================================================
+
+/**
+ * 50_UIBridge.gs 不新增任何一张表的写入权——所有写操作最终落到既有
+ * Command（29_NoteEngine.createNote / 42_ConversionEngine.
+ * convertNoteToTask），既有 Command 已经是各自表的唯一写入者（本文件
+ * 「一」的矩阵不需要变）。UI 只是多了一个"发起写请求"的入口，跟
+ * Telegram 指令层并列，不是替代关系。
+ *
+ * Web Identity（decision_owner）：07_IdentityEngine.gs 核实过，只是
+ * 内容去重哈希生成器，没有 Actor/User Identity 概念，无法复用；也不
+ * 直接复用 Telegram chatId（Telegram Identity ≠ Web Identity ≠ Domain
+ * Identity）。改用 Session.getEffectiveUser().getEmail()。
+ *
+ * chat_id 的双重角色（这次排查 Bug 时确认，值得记下来避免以后重新
+ * 踩一次）：这个字段在既有代码里同时承担 (a) 每个实体的 owner/tenant
+ * key，(b) 03_Output.sendMessage / 43_ReminderConnector 用来真的投递
+ * Telegram 消息的地址——两者此前一直是同一个值，因为所有实体都来自
+ * Telegram。UI 引入了第二个创建渠道后，这两个角色被拆开处理：
+ * decision_owner 用 Web Identity（谁的决定），chat_id 参数位继续传
+ * 真实 SecureConfig 'TELEGRAM_CHAT_ID'（提醒该送到哪）。两个字段本来
+ * 就允许分开传，没有新增字段、没有改任何既有 Engine 的 Metadata
+ * Standard（「三」不变）。
+ */

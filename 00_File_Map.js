@@ -3,6 +3,10 @@
  * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
  * File Map
  *
+ * 【2026-08-16 补充，UI Phase 0 → Slice 1，见 00_Project_State.gs「九」】
+ * 50_UIBridge.gs + ui_index.html 补录进「二」「三」两节。不是版本号变化
+ * （仍是 v5.2）。
+ *
  * 【2026-08-14 补充，Sprint 4 Recovery，见 ADR-2026-07-24-021】
  * 46_AIConnector.gs / 47_AIPlanningEngine.gs 补录进「一」「二」「三」
  * 三节；22_PriorityEngine.gs 的依赖列表补上 Sprint 4 新增的
@@ -175,6 +179,14 @@
  *   22_PriorityEngine（Sprint 4 增量，见十三、Module_Responsibility）
  *     → 新增 46_AIConnector（仅 suggestPriorityWithAI_ 使用）
  *
+ *   50_UIBridge（UI Phase 0 Slice 1，见十四、Module_Responsibility，
+ *   00_Data_Ownership.gs「五」）
+ *     → 29_NoteEngine, 42_ConversionEngine, 17_NoteQueryEngine,
+ *       01_SecureConfig（读 TELEGRAM_CHAT_ID）——同样是 Domain/
+ *       Application 常规调用，不是新例外
+ *     配套前端文件：ui_index.html（Presentation，纯静态，不在
+ *     scriptExtensions 里，clasp 单独处理，不计入以上依赖图）
+ *
  * 依赖方向铁律不变（见 00_Project_Constitution.gs 零之四）：一律从
  * Runtime/Intelligence 指向 Integration，禁止反向。
  *
@@ -198,7 +210,11 @@
 // ============================================================
 
 /**
- *   Presentation   : 06_TaskIntentParser.gs
+ *   Presentation   : 06_TaskIntentParser.gs, 50_UIBridge.gs（2026-08-16
+ *                    新增，UI Phase 0 Slice 1——跟 06 同一种角色，把
+ *                    外部输入（这次是 HTTP/google.script.run，不是
+ *                    Telegram 指令文本）转成对内部 Command/QueryEngine
+ *                    的调用）
  *
  *   Application    : 08_DeduplicationEngine.gs, 09_IdempotencyManager.gs,
  *                    11_ProjectionRebuilder.gs, 12_TaskQueryEngine.gs,

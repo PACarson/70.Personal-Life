@@ -3,6 +3,9 @@
  * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
  * Module Responsibility
  *
+ * 【2026-08-16 补充，UI Phase 0 → Slice 1，见 00_Project_State.gs「九」】
+ * 新增「十四」50_UIBridge.gs。不是版本号变化。
+ *
  * 【2026-08-14 补充，Sprint 4 Recovery，见 00_ADR.gs ADR-2026-07-24-021】
  * 新增「十一」46_AIConnector.gs、「十二」47_AIPlanningEngine.gs、
  * 「十三」22_PriorityEngine.gs 的 Sprint 4 增量。不是版本号变化——三个
@@ -491,4 +494,61 @@
  *                           priority 字段严格校验必须是 HIGH/MEDIUM/
  *                           LOW 之一，不是则抛 AI_RESPONSE_INVALID；
  *                           reasoning 缺失时容错为空字符串，不报错。
+ */
+
+// ============================================================
+// 十四、50_UIBridge.gs（UI Phase 0 → Slice 1 新增，2026-08-16，见
+//      00_Project_State.gs「九」、UI_Architecture_Audit_Phase0.md）
+// ============================================================
+
+/**
+ * ── Engine Contract ──────────────────────────────────────────────────
+ *   Responsibilities      : 把 doGet/google.script.run 请求路由到既有
+ *                           QueryEngine/Command，做字段清洗和错误包装；
+ *                           解析 Web Identity
+ *   Owns                  : {ok,code,message} 错误信封格式；Web Identity
+ *                           解析规则（Session.getEffectiveUser().
+ *                           getEmail()）
+ *   Reads                 : 17_NoteQueryEngine.getOpenNotes
+ *   Writes                : none（自己不发 Event，全部通过既有 Command）
+ *   Public API            : doGet(e)，ui_getOpenNotes(),
+ *                           ui_createNote(content),
+ *                           ui_convertNoteToTask(noteId)
+ *                           （后三个都带一个仅测试用的第二参数，前端
+ *                           永远不传）
+ *   Dependencies           : 29_NoteEngine.gs、42_ConversionEngine.gs、
+ *                           17_NoteQueryEngine.gs、01_SecureConfig.gs
+ *   Forbidden Dependencies  : Sheet 直接读写、Events 直接发布
+ *   Pure Function            : NO
+ *   Side Effects              : YES（间接，通过调用既有 Command）
+ *   Notes                        : 身份设计——07_IdentityEngine.gs 核实
+ *                           过，只是内容去重哈希生成器，没有 Actor/
+ *                           User Identity 概念，不能复用；decision_
+ *                           owner 改用 Session.getEffectiveUser().
+ *                           getEmail()（Web Identity，跟 Telegram
+ *                           chatId 概念上分开）；chat_id 参数位继续传
+ *                           真实 SecureConfig 'TELEGRAM_CHAT_ID'——
+ *                           因为 03_Output.sendMessage/
+ *                           43_ReminderConnector 把 chat_id 当真实
+ *                           投递地址用，混入非 Telegram 值会导致提醒
+ *                           静默送不出去（核实过的真实风险，不是猜测）。
+ *
+ *                           开发过程中发现并修复了一个既有 Bug（不是
+ *                           本文件的 Bug）：42_ConversionEngine.
+ *                           convertNoteToTask 内部拼 TaskEngine.
+ *                           createTask 的 meta 时用的是写死的对象，
+ *                           没有转发 decision_owner，导致转换出来的
+ *                           Task 静默丢失调用方传入的 decision_owner、
+ *                           回退成 chat_id——2026-08-16 修复，已通过
+ *                           Bridge 层测试 + Sprint 3 Gate 重新验证。
+ *                           同一模式在 convertTaskToProject 里也存在，
+ *                           Slice 2 用到时再修，现在没动。
+ *
+ *                           测试：38_Tests_UIBridge.gs，8/8 通过（真实
+ *                           环境）。仍然有一项未确认：Carson 手动通过
+ *                           真实浏览器界面转换第 2/3 条 Note 时，Google
+ *                           Sheet 里没看到对应 Task 行，但自动化 Gate
+ *                           测试（含 NoDuplicateOnRetry）没有重现这个
+ *                           现象——具体原因待确认（见 00_Project_
+ *                           State.gs「九」），不代表已经排除。
  */
