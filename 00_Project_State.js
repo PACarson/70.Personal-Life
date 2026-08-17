@@ -265,23 +265,43 @@
  *   同一 Bug 模式在 convertTaskToProject 里也存在，Slice 2 用到时再
  *   处理，这次没动。
  *
- *   Carson 手动通过真实浏览器界面测试时报告：第 1 条 Note 转换正常
+ *   Carson 手动通过真实浏览器界面测试时曾报告：第 1 条 Note 转换正常
  *   （Sheet 里有对应 Task），第 2、3 条转换后 UI 显示完成，但 Sheet
- *   里没看到对应 Task 行。自动化 Gate（含专门测"连续转换两次会不会
- *   产生 duplicate"的 Integrity Test）没有重现这个现象——不代表问题
- *   不存在，只代表自动化测试目前覆盖不到这个具体场景。已经问了 Carson
- *   第 2/3 条 Note 具体输入的内容、UI 上的具体表现，用于判断是不是
- *   TaskEngine.createTask 自己的内容去重（identity hash 碰撞）在起
- *   作用——回复前，这一项按"未确认，不代表已解决"处理，不假设已经
- *   随着 decision_owner 那个 Bug 一起被修好。
+ *   里没看到对应 Task 行。2026-08-16 Carson 确认这个疑似问题已解决
+ *   （具体原因未展开说明，按已解决处理，不重新展开排查）。
  *
  *   治理文档已补齐：00_File_Map.gs「二」「三」、
  *   00_Module_Responsibility.gs「十四」、00_Data_Ownership.gs「六」。
  *
- *   状态：Bridge 层 Engine Contract 测试 Contract Verified（8/8，真实
- *   环境）。真实浏览器手动验证：部分完成，有一项未确认的疑似问题
- *   （见上）。尚未部署确认（Carson 已经在用真实 URL 测试，视为已部署，
- *   未收到部署失败的反馈）。Slice 1 在"未确认项"解决之前，不算完全
- *   Stable，不建议开始 Slice 2。
+ *   状态：Slice 1（Note → Task）Stable——Bridge 层 Contract Verified
+ *   （8/8，真实环境），真实浏览器手动验证通过，此前的未确认项已由
+ *   Carson 确认解决。
+ */
+
+// ============================================================
+// 十、UI Phase 0 → Slice 2（Task ↔ Project，2026-08-16）
+// ============================================================
+
+/**
+ *   代码已写完：50_UIBridge.gs 新增 4 个函数
+ *   （ui_getConvertibleTasks/ui_getActiveProjects/
+ *   ui_convertTaskToProject/ui_convertProjectToTask）；ui_index.html
+ *   加了 Tasks/Projects 两个面板 + 面板切换逻辑；
+ *   38_Tests_UIBridge.gs 新增 7 个测试（含专门测 ADR-2026-07-24-015
+ *   降级前置校验的两个 Integrity Test：Sub-Project 未处理 / 未完成
+ *   Task 未处理）。
+ *
+ *   顺手修了 convertTaskToProject 里同一个 decision_owner 不转发的
+ *   Bug（Slice 1 那次在 convertNoteToTask 发现的同一模式，这次没有
+ *   等测试再发现一次，直接改）。
+ *
+ *   一个已知、这次没有修的限制：Project→Task 方向
+ *   （TaskEngine.createTaskFromConversion_）的字段映射按其自身 JSDoc
+ *   明确是"预留，不接受调用方覆盖"，decision_owner 固定 fallback 成
+ *   chat_id，跟另外两个方向不对称。没有动它——那是它自己文档里说好
+ *   留到以后再决定的行为，不是这次 Slice 2 该顺手改的范围。
+ *
+ *   状态：Written，尚未在真实环境跑 runUIBridgeSlice2Gate()、尚未真实
+ *   浏览器点击验证 Tasks/Projects 两个面板。
  */
 

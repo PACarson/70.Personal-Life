@@ -1,13 +1,14 @@
 /**
  * 38_Tests_UIBridge.gs
- * Personal Life OS — UI Vertical Slice 1 Tests（Note → Task）
+ * Personal Life OS — UI Vertical Slice 1 + 2 Tests（Note→Task,
+ * Task↔Project）
  *
  * 跟 35/36 一样是真实环境集成测试（真的写 Sheet），用命名空间化的测试
  * chatId（accept_test_ui_ + 时间戳）隔离，不碰真实 Telegram 数据。
  * 结构对照 UI_Architecture_Audit_Phase0.md「Testing Requirements」：
  * Positive / Negative / Integrity 三类。
  *
- * 单一入口 runUIBridgeSlice1Gate()。
+ * 两个独立入口：runUIBridgeSlice1Gate()、runUIBridgeSlice2Gate()。
  */
 
 // ============================================================
@@ -232,7 +233,192 @@ function testUIBridge_ConvertedNote_NoLongerInOpenList_() {
 }
 
 // ============================================================
-// 四、单一入口
+// 五、Slice 2 Positive Tests（Task ↔ Project，ADR-2026-07-24-015）
+// ============================================================
+
+function testUIBridge_ConvertTaskToProject_Success_() {
+  Logger.log('--- testUIBridge_ConvertTaskToProject_Success_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+  var testOwner = 'test-ui@example.com';
+
+  try {
+    var task = TaskEngine.createTask('验收测试：这个任务长大了要拆项目', {}, testChatId);
+
+    var converted = ui_convertTaskToProject(task.task_id, { chatId: testChatId, decisionOwner: testOwner });
+    if (!converted.ok) {
+      Logger.log('❌ 转换应该成功，实际: ' + JSON.stringify(converted));
+      pass = false;
+    } else {
+      if (converted.project.title !== task.title) { Logger.log('❌ Project 标题应该继承 Task 标题'); pass = false; }
+      if (converted.project.decision_owner !== testOwner) { Logger.log('❌ decision_owner 没有正确转发，实际: ' + converted.project.decision_owner); pass = false; }
+      if (converted.project.created_method !== 'Converted') { Logger.log('❌ created_method 应该是 Converted'); pass = false; }
+    }
+
+    try { TaskEngine.cancelTask(task.task_id, testChatId); } catch (ignore) {}
+    if (converted.ok && converted.project) { try { ProjectEngine.archiveProject(converted.project.project_id, testChatId); } catch (ignore) {} }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertTaskToProject_Success_ PASS' : '❌ testUIBridge_ConvertTaskToProject_Success_ FAIL');
+  return pass;
+}
+
+function testUIBridge_ConvertProjectToTask_Success_EmptyProject_() {
+  Logger.log('--- testUIBridge_ConvertProjectToTask_Success_EmptyProject_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+
+  try {
+    var project = ProjectEngine.createProject('验收测试：空 Project 应该能降级', {}, testChatId);
+
+    var converted = ui_convertProjectToTask(project.project_id, { chatId: testChatId });
+    if (!converted.ok) {
+      Logger.log('❌ 没有 Sub-Project、没有未完成 Task 的空 Project 应该允许降级，实际: ' + JSON.stringify(converted));
+      pass = false;
+    }
+
+    if (converted.ok && converted.task) { try { TaskEngine.cancelTask(converted.task.task_id, testChatId); } catch (ignore) {} }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertProjectToTask_Success_EmptyProject_ PASS' : '❌ testUIBridge_ConvertProjectToTask_Success_EmptyProject_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 六、Slice 2 Negative Tests
+// ============================================================
+
+function testUIBridge_ConvertTaskToProject_InvalidOrMissingId_() {
+  Logger.log('--- testUIBridge_ConvertTaskToProject_InvalidOrMissingId_ 开始 ---');
+  var pass = true;
+
+  var missing = ui_convertTaskToProject(null, { chatId: 'accept_test_ui_x' });
+  if (missing.ok || missing.code !== 'MISSING_TASK_ID') { Logger.log('❌ 缺 taskId 应该返回 MISSING_TASK_ID: ' + JSON.stringify(missing)); pass = false; }
+
+  var invalid = ui_convertTaskToProject('TASK-DOES-NOT-EXIST-99999', { chatId: 'accept_test_ui_x' });
+  if (invalid.ok || invalid.code !== 'NOT_FOUND') { Logger.log('❌ 不存在的 taskId 应该返回 NOT_FOUND: ' + JSON.stringify(invalid)); pass = false; }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertTaskToProject_InvalidOrMissingId_ PASS' : '❌ testUIBridge_ConvertTaskToProject_InvalidOrMissingId_ FAIL');
+  return pass;
+}
+
+function testUIBridge_ConvertProjectToTask_InvalidOrMissingId_() {
+  Logger.log('--- testUIBridge_ConvertProjectToTask_InvalidOrMissingId_ 开始 ---');
+  var pass = true;
+
+  var missing = ui_convertProjectToTask(null, { chatId: 'accept_test_ui_x' });
+  if (missing.ok || missing.code !== 'MISSING_PROJECT_ID') { Logger.log('❌ 缺 projectId 应该返回 MISSING_PROJECT_ID: ' + JSON.stringify(missing)); pass = false; }
+
+  var invalid = ui_convertProjectToTask('PRJ-DOES-NOT-EXIST-99999', { chatId: 'accept_test_ui_x' });
+  if (invalid.ok || invalid.code !== 'NOT_FOUND') { Logger.log('❌ 不存在的 projectId 应该返回 NOT_FOUND: ' + JSON.stringify(invalid)); pass = false; }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertProjectToTask_InvalidOrMissingId_ PASS' : '❌ testUIBridge_ConvertProjectToTask_InvalidOrMissingId_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 七、Slice 2 Integrity / Business Rule Tests（ADR-015 核心）
+// ============================================================
+
+function testUIBridge_ConvertProjectToTask_BlockedByIncompleteTask_() {
+  Logger.log('--- testUIBridge_ConvertProjectToTask_BlockedByIncompleteTask_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+
+  try {
+    var project = ProjectEngine.createProject('验收测试：底下还有活没干完', {}, testChatId);
+    var childTask = TaskEngine.createTask('验收测试：子任务，故意不做完', { project_id: project.project_id }, testChatId);
+
+    var result = ui_convertProjectToTask(project.project_id, { chatId: testChatId });
+    if (result.ok) {
+      Logger.log('❌ 还有未完成子 Task 的 Project 不应该允许降级，但成功了');
+      pass = false;
+    } else if (result.code !== 'BLOCKED' || result.message.indexOf('未完成的 Task') === -1) {
+      Logger.log('❌ 应该是 BLOCKED + "未完成的 Task" 原因，实际: ' + JSON.stringify(result));
+      pass = false;
+    }
+
+    try { TaskEngine.cancelTask(childTask.task_id, testChatId); } catch (ignore) {}
+    try { ProjectEngine.archiveProject(project.project_id, testChatId); } catch (ignore) {}
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertProjectToTask_BlockedByIncompleteTask_ PASS' : '❌ testUIBridge_ConvertProjectToTask_BlockedByIncompleteTask_ FAIL');
+  return pass;
+}
+
+function testUIBridge_ConvertProjectToTask_BlockedBySubProject_() {
+  Logger.log('--- testUIBridge_ConvertProjectToTask_BlockedBySubProject_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+
+  try {
+    var parent = ProjectEngine.createProject('验收测试：有子项目的父项目', {}, testChatId);
+    var child = ProjectEngine.createProject('验收测试：子项目', { parent_project_id: parent.project_id }, testChatId);
+
+    var result = ui_convertProjectToTask(parent.project_id, { chatId: testChatId });
+    if (result.ok) {
+      Logger.log('❌ 还有 Sub-Project 的 Project 不应该允许降级，但成功了');
+      pass = false;
+    } else if (result.code !== 'BLOCKED' || result.message.indexOf('Sub-Project') === -1) {
+      Logger.log('❌ 应该是 BLOCKED + "Sub-Project" 原因，实际: ' + JSON.stringify(result));
+      pass = false;
+    }
+
+    try { ProjectEngine.archiveProject(child.project_id, testChatId); } catch (ignore) {}
+    try { ProjectEngine.archiveProject(parent.project_id, testChatId); } catch (ignore) {}
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertProjectToTask_BlockedBySubProject_ PASS' : '❌ testUIBridge_ConvertProjectToTask_BlockedBySubProject_ FAIL');
+  return pass;
+}
+
+function testUIBridge_ConvertTaskToProject_NoDuplicateOnRetry_() {
+  Logger.log('--- testUIBridge_ConvertTaskToProject_NoDuplicateOnRetry_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+
+  try {
+    var task = TaskEngine.createTask('验收测试：Task→Project 重复提交检查', {}, testChatId);
+
+    var first = ui_convertTaskToProject(task.task_id, { chatId: testChatId });
+    var second = ui_convertTaskToProject(task.task_id, { chatId: testChatId });
+
+    if (!first.ok || !second.ok) {
+      Logger.log('❌ 两次调用都应该成功返回: ' + JSON.stringify(first) + ' / ' + JSON.stringify(second));
+      pass = false;
+    } else if (first.project.project_id !== second.project.project_id) {
+      Logger.log('❌ 重复转换产生了两个不同的 Project——duplicate entity bug');
+      pass = false;
+    } else if (!second.already_converted) {
+      Logger.log('❌ 第二次应该标记 already_converted:true');
+      pass = false;
+    }
+
+    try { TaskEngine.cancelTask(task.task_id, testChatId); } catch (ignore) {}
+    if (first.ok && first.project) { try { ProjectEngine.archiveProject(first.project.project_id, testChatId); } catch (ignore) {} }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_ConvertTaskToProject_NoDuplicateOnRetry_ PASS' : '❌ testUIBridge_ConvertTaskToProject_NoDuplicateOnRetry_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 八、单一入口
 // ============================================================
 
 function runUIBridgeSlice1Gate() {
@@ -265,6 +451,39 @@ function runUIBridgeSlice1Gate() {
       '手动走一遍真实浏览器界面（Bridge 层测试不能替代真实点击）'
     : '❌ 有测试未通过——请把上面完整 Logger 输出发回去');
   Logger.log('========== UI Vertical Slice 1 Gate 结束 ==========');
+
+  return allPass;
+}
+
+function runUIBridgeSlice2Gate() {
+  Logger.log('========== UI Vertical Slice 2 Gate 开始 ==========');
+  Logger.log('范围：50_UIBridge.gs 新增 4 个函数 + Task↔Project 双向');
+  Logger.log('完整闭环，重点覆盖 ADR-2026-07-24-015 的降级前置校验。');
+  Logger.log('');
+
+  var results = {
+    'Positive: Convert Task to Project Success':      testUIBridge_ConvertTaskToProject_Success_(),
+    'Positive: Convert Empty Project to Task Success': testUIBridge_ConvertProjectToTask_Success_EmptyProject_(),
+    'Negative: Task→Project Invalid/Missing ID':       testUIBridge_ConvertTaskToProject_InvalidOrMissingId_(),
+    'Negative: Project→Task Invalid/Missing ID':       testUIBridge_ConvertProjectToTask_InvalidOrMissingId_(),
+    'Integrity: Blocked by Incomplete Child Task':     testUIBridge_ConvertProjectToTask_BlockedByIncompleteTask_(),
+    'Integrity: Blocked by Sub-Project':               testUIBridge_ConvertProjectToTask_BlockedBySubProject_(),
+    'Integrity: No Duplicate Project on Retry':        testUIBridge_ConvertTaskToProject_NoDuplicateOnRetry_()
+  };
+
+  Logger.log('');
+  Logger.log('========== UI Vertical Slice 2 Gate 结果汇总 ==========');
+  var allPass = true;
+  for (var name in results) {
+    Logger.log((results[name] ? '✅ ' : '❌ ') + name);
+    if (!results[name]) allPass = false;
+  }
+  Logger.log('');
+  Logger.log(allPass
+    ? '✅✅✅ 全部通过——Task↔Project 双向闭环 + ADR-015 降级校验验证完成。' +
+      '下一步：真实浏览器手动点一遍 Tasks/Projects 两个面板'
+    : '❌ 有测试未通过——请把上面完整 Logger 输出发回去');
+  Logger.log('========== UI Vertical Slice 2 Gate 结束 ==========');
 
   return allPass;
 }

@@ -39,14 +39,19 @@
  *                           清洗，错误包装，解析 Web Identity
  *   Owns                  : {ok,code,message} 错误信封格式；Web Identity
  *                           解析规则
- *   Reads                 : 17_NoteQueryEngine
+ *   Reads                 : 17_NoteQueryEngine, 12_TaskQueryEngine（非
+ *                           终态过滤）, 14_ProjectQueryEngine
  *   Writes                : none（自己不发 Event，全部通过既有 Command）
  *   Public API            : ui_getOpenNotes(), ui_createNote(content),
- *                           ui_convertNoteToTask(noteId)
+ *                           ui_convertNoteToTask(noteId)，
+ *                           ui_getConvertibleTasks(), ui_getActiveProjects(),
+ *                           ui_convertTaskToProject(taskId),
+ *                           ui_convertProjectToTask(projectId)
  *                           （均有第二个 _testOverrides 参数，仅测试用，
  *                           前端永远不传）
  *   Dependencies           : 29_NoteEngine.gs、42_ConversionEngine.gs、
- *                           17_NoteQueryEngine.gs、01_SecureConfig.gs
+ *                           17_NoteQueryEngine.gs、12_TaskQueryEngine.gs、
+ *                           14_ProjectQueryEngine.gs、01_SecureConfig.gs
  *   Forbidden Dependencies  : Sheet 直接读写、Events 直接发布
  *   Pure Function            : NO
  *   Side Effects              : YES（间接，通过调用既有 Command）
@@ -181,6 +186,112 @@ function ui_convertNoteToTask(noteId, _testOverrides) {
 
     if (result.not_found) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这条 Note（可能已经被删除或转换过）' };
+    }
+    return { ok: true, task: result.task, already_converted: !!result.already_converted };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+// ============================================================
+// Slice 2（Task ↔ Project，2026-08-16，见 00_ADR.gs ADR-2026-07-24-015、
+// 00_Business_Rules.gs「一」）
+// ============================================================
+
+/**
+ * 只返回非终态 Task（PENDING/BLOCKED/WAITING）——跟 Business_Rules「一」
+ * 里 Task→Project 的前置校验对齐（终态 Task 转 Project 没有意义）。
+ * TaskQueryEngine.getTasks 只支持单值精确匹配，多状态过滤在这里做。
+ * @param {object} [_testOverrides]
+ */
+function ui_getConvertibleTasks(_testOverrides) {
+  try {
+    var chatId = _resolveChatId_(_testOverrides);
+    var NONTERMINAL = ['PENDING', 'BLOCKED', 'WAITING'];
+    var tasks = TaskQueryEngine.getTasks(chatId).filter(function (t) {
+      return NONTERMINAL.indexOf(String(t.status || '').toUpperCase()) !== -1;
+    });
+    return { ok: true, tasks: tasks };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * @param {object} [_testOverrides]
+ */
+function ui_getActiveProjects(_testOverrides) {
+  try {
+    var chatId = _resolveChatId_(_testOverrides);
+    var projects = ProjectQueryEngine.getActiveProjects(chatId);
+    return { ok: true, projects: projects };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * @param {string} taskId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, project:object, already_converted?:boolean}|
+ *           {ok:false, code:'NOT_FOUND'|string, message}}
+ */
+function ui_convertTaskToProject(taskId, _testOverrides) {
+  try {
+    if (!taskId) {
+      return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var decisionOwner = _resolveDecisionOwner_(_testOverrides);
+
+    var result = ConversionEngine.convertTaskToProject(taskId, {
+      decision_owner: decisionOwner
+    }, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除或转换过）' };
+    }
+    return { ok: true, project: result.project, already_converted: !!result.already_converted };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * Project→Task 有 Task→Project 没有的第三种结果：{blocked:true, reason}
+ * ——ADR-015 的前置校验没通过（还有 Sub-Project 或未完成 Task），不是
+ * 异常，是一个正常、预期内的"暂时不能转换"结果，转成 code:'BLOCKED'
+ * 而不是裸错误，前端应该用不同于"出错了"的方式呈现（说明原因，不是
+ * 报红）。
+ *
+ * 已知限制（不是这次引入的，是 TaskEngine.createTaskFromConversion_
+ * 本身的既有设计——见该函数 JSDoc"预留，不接受调用方覆盖映射规则"）：
+ * 这个方向转换出来的 Task，decision_owner 固定 fallback 成 chat_id，
+ * 拿不到 Web Identity——跟 Task→Project、Note→Task 两个方向不对称。
+ * 这不是本文件能修的（改 createTaskFromConversion_ 的映射规则不在
+ * Slice 2 范围内，那是它自己文档明确保留到以后再决定的行为），如果
+ * 需要修，应该是一次独立、带着"到底要不要开放覆盖"这个问题一起决定的
+ * 改动，不是顺手就改。
+ *
+ * @param {string} projectId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, task:object, already_converted?:boolean}|
+ *           {ok:false, code:'NOT_FOUND'|'BLOCKED'|string, message}}
+ */
+function ui_convertProjectToTask(projectId, _testOverrides) {
+  try {
+    if (!projectId) {
+      return { ok: false, code: 'MISSING_PROJECT_ID', message: '缺少 projectId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+
+    var result = ConversionEngine.convertProjectToTask(projectId, null, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Project（可能已经被删除或转换过）' };
+    }
+    if (result.blocked) {
+      return { ok: false, code: 'BLOCKED', message: result.reason };
     }
     return { ok: true, task: result.task, already_converted: !!result.already_converted };
   } catch (e) {

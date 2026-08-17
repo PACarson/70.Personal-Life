@@ -71,7 +71,15 @@ var ConversionEngine = (function () {
       execution_mode:    projectMeta.execution_mode || '',
       source_task_id:    taskId,
       creator:           'User',
-      source_module:     'ConversionEngine.convertTaskToProject'
+      source_module:     'ConversionEngine.convertTaskToProject',
+      decision_owner:    projectMeta.decision_owner // 2026-08-16 同一处修复
+                                                       // （见 convertNoteToTask 上面
+                                                       // 的说明）：此前没有转发，
+                                                       // Slice 2 开发时顺手修，不等
+                                                       // 它再被测试发现一次。不传
+                                                       // || '' 兜底，未传时行为
+                                                       // 不变（createProject 内部
+                                                       // 自己会 fallback 成 chatId）。
     }, chatId || sourceTask.chat_id);
 
     TaskEngine.markTaskConverted_(taskId, project.project_id, chatId || sourceTask.chat_id);
