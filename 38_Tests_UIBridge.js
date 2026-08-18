@@ -1,14 +1,15 @@
 /**
  * 38_Tests_UIBridge.gs
- * Personal Life OS — UI Vertical Slice 1 + 2 Tests（Note→Task,
- * Task↔Project）
+ * Personal Life OS — UI Vertical Slice 1 + 2 + 3 Tests（Note→Task,
+ * Task↔Project, Project→Template→Instance）
  *
  * 跟 35/36 一样是真实环境集成测试（真的写 Sheet），用命名空间化的测试
  * chatId（accept_test_ui_ + 时间戳）隔离，不碰真实 Telegram 数据。
  * 结构对照 UI_Architecture_Audit_Phase0.md「Testing Requirements」：
  * Positive / Negative / Integrity 三类。
  *
- * 两个独立入口：runUIBridgeSlice1Gate()、runUIBridgeSlice2Gate()。
+ * 三个独立入口：runUIBridgeSlice1Gate()、runUIBridgeSlice2Gate()、
+ * runUIBridgeSlice3Gate()。
  */
 
 // ============================================================
@@ -484,6 +485,281 @@ function runUIBridgeSlice2Gate() {
       '下一步：真实浏览器手动点一遍 Tasks/Projects 两个面板'
     : '❌ 有测试未通过——请把上面完整 Logger 输出发回去');
   Logger.log('========== UI Vertical Slice 2 Gate 结束 ==========');
+
+  return allPass;
+}
+
+// ============================================================
+// 九、Slice 3 Positive Tests（Project → Workflow → Task，三层模型）
+// ============================================================
+
+function testUIBridge_CaptureProjectAsTemplate_Success_() {
+  Logger.log('--- testUIBridge_CaptureProjectAsTemplate_Success_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+  var ruleName = '验收测试规则_' + new Date().getTime();
+
+  try {
+    var project = ProjectEngine.createProject('验收测试：待拍照的 Project', {}, testChatId);
+    TaskEngine.createTask('验收测试：里面的任务', { project_id: project.project_id }, testChatId);
+
+    var result = ui_captureProjectAsTemplate(project.project_id, ruleName);
+    if (!result.ok) {
+      Logger.log('❌ Capture 应该成功，实际: ' + JSON.stringify(result));
+      pass = false;
+    } else {
+      if (result.template.version !== 1) { Logger.log('❌ 第一次 Capture 版本应该是 1，实际: ' + result.template.version); pass = false; }
+      if (result.template.captured_from_project_id !== project.project_id) { Logger.log('❌ captured_from_project_id 应该指回源 Project'); pass = false; }
+      var shape = JSON.parse(result.template.workflow_shape);
+      if (!shape.tasks || shape.tasks.length !== 1) { Logger.log('❌ workflow_shape 应该捕获到 1 个 task，实际: ' + JSON.stringify(shape)); pass = false; }
+
+      try { BusinessRuleEngine.deprecateWorkflowTemplate(result.template.template_id); } catch (ignore) {}
+    }
+
+    try { ProjectEngine.archiveProject(project.project_id, testChatId); } catch (ignore) {}
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_CaptureProjectAsTemplate_Success_ PASS' : '❌ testUIBridge_CaptureProjectAsTemplate_Success_ FAIL');
+  return pass;
+}
+
+function testUIBridge_InstantiateTemplate_Success_() {
+  Logger.log('--- testUIBridge_InstantiateTemplate_Success_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+  var ruleName = '验收测试规则_' + new Date().getTime();
+  var sourceProject, template, instantiated;
+
+  try {
+    sourceProject = ProjectEngine.createProject('验收测试：源 Project', {}, testChatId);
+    TaskEngine.createTask('验收测试：源任务A', { project_id: sourceProject.project_id }, testChatId);
+    TaskEngine.createTask('验收测试：源任务B', { project_id: sourceProject.project_id }, testChatId);
+
+    var captured = ui_captureProjectAsTemplate(sourceProject.project_id, ruleName);
+    if (!captured.ok) { Logger.log('❌ 前置 Capture 失败'); return false; }
+    template = captured.template;
+
+    instantiated = ui_instantiateTemplate(template.template_id, { chatId: testChatId });
+    if (!instantiated.ok) {
+      Logger.log('❌ Instantiate 应该成功，实际: ' + JSON.stringify(instantiated));
+      pass = false;
+    } else {
+      // 三层不能混淆：新 Project 不是源 Project，新 Task 不是源 Task，
+      // 但 Task 数量应该跟模板一致（2 个）。
+      if (instantiated.project.project_id === sourceProject.project_id) {
+        Logger.log('❌ 应该生成全新的 Project，而不是复用源 Project');
+        pass = false;
+      }
+      if (instantiated.tasks.length !== 2) {
+        Logger.log('❌ 应该生成 2 个新 Task（跟模板一致），实际: ' + instantiated.tasks.length);
+        pass = false;
+      }
+      if (!instantiated.workflow || !instantiated.workflow.workflow_id) {
+        Logger.log('❌ 应该生成一个新 Workflow');
+        pass = false;
+      }
+      instantiated.tasks.forEach(function (t) {
+        if (t.workflow_id !== instantiated.workflow.workflow_id || t.project_id !== instantiated.project.project_id) {
+          Logger.log('❌ 新 Task 应该同时挂在新 Project 和新 Workflow 下面');
+          pass = false;
+        }
+      });
+    }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  } finally {
+    try { if (template) BusinessRuleEngine.deprecateWorkflowTemplate(template.template_id); } catch (ignore) {}
+    try { if (sourceProject) ProjectEngine.archiveProject(sourceProject.project_id, testChatId); } catch (ignore) {}
+    if (instantiated && instantiated.ok) {
+      instantiated.tasks.forEach(function (t) { try { TaskEngine.cancelTask(t.task_id, testChatId); } catch (ignore) {} });
+      try { ProjectEngine.archiveProject(instantiated.project.project_id, testChatId); } catch (ignore) {}
+    }
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_InstantiateTemplate_Success_ PASS' : '❌ testUIBridge_InstantiateTemplate_Success_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 十、Slice 3 Negative Tests
+// ============================================================
+
+function testUIBridge_CaptureProjectAsTemplate_MissingRuleName_() {
+  Logger.log('--- testUIBridge_CaptureProjectAsTemplate_MissingRuleName_ 开始 ---');
+  var pass = true;
+
+  [['', 'MISSING_RULE_NAME'], ['   ', 'MISSING_RULE_NAME'], [null, 'MISSING_RULE_NAME']].forEach(function (pair) {
+    var result = ui_captureProjectAsTemplate('PRJ-ANYTHING', pair[0]);
+    if (result.ok || result.code !== pair[1]) {
+      Logger.log('❌ ruleName=' + JSON.stringify(pair[0]) + ' 应该返回 MISSING_RULE_NAME: ' + JSON.stringify(result));
+      pass = false;
+    }
+  });
+
+  Logger.log(pass ? '✅ testUIBridge_CaptureProjectAsTemplate_MissingRuleName_ PASS' : '❌ testUIBridge_CaptureProjectAsTemplate_MissingRuleName_ FAIL');
+  return pass;
+}
+
+function testUIBridge_CaptureProjectAsTemplate_InvalidProjectId_() {
+  Logger.log('--- testUIBridge_CaptureProjectAsTemplate_InvalidProjectId_ 开始 ---');
+  var pass = true;
+
+  var result = ui_captureProjectAsTemplate('PRJ-DOES-NOT-EXIST-99999', '验收测试：不存在的项目');
+  if (result.ok || result.code !== 'NOT_FOUND') {
+    Logger.log('❌ 不存在的 projectId 应该返回 NOT_FOUND: ' + JSON.stringify(result));
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_CaptureProjectAsTemplate_InvalidProjectId_ PASS' : '❌ testUIBridge_CaptureProjectAsTemplate_InvalidProjectId_ FAIL');
+  return pass;
+}
+
+function testUIBridge_InstantiateTemplate_InvalidTemplateId_() {
+  Logger.log('--- testUIBridge_InstantiateTemplate_InvalidTemplateId_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+
+  var missing = ui_instantiateTemplate(null, { chatId: testChatId });
+  if (missing.ok || missing.code !== 'MISSING_TEMPLATE_ID') { Logger.log('❌ 缺 templateId 应该返回 MISSING_TEMPLATE_ID: ' + JSON.stringify(missing)); pass = false; }
+
+  var invalid = ui_instantiateTemplate('TPL-DOES-NOT-EXIST-99999', { chatId: testChatId });
+  if (invalid.ok || invalid.code !== 'NOT_FOUND') { Logger.log('❌ 不存在的 templateId 应该返回 NOT_FOUND: ' + JSON.stringify(invalid)); pass = false; }
+
+  Logger.log(pass ? '✅ testUIBridge_InstantiateTemplate_InvalidTemplateId_ PASS' : '❌ testUIBridge_InstantiateTemplate_InvalidTemplateId_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 十一、Slice 3 Integrity Tests（三层模型不能混淆）
+// ============================================================
+
+function testUIBridge_RecaptureSameProject_CreatesNewVersion_() {
+  Logger.log('--- testUIBridge_RecaptureSameProject_CreatesNewVersion_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+  var ruleName = '验收测试规则_' + new Date().getTime();
+  var project, v1, v2;
+
+  try {
+    project = ProjectEngine.createProject('验收测试：会被拍两次的 Project', {}, testChatId);
+
+    v1 = ui_captureProjectAsTemplate(project.project_id, ruleName);
+    v2 = ui_captureProjectAsTemplate(project.project_id, ruleName); // 同一个 rule name 再拍一次
+
+    if (!v1.ok || !v2.ok) {
+      Logger.log('❌ 两次 Capture 都应该成功: ' + JSON.stringify(v1) + ' / ' + JSON.stringify(v2));
+      pass = false;
+    } else {
+      if (v1.template.business_rule_id !== v2.template.business_rule_id) {
+        Logger.log('❌ 同一个 rule name 应该复用同一个 BusinessRule，不是新建一个');
+        pass = false;
+      }
+      if (v2.template.version !== v1.template.version + 1) {
+        Logger.log('❌ 第二次应该是版本 ' + (v1.template.version + 1) + '，实际: ' + v2.template.version);
+        pass = false;
+      }
+      if (v1.template.template_id === v2.template.template_id) {
+        Logger.log('❌ 两次 Capture 应该产生两个不同的 template_id（不同版本是不同实体）');
+        pass = false;
+      }
+    }
+
+    try { if (v1 && v1.ok) BusinessRuleEngine.deprecateWorkflowTemplate(v1.template.template_id); } catch (ignore) {}
+    try { if (v2 && v2.ok) BusinessRuleEngine.deprecateWorkflowTemplate(v2.template.template_id); } catch (ignore) {}
+    try { ProjectEngine.archiveProject(project.project_id, testChatId); } catch (ignore) {}
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_RecaptureSameProject_CreatesNewVersion_ PASS' : '❌ testUIBridge_RecaptureSameProject_CreatesNewVersion_ FAIL');
+  return pass;
+}
+
+function testUIBridge_InstantiateTwice_NoCrossContamination_() {
+  Logger.log('--- testUIBridge_InstantiateTwice_NoCrossContamination_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ui_' + new Date().getTime();
+  var ruleName = '验收测试规则_' + new Date().getTime();
+  var project, template, first, second;
+
+  try {
+    project = ProjectEngine.createProject('验收测试：会被实例化两次的模板源', {}, testChatId);
+    TaskEngine.createTask('验收测试：模板任务', { project_id: project.project_id }, testChatId);
+
+    var captured = ui_captureProjectAsTemplate(project.project_id, ruleName);
+    if (!captured.ok) { Logger.log('❌ 前置 Capture 失败'); return false; }
+    template = captured.template;
+
+    first = ui_instantiateTemplate(template.template_id, { chatId: testChatId });
+    second = ui_instantiateTemplate(template.template_id, { chatId: testChatId });
+
+    if (!first.ok || !second.ok) {
+      Logger.log('❌ 两次 Instantiate 都应该成功（同一个模板可以反复用）');
+      pass = false;
+    } else if (first.project.project_id === second.project.project_id ||
+               first.workflow.workflow_id === second.workflow.workflow_id ||
+               first.tasks[0].task_id === second.tasks[0].task_id) {
+      Logger.log('❌ 两次 Instantiate 应该产生完全独立的 Project/Workflow/Task，不能互相污染');
+      pass = false;
+    }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  } finally {
+    try { if (template) BusinessRuleEngine.deprecateWorkflowTemplate(template.template_id); } catch (ignore) {}
+    try { if (project) ProjectEngine.archiveProject(project.project_id, testChatId); } catch (ignore) {}
+    [first, second].forEach(function (r) {
+      if (r && r.ok) {
+        r.tasks.forEach(function (t) { try { TaskEngine.cancelTask(t.task_id, testChatId); } catch (ignore) {} });
+        try { ProjectEngine.archiveProject(r.project.project_id, testChatId); } catch (ignore) {}
+      }
+    });
+  }
+
+  Logger.log(pass ? '✅ testUIBridge_InstantiateTwice_NoCrossContamination_ PASS' : '❌ testUIBridge_InstantiateTwice_NoCrossContamination_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 十二、单一入口
+// ============================================================
+
+function runUIBridgeSlice3Gate() {
+  Logger.log('========== UI Vertical Slice 3 Gate 开始 ==========');
+  Logger.log('范围：50_UIBridge.gs 新增 2 个函数 + Capture/Instantiate');
+  Logger.log('闭环，重点覆盖三层模型（BusinessRule/WorkflowTemplate/');
+  Logger.log('Workflow Instance）不互相混淆。');
+  Logger.log('');
+
+  var results = {
+    'Positive: Capture Project as Template Success': testUIBridge_CaptureProjectAsTemplate_Success_(),
+    'Positive: Instantiate Template Success':         testUIBridge_InstantiateTemplate_Success_(),
+    'Negative: Missing Rule Name':                    testUIBridge_CaptureProjectAsTemplate_MissingRuleName_(),
+    'Negative: Invalid Project ID':                   testUIBridge_CaptureProjectAsTemplate_InvalidProjectId_(),
+    'Negative: Invalid Template ID':                  testUIBridge_InstantiateTemplate_InvalidTemplateId_(),
+    'Integrity: Recapture Creates New Version':       testUIBridge_RecaptureSameProject_CreatesNewVersion_(),
+    'Integrity: Instantiate Twice, No Cross-Contamination': testUIBridge_InstantiateTwice_NoCrossContamination_()
+  };
+
+  Logger.log('');
+  Logger.log('========== UI Vertical Slice 3 Gate 结果汇总 ==========');
+  var allPass = true;
+  for (var name in results) {
+    Logger.log((results[name] ? '✅ ' : '❌ ') + name);
+    if (!results[name]) allPass = false;
+  }
+  Logger.log('');
+  Logger.log(allPass
+    ? '✅✅✅ 全部通过——三层模型闭环验证完成，Capture/Instantiate 互不' +
+      '污染。下一步：真实浏览器手动走一遍 Capture as Template → ' +
+      'Instantiate Now 这条交互'
+    : '❌ 有测试未通过——请把上面完整 Logger 输出发回去');
+  Logger.log('========== UI Vertical Slice 3 Gate 结束 ==========');
 
   return allPass;
 }

@@ -21,9 +21,13 @@
  *   新增 ADR-2026-07-24-021）
  *   实现：Sprint 1（Foundation）Reference Certified；Sprint 3
  *   （Integration）Reference Certified；Sprint 4（AI）Recovery →
- *   Contract Verified，Integration Pending（UI Entry Point 未定）；
- *   UI Phase 0（Architecture Audit）进行中
- *   最后更新：2026-08-16
+ *   Contract Verified，Integration Pending（UI Entry Point 见「九」
+ *   已有决定，具体指令/入口设计还没做）；UI Phase 0 Audit 已完成，
+ *   Vertical Slice 1（Note→Task）、Slice 2（Task↔Project）均已
+ *   Stable（代码 + 真实环境测试 + 真实浏览器验证三者都过），Slice 3
+ *   （Project→Workflow，BusinessRule 三层模型）代码已写完，尚未跑
+ *   Gate、尚未真实浏览器验证——见「十一」
+ *   最后更新：2026-08-18
  */
 
 // ============================================================
@@ -86,7 +90,7 @@
  */
 
 // ============================================================
-// 五、Sprint 3（Integration）—— 代码已交付，Acceptance Gate 待跑
+// 五、Sprint 3（Integration）—— Reference Certified
 // ============================================================
 
 /**
@@ -301,11 +305,75 @@
  *   chat_id，跟另外两个方向不对称。没有动它——那是它自己文档里说好
  *   留到以后再决定的行为，不是这次 Slice 2 该顺手改的范围。
  *
- *   状态：Bridge 层 Contract Verified（7/7，真实环境，2026-08-16 跑
- *   runUIBridgeSlice2Gate() 全过，含两个 ADR-015 降级拦截场景）。
- *   Slice 1 的 8 个测试同时重跑确认无回归。真实浏览器点击验证 Tasks/
- *   Projects 两个面板——尚未收到确认，尤其是 blocked 状态那条暖色
- *   提示文字的展示效果，自动化测试只能确认后端返回了正确的
- *   code/message，没法确认前端样式对不对。
+ *   状态：Slice 2（Task ↔ Project）Stable——Bridge 层 Contract Verified
+ *   （15/15，真实环境，Slice 1+2 一起重跑无回归），2026-08-18 真实
+ *   浏览器三个场景全部确认：Task→Project 卡片即时迁移；Project→Task
+ *   空项目降级顺畅；Project→Task 受阻项目暖色提示清晰、不跟真实报错
+ *   混淆。Vertical Slice 3（Project → Workflow → Task，含 Business
+ *   Rule → Workflow Template → Workflow Instance 三层）开始，先做
+ *   研究，再动代码——Carson 原文档特别强调这三层"不能混淆"，值得比
+ *   Slice 1/2 多花一点时间先把机制看清楚。
+ */
+
+// ============================================================
+// 十一、UI Phase 0 → Slice 3（Project → Workflow → Task，2026-08-18）
+// ============================================================
+
+/**
+ *   研究先行确认了三层模型的准确机制（41_BusinessRuleEngine.gs 头部
+ *   注释 + captureAsWorkflowTemplate/instantiateFromTemplate 源码）：
+ *   BusinessRule（顶层分类）1-N WorkflowTemplate（版本，capture 时
+ *   自动给上一个 ACTIVE 版本打 FROZEN）1-N Workflow Instance（永久
+ *   绑定创建时的具体版本）。"Project → Workflow" 不是一次直接转换，
+ *   是两个独立动作：Capture（现有 Project 结构"拍照"存成
+ *   WorkflowTemplate，不产生 Workflow）+ Instantiate（拿一个
+ *   WorkflowTemplate 生成全新的 Project + Workflow + 一批 Task）。
+ *
+ *   代码已写完：50_UIBridge.gs 新增
+ *   ui_captureProjectAsTemplate(projectId, ruleName)、
+ *   ui_instantiateTemplate(templateId)；ui_index.html 的 Project 卡片
+ *   加了"Capture as Template"（进度式内联表单，输 rule name），
+ *   Capture 成功后就地展示"Instantiate Now"；
+ *   38_Tests_UIBridge.gs 新增 7 个测试，重点覆盖三层不混淆：同一
+ *   Project 重复 Capture 应该在同一个 BusinessRule 下生成新版本
+ *   （不是新建一个 BusinessRule）、同一 Template 实例化两次应该产生
+ *   两组完全独立的 Project/Workflow/Task（不能互相污染）。
+ *
+ *   已知缺口，这次没有解决：19_BusinessRuleQueryEngine.gs 没有"列出
+ *   全部 Template"的读接口——当前 UI 只支持"刚 Capture 完立刻
+ *   Instantiate"，没法做一个"浏览我所有模板、过几天回来用"的面板。
+ *   需要时再加一个新的 QueryEngine 读函数，这次范围内没有必要碰。
+ *
+ *   状态：Written，尚未在真实环境跑 runUIBridgeSlice3Gate()、尚未真实
+ *   浏览器点击验证 Capture → Instantiate 这条交互。
+ */
+
+// ============================================================
+// 十二、Open Items（还没有被处理、也不属于上面任何一个 Sprint/Slice
+//      状态行的独立事项，避免开新窗口后被忘记）
+// ============================================================
+
+/**
+ *   1. 改名成 "Life OS"（Carson 2026-08-14 提出，见 Sprint4_Recovery_
+ *      Audit.md「7.7」）：目前只在文档/记忆里采用了新名字，代码库本身
+ *      （文件头"Personal Life OS v5.2"、Library Identifier
+ *      PersonalLifeOS、GAS 项目名）完全没有动过，Carson 也还没有回复
+ *      要不要现在做、什么时候做。建议：等这一整轮 UI Vertical Slice
+ *      （1-4）都稳定后再单独做一次 Rename Migration，不要现在顺手做。
+ *
+ *   2. 19_BusinessRuleQueryEngine.gs 缺"列出全部 Template"的读接口
+ *      （见「十一」）——Slice 3 UI 目前只能"刚 Capture 完立刻用"，
+ *      不能"浏览所有已存模板"。
+ *
+ *   3. TaskEngine.createTaskFromConversion_ 的 decision_owner 固定
+ *      fallback 成 chat_id，跟 convertNoteToTask/convertTaskToProject
+ *      两个方向不对称（见「十」）——该函数自身 JSDoc 说明这是"预留，
+ *      暂不接受调用方覆盖"，不建议在没有明确决定"是否要开放覆盖"之前
+ *      顺手改掉。
+ *
+ *   4. Vertical Slice 4（Priority + AI Recommendation）尚未开始——
+ *      要用到的三个 AI 函数（22/47 文件里）本身已经 Contract Verified
+ *      （见「八」），缺的是这一层的 UI Bridge + 前端，跟 Slice 1-3 是
+ *      同一个模式，届时可以直接参照。
  */
 

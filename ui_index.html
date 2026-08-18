@@ -145,6 +145,26 @@
 
     .item-actions { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 
+    /* ---------- Capture-as-template inline form / result ---------- */
+    .capture-form {
+      display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+      gap: 6px; flex-direction: column;
+    }
+    .capture-form.visible { display: flex; }
+    .capture-form input {
+      background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+      color: var(--ink); font-family: var(--sans); font-size: 13px; padding: 6px 8px; outline: none;
+    }
+    .capture-form input:focus { border-color: var(--accent-dim); }
+    .capture-form-row { display: flex; gap: 8px; justify-content: flex-end; }
+
+    .capture-result {
+      display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+      font-family: var(--mono); font-size: 11px; color: var(--accent);
+    }
+    .capture-result.visible { display: block; }
+    .capture-result .btn { margin-top: 8px; }
+
     .empty-state {
       text-align: center; padding: 48px 20px; color: var(--ink-dim); font-size: 13px;
       border: 1px dashed var(--line); border-radius: 8px;
@@ -427,11 +447,32 @@
               '<span class="sep">\u00b7</span>' + relativeTime(project.created_time) +
             '</div>' +
             '<div class="item-blocked-reason" style="display:none;"></div>' +
+            '<div class="capture-form">' +
+              '<input type="text" placeholder="Name this template\u2026 e.g. \u2018Client Onboarding\u2019" class="rule-name-input">' +
+              '<div class="capture-form-row">' +
+                '<button class="btn btn-ghost cancel-capture-btn">Cancel</button>' +
+                '<button class="btn save-capture-btn">Save</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="capture-result"></div>' +
           '</div>' +
-          '<div class="item-actions"><button class="btn btn-ghost convert-btn">Convert to Task</button></div>';
+          '<div class="item-actions">' +
+            '<button class="btn btn-ghost convert-btn">Convert to Task</button>' +
+            '<button class="btn btn-ghost capture-btn">Capture as Template</button>' +
+          '</div>';
 
         card.querySelector('.convert-btn').addEventListener('click', function (ev) {
           convertProjectToTask(project.project_id, card, ev.currentTarget);
+        });
+        card.querySelector('.capture-btn').addEventListener('click', function () {
+          card.querySelector('.capture-form').classList.add('visible');
+          card.querySelector('.rule-name-input').focus();
+        });
+        card.querySelector('.cancel-capture-btn').addEventListener('click', function () {
+          card.querySelector('.capture-form').classList.remove('visible');
+        });
+        card.querySelector('.save-capture-btn').addEventListener('click', function (ev) {
+          submitCapture(project.project_id, card, ev.currentTarget);
         });
         projectListEl.appendChild(card);
       });
@@ -476,6 +517,66 @@
           projectsStatus.className = 'status-line err';
         })
         .ui_convertProjectToTask(projectId);
+    }
+
+    function submitCapture(projectId, cardEl, btnEl) {
+      var input = cardEl.querySelector('.rule-name-input');
+      var ruleName = input.value.trim();
+      if (!ruleName) { input.focus(); return; }
+
+      btnEl.disabled = true;
+      btnEl.textContent = 'Saving\u2026';
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          btnEl.disabled = false; btnEl.textContent = 'Save';
+          if (!result.ok) {
+            projectsStatus.textContent = 'Couldn\u2019t capture \u2014 ' + result.message;
+            projectsStatus.className = 'status-line err';
+            return;
+          }
+          cardEl.querySelector('.capture-form').classList.remove('visible');
+          var resultEl = cardEl.querySelector('.capture-result');
+          resultEl.innerHTML =
+            '\u2713 Captured as \u201c' + escapeHtml(ruleName) +
+            '\u201d (v' + result.template.version + ')' +
+            '<br><button class="btn instantiate-btn">Instantiate Now</button>';
+          resultEl.classList.add('visible');
+          resultEl.querySelector('.instantiate-btn').addEventListener('click', function (ev) {
+            submitInstantiate(result.template.template_id, resultEl, ev.currentTarget);
+          });
+        })
+        .withFailureHandler(function () {
+          btnEl.disabled = false; btnEl.textContent = 'Save';
+          projectsStatus.textContent = 'Couldn\u2019t capture \u2014 try again.';
+          projectsStatus.className = 'status-line err';
+        })
+        .ui_captureProjectAsTemplate(projectId, ruleName);
+    }
+
+    function submitInstantiate(templateId, resultEl, btnEl) {
+      btnEl.disabled = true;
+      btnEl.textContent = 'Instantiating\u2026';
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          if (!result.ok) {
+            btnEl.disabled = false; btnEl.textContent = 'Instantiate Now';
+            projectsStatus.textContent = 'Couldn\u2019t instantiate \u2014 ' + result.message;
+            projectsStatus.className = 'status-line err';
+            return;
+          }
+          resultEl.innerHTML = '\u2713 Created \u201c' + escapeHtml(result.project.title) + '\u201d \u2014 ' +
+            result.tasks.length + ' task' + (result.tasks.length === 1 ? '' : 's') + ', 1 workflow';
+          loadProjects();
+          loadTasks();
+        })
+        .withFailureHandler(function () {
+          btnEl.disabled = false; btnEl.textContent = 'Instantiate Now';
+          projectsStatus.textContent = 'Couldn\u2019t instantiate \u2014 try again.';
+          projectsStatus.className = 'status-line err';
+        })
+        .ui_instantiateTemplate(templateId);
     }
 
     // ---------------- Init ----------------

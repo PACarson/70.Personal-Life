@@ -46,10 +46,14 @@
  *                           ui_convertNoteToTask(noteId)，
  *                           ui_getConvertibleTasks(), ui_getActiveProjects(),
  *                           ui_convertTaskToProject(taskId),
- *                           ui_convertProjectToTask(projectId)
- *                           （均有第二个 _testOverrides 参数，仅测试用，
- *                           前端永远不传）
+ *                           ui_convertProjectToTask(projectId)，
+ *                           ui_captureProjectAsTemplate(projectId, ruleName),
+ *                           ui_instantiateTemplate(templateId)
+ *                           （除 ui_captureProjectAsTemplate 外都带一个
+ *                           仅测试用的 _testOverrides 参数，前端永远
+ *                           不传；capture 不需要，见该函数注释）
  *   Dependencies           : 29_NoteEngine.gs、42_ConversionEngine.gs、
+ *                           41_BusinessRuleEngine.gs、
  *                           17_NoteQueryEngine.gs、12_TaskQueryEngine.gs、
  *                           14_ProjectQueryEngine.gs、01_SecureConfig.gs
  *   Forbidden Dependencies  : Sheet 直接读写、Events 直接发布
@@ -294,6 +298,81 @@ function ui_convertProjectToTask(projectId, _testOverrides) {
       return { ok: false, code: 'BLOCKED', message: result.reason };
     }
     return { ok: true, task: result.task, already_converted: !!result.already_converted };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+// ============================================================
+// Slice 3（Project → Workflow → Task，2026-08-18，见
+// 41_BusinessRuleEngine.gs、00_ADR.gs ADR-2026-07-24-010/011）
+// ============================================================
+
+/**
+ * 三层模型：BusinessRule（顶层分类）1-N WorkflowTemplate（版本）1-N
+ * Workflow（Instance）。"Project → Workflow" 不是一次直接转换，是两个
+ * 独立动作：
+ *   (a) Capture：把一个现有 Project 的结构"拍照"存成 WorkflowTemplate
+ *       （不产生 Workflow，只产生模板）
+ *   (b) Instantiate：拿一个 WorkflowTemplate 生成全新的
+ *       Project + Workflow + 一批 Task（复用既有三个 Command，本函数
+ *       不重新实现创建逻辑）
+ * 前端把这两步串在一起（Capture 成功后立刻展示 Instantiate 按钮），
+ * 但它们在 Engine 层是两个独立、可以分开调用的能力。
+ *
+ * 已知缺口，这次没有解决：19_BusinessRuleQueryEngine.gs 没有"列出全部
+ * Template"的读接口（Public API 只有单个查询 + 按 Rule 查询），没法做
+ * 一个"浏览我所有模板"的面板。这次的 Bridge 函数够用（capture 直接
+ * 返回 templateId，前端立刻能用），但如果以后要做"过几天回来找某个
+ * 旧模板重新实例化"，需要先在 19_BusinessRuleQueryEngine.gs 加一个
+ * 列表查询函数——不在本次范围内，先记下来。
+ */
+
+/**
+ * @param {string} projectId
+ * @param {string} ruleName
+ * @returns {{ok:true, template:object}|{ok:false, code, message}}
+ */
+function ui_captureProjectAsTemplate(projectId, ruleName) {
+  try {
+    if (!projectId) {
+      return { ok: false, code: 'MISSING_PROJECT_ID', message: '缺少 projectId' };
+    }
+    if (!ruleName || !String(ruleName).trim()) {
+      return { ok: false, code: 'MISSING_RULE_NAME', message: '需要给这个模板起一个名字' };
+    }
+
+    // captureAsWorkflowTemplate 内部直接用 project.chat_id，不接受
+    // chatId 参数——这里没有 _testOverrides，测试用真实创建出来的
+    // Project 天然带着正确的（命名空间化）chat_id，不需要额外传递。
+    var template = BusinessRuleEngine.captureAsWorkflowTemplate(projectId, String(ruleName).trim(), []);
+    if (template.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Project' };
+    }
+    return { ok: true, template: template };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * @param {string} templateId
+ * @param {object} [_testOverrides]  仅测试使用：{chatId}
+ * @returns {{ok:true, project:object, workflow:object, tasks:object[]}|
+ *           {ok:false, code, message}}
+ */
+function ui_instantiateTemplate(templateId, _testOverrides) {
+  try {
+    if (!templateId) {
+      return { ok: false, code: 'MISSING_TEMPLATE_ID', message: '缺少 templateId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+
+    var result = BusinessRuleEngine.instantiateFromTemplate(templateId, {}, chatId);
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Template（可能已经被删除）' };
+    }
+    return { ok: true, project: result.project, workflow: result.workflow, tasks: result.tasks };
   } catch (e) {
     return _wrapError_(e);
   }

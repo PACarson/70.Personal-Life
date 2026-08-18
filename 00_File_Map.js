@@ -3,6 +3,9 @@
  * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
  * File Map
  *
+ * 【2026-08-18 补充，UI Phase 0 → Slice 3】50_UIBridge.gs 依赖列表
+ * 补上 41_BusinessRuleEngine（Capture/Instantiate 两个新函数用到）。
+ *
  * 【2026-08-16 补充，UI Phase 0 → Slice 1，见 00_Project_State.gs「九」】
  * 50_UIBridge.gs + ui_index.html 补录进「二」「三」两节。不是版本号变化
  * （仍是 v5.2）。
@@ -179,9 +182,12 @@
  *   22_PriorityEngine（Sprint 4 增量，见十三、Module_Responsibility）
  *     → 新增 46_AIConnector（仅 suggestPriorityWithAI_ 使用）
  *
- *   50_UIBridge（UI Phase 0 Slice 1，见十四、Module_Responsibility，
+ *   50_UIBridge（UI Phase 0 Slice 1/2/3，见十四、Module_Responsibility，
  *   00_Data_Ownership.gs「五」）
- *     → 29_NoteEngine, 42_ConversionEngine, 17_NoteQueryEngine,
+ *     → 29_NoteEngine, 42_ConversionEngine, 41_BusinessRuleEngine
+ *       （Slice 3 新增：captureAsWorkflowTemplate/
+ *       instantiateFromTemplate）, 12_TaskQueryEngine,
+ *       14_ProjectQueryEngine, 17_NoteQueryEngine,
  *       01_SecureConfig（读 TELEGRAM_CHAT_ID）——同样是 Domain/
  *       Application 常规调用，不是新例外
  *     配套前端文件：ui_index.html（Presentation，纯静态，不在

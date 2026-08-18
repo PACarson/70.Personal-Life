@@ -497,8 +497,9 @@
  */
 
 // ============================================================
-// 十四、50_UIBridge.gs（UI Phase 0 → Slice 1 新增，2026-08-16，见
-//      00_Project_State.gs「九」、UI_Architecture_Audit_Phase0.md）
+// 十四、50_UIBridge.gs（UI Phase 0 → Slice 1/2/3，最后更新 2026-08-18，
+//      见 00_Project_State.gs「九」「十」「十一」、
+//      UI_Architecture_Audit_Phase0.md）
 // ============================================================
 
 /**
@@ -544,11 +545,21 @@
  *                           同一模式在 convertTaskToProject 里也存在，
  *                           Slice 2 用到时再修，现在没动。
  *
- *                           测试：38_Tests_UIBridge.gs，8/8 通过（真实
- *                           环境）。仍然有一项未确认：Carson 手动通过
- *                           真实浏览器界面转换第 2/3 条 Note 时，Google
- *                           Sheet 里没看到对应 Task 行，但自动化 Gate
- *                           测试（含 NoDuplicateOnRetry）没有重现这个
- *                           现象——具体原因待确认（见 00_Project_
- *                           State.gs「九」），不代表已经排除。
+ *                           测试：38_Tests_UIBridge.gs，Slice 1（8）+
+ *                           Slice 2（7）+ Slice 3（7）= 22 个测试，
+ *                           真实环境全部通过。Slice 1 那次的未确认项
+ *                           （Carson 手动测试时第 2/3 条 Note 转换未见
+ *                           Sheet 记录）已由 Carson 确认解决。Slice 2
+ *                           的 blocked 状态、Slice 3 的三层模型隔离
+ *                           （Capture 生成新版本不覆盖旧版本、
+ *                           Instantiate 两次互不污染）均已通过真实环境
+ *                           测试或人工浏览器验证，见 00_Project_
+ *                           State.gs「九」「十」「十一」。
+ *
+ *                           Slice 3 已知缺口（这次没有解决）：
+ *                           19_BusinessRuleQueryEngine.gs 没有"列出
+ *                           全部 Template"的读接口，没法做一个"浏览
+ *                           我所有模板"的面板——当前 UI 只能"刚 Capture
+ *                           完立刻 Instantiate"，没法过几天回来找一个
+ *                           旧模板重新实例化。
  */
