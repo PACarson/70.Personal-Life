@@ -268,7 +268,22 @@ var BusinessRuleEngine = (function () {
     newProjectMeta = newProjectMeta || {};
     var shape = JSON.parse(template.workflow_shape);
 
-    var project = ProjectEngine.createProject(newProjectMeta.title || ('实例化-' + template.template_id), {
+    // 【2026-08-19 Bug 修复】newProjectMeta.title 缺省时，旧写法用
+    // '实例化-' + template.template_id 做默认标题——同一个 template_id
+    // 在反复 instantiate 同一模板时恒定不变，导致默认标题逐字节相同，
+    // 使 generateProjectIdentity(chatId, title, parentProjectId) 算出
+    // 相同 identity，被 IdempotencyManager 误判成"同一个创建请求的
+    // 重复提交"而不是"同一模板的第二次独立实例化"——这两者语义完全
+    // 不同，见 testUIBridge_InstantiateTwice_NoCrossContamination_。
+    // 这里只改"调用方传给 identity 计算的标题内容"，IdentityEngine
+    // 本身零改动，不违反它"不依赖时间戳/随机数/UUID"的铁律——铁律
+    // 约束的是 IdentityEngine 的哈希算法本身必须是纯函数，不约束调用方
+    // 决定喂给它的字符串内容可以是什么。调用方显式传入 title 时，行为
+    // 不变（仍然按显式 title 走原有幂等去重语义）。
+    var defaultInstantiationTitle = '实例化-' + template.template_id +
+      '-' + Utilities.getUuid().split('-')[0].toUpperCase();
+
+    var project = ProjectEngine.createProject(newProjectMeta.title || defaultInstantiationTitle, {
       description:        newProjectMeta.description || '',
       parent_project_id:  newProjectMeta.parent_project_id || '',
       execution_mode:     newProjectMeta.execution_mode || '',
