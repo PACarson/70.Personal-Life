@@ -893,3 +893,94 @@
  *   ADR 不代表 Sprint 3 或 Sprint 4 已经验收完成。
  */
 
+// ============================================================
+// ADR-2026-07-24-022：Task Identity 新增可选 workflow_id scope，
+//                      解决 Instantiate Now 反复实例化时的碰撞
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-022
+ * Status          : Accepted
+ * Decision Date   : 2026-08-20
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 07_IdentityEngine.gs, 09_IdempotencyManager.gs
+ *                   （41_BusinessRuleEngine.gs、28_WorkflowEngine.gs
+ *                   均无需改动，见 Decision）
+ * Related ADR     : ADR-2026-07-24-021（同样约束"不轻易改
+ *                   generateTaskIdentity() 签名"的先例）
+ *
+ * Context
+ *   UI Vertical Slice 3 Gate 首次真实运行（2026-08-19）发现
+ *   testUIBridge_InstantiateTwice_NoCrossContamination_ 失败：同一个
+ *   WorkflowTemplate 连续 instantiate 两次，Project/Workflow/Task
+ *   全部被 IdempotencyManager 判定成"已存在"而复用第一次的记录，
+ *   不是各自产生独立实例——违反 Instantiate Now 的核心语义（明确的
+ *   用户动作，应该产生完全独立的新实例，不是幂等重试保护的对象）。
+ *   根因是两处独立的 identity 碰撞：instantiateFromTemplate 缺省
+ *   Project 标题在同一模板反复调用时逐字节不变（本 ADR 范围外，已
+ *   单独修复，不涉及 IdentityEngine）；以及 generateTaskIdentity()
+ *   完全不看 project_id/workflow_id，两次 instantiate 产生的 Task
+ *   标题/due_date/priority/category 可能全部相同。
+ *   ADR-2026-07-24-021 之前的一次改动（due_time/due_datetime）明确
+ *   要求"不改 generateTaskIdentity() 函数签名，避免牵动
+ *   07_IdentityEngine.gs 本身及其单元测试"——这是已有先例，改动前
+ *   先完成一次完整的 Identity Impact Audit（Identity_Impact_Audit.md，
+ *   逐条回答现有调用路径、identity 是否已被生产数据持久化并依赖、
+ *   ProjectionRebuilder 依赖方式、迁移必要性等 8 个问题，全部附
+ *   file:line 证据），确认安全后才实施，不是先改再验证。
+ *
+ * Decision
+ *   1. generateTaskIdentity(chatId, title, dueDate, repeatRule,
+ *      priority, category) 新增第 7 个**可选**参数 scopeKey——缺省或
+ *      空字符串时，拼接进哈希的字符串跟改动前逐字节相同；仅当调用方
+ *      显式传入非空 scopeKey 时才多拼一段。全仓库审计确认：现存
+ *      4 条业务调用路径（聊天捕获 06_TaskIntentParser、周期任务续期
+ *      21_RecurringEngine、Note→Task/Project→Task 转换
+ *      42_ConversionEngine）没有一条会传这个参数，哈希不受影响，
+ *      不需要 migration。
+ *   2. scopeKey 按 **workflow_id**，不是最初设想的 project_id——
+ *      审计过程中发现 28_WorkflowEngine.spawnNextWorkflowIfNeeded
+ *      （周期 Workflow 续期）每轮复用同一个 project_id，只有
+ *      workflow_id 每轮才是新的；按 project_id 分区区分不开这条
+ *      路径，按 workflow_id 分区能把这条潜在风险和
+ *      instantiateFromTemplate 一起覆盖，且完全不影响只传
+ *      project_id、从不传 workflow_id 的 Project→Task 转换路径。
+ *   3. 09_IdempotencyManager.gs 的 createTaskIfNotExists() 把
+ *      meta.workflow_id || '' 作为这个新参数传入——只改这一处调用点，
+ *      不改函数本身的其它逻辑。
+ *   4. 41_BusinessRuleEngine.gs（instantiateFromTemplate）和
+ *      28_WorkflowEngine.gs（spawnNextWorkflowIfNeeded）零改动——两条
+ *      路径本来就在创建 Task 时于 meta 里带 workflow_id，机制在
+ *      IdempotencyManager 这一层自动生效，不需要调用方知道或配合。
+ *   5. 07_IdentityEngine.gs 的 testIdentity() 新增 3 组断言：不传
+ *      scopeKey 与改动前结果一致（向后兼容）、不同 scopeKey 产生不同
+ *      identity、相同 scopeKey 产生相同 identity。
+ *
+ * Consequences
+ *   正面：Instantiate Now 反复实例化同一模板，Project/Workflow/Task
+ *   三层现在全部各自独立，不再互相污染（runUIBridgeSlice3Gate()
+ *   2026-08-20 完整重跑 7/7 通过，含此前失败的这一条）；顺带堵上了
+ *   spawnNextWorkflowIfNeeded 一个此前未暴露、靠 due_date 天然递增
+ *   侥幸没触发的同类潜在碰撞；改动范围经审计确认后其实比最初设想的
+ *   更小——不需要碰 41/28 两个业务文件，只动 IdentityEngine 一个
+ *   可选参数 + IdempotencyManager 一行调用。
+ *   需要接受的代价：11_ProjectionRebuilder.gs 对绝大多数历史 Task
+ *   （Event payload 里已有 identity 字段的）重建时直接照抄存量值，
+ *   不受本次改动影响，但如果生产环境里恰好有一个卡在
+ *   instantiateFromTemplate 或 spawnNextWorkflowIfNeeded 路径、待
+ *   重试的旧请求，本次改动上线后重试会因为 scopeKey 生效而算出新
+ *   哈希、不会被识别成对旧哈希的重复提交，从而多创建一条——这是极窄
+ *   的边缘情况（需要"改动上线的同一时刻恰好有这两条路径的请求卡在
+ *   重试状态"），后果只是多创建、不是数据损坏或丢失，接受。
+ *
+ * Notes
+ *   完整审计过程、8 个问题逐条回答、全部 file:line 证据见
+ *   Identity_Impact_Audit.md。UI-I1~I6（Sort/Filter/Edit/Priority/
+ *   Done/Cancel/拖拽排序）跟本 ADR 是同一轮对话里并行讨论的独立
+ *   议题，互不阻塞——UI-I1~I5 已批准独立推进，UI-I6 冻结待另一份
+ *   Drag Ordering ADR（尚未撰写），两者都不依赖本 ADR 是否落地，
+ *   本 ADR 也不依赖它们，见 00_Project_State.gs「十二」第 5 条。
+ */
+
+

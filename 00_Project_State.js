@@ -375,5 +375,98 @@
  *      要用到的三个 AI 函数（22/47 文件里）本身已经 Contract Verified
  *      （见「八」），缺的是这一层的 UI Bridge + 前端，跟 Slice 1-3 是
  *      同一个模式，届时可以直接参照。
+ *
+ *   5. UI Interaction Layer（Sort/Filter/Edit/Priority/Done/Cancel/
+ *      拖拽排序，见「十三」）UI-I6（Manual Drag Reorder）冻结为
+ *      BLOCKED_PENDING_ARCHITECTURE_DECISION——排序归属（Task 自己
+ *      拥有 / Project-membership 拥有 / View 本地状态，三选一，不允许
+ *      发明第四种绕开问题）尚未写成正式 ADR，写完并经 Carson 明确批准
+ *      之前不得实现。UI-I1~I5 不受此影响，可独立推进。
+ *
+ *   6. UI 审计顺带发现两处现有 Domain 缺口，跟 UI-I6 一样先记录、不
+ *      在当前范围内顺手补：(a) 28_WorkflowEngine.gs 没有 updateWorkflow
+ *      ——create/start/finish/cancel 都有，唯独没有编辑；Slice 3 UI
+ *      如果以后要做"编辑 Workflow"会先卡在这里。(b) 全仓库没有任何
+ *      order/position/rank/display_order/manual_order 字段（跟「5」
+ *      是同一个缺口的两个侧面：UI-I6 要不要做，取决于这个字段最终该
+ *      挂在哪一层，而不是先随手加一个）。
+ *
+ *   7. 22_PriorityEngine.suggestPriorityWithAI_() 目前只在
+ *      HIGH/MEDIUM/LOW 三档里选，不含 CRITICAL——UI 的 Priority 下拉
+ *      本身四档都有（LOW/MEDIUM/HIGH/CRITICAL，见 TASK_PRIORITIES），
+ *      两者不一致；不阻塞 UI-I3，记一笔，之后有空再补 AI 推荐逻辑。
  */
+
+// ============================================================
+// 十三、UI Phase 0 → Slice 3 Gate 完整通过 + Task Identity Collision
+//      修复（2026-08-19~20）——「十一」的"尚未验证"状态解除
+// ============================================================
+
+/**
+ *   真实环境第一次跑 runUIBridgeSlice3Gate()（2026-08-19）：5/7 通过，
+ *   testUIBridge_InstantiateTwice_NoCrossContamination_ 失败——同一个
+ *   WorkflowTemplate 连续 instantiate 两次，Project/Workflow/Task 三个
+ *   都被 IdempotencyManager 判定成"已存在"，复用了第一次的记录，而不是
+ *   各自产生独立实例。诊断出两处独立碰撞，不是一处：
+ *
+ *   ① Project 碰撞：41_BusinessRuleEngine.gs instantiateFromTemplate
+ *      在 newProjectMeta.title 缺省时，默认标题写死成
+ *      '实例化-' + template.template_id——同一模板反复 instantiate，
+ *      这串字符逐字节不变，generateProjectIdentity() 算出同一个
+ *      identity。修复：默认标题加一个每次调用都不同的短后缀（沿用
+ *      本文件内 generateRuleId_/BG- 前缀已经在用的
+ *      Utilities.getUuid().split('-')[0].toUpperCase() 写法），
+ *      07_IdentityEngine.gs 零改动。Workflow 跟着自动不碰撞（它的
+ *      默认标题依赖 project.title，现在天然不同了）。
+ *
+ *   ② Task 碰撞：generateTaskIdentity() 完全不看 project_id/
+ *      workflow_id，两次 instantiate 产生的 Task 标题/due_date/
+ *      priority/category 全部相同，仍会被判成重复。这一处涉及
+ *      07_IdentityEngine.gs（此前 ADR-2026-07-24-021 的 due_time 改动
+ *      明确要求"不改 generateTaskIdentity() 签名，避免牵动本文件及其
+ *      单元测试"），所以先做完整的 Identity Impact Audit（见
+ *      Identity_Impact_Audit.md，逐条回答 Carson 提出的 8 个问题，
+ *      全部有 file:line 证据）才动手改，不是直接改。
+ *
+ *   审计确认：identity 已被生产数据持久化并依赖（DeduplicationEngine.
+ *   findExistingTask 精确匹配）；全仓库只有 4 条业务路径调用
+ *   createTaskIfNotExists（聊天捕获/周期任务续期/Note→Task/
+ *   Project→Task 转换）+ 2 条会传 workflow_id（instantiateFromTemplate、
+ *   28_WorkflowEngine.spawnNextWorkflowIfNeeded——后者是审计过程中
+ *   意外发现的同类潜在风险，目前靠 due_date 每轮天然递增侥幸没暴露）；
+ *   11_ProjectionRebuilder.gs 只在原始 Event payload 缺 identity 字段
+ *   时才在线重算，正常数据重建时直接照抄 payload 里存的值，未来改
+ *   公式对历史数据重建结果零影响；因此不需要 migration。
+ *
+ *   关键发现：scope key 应该用 workflow_id，不是最初设想的
+ *   project_id——spawnNextWorkflowIfNeeded 每轮续期复用同一个
+ *   project_id，只有 workflow_id 每轮才是新的，按 project_id 分区
+ *   分不开这条路径；按 workflow_id 分区，两条风险路径一起覆盖，
+ *   且完全不影响 Project→Task 转换（它从不传 workflow_id）。
+ *
+ *   实施（2026-08-20）：07_IdentityEngine.gs 的 generateTaskIdentity()
+ *   加第 7 个可选参数 scopeKey——缺省/空字符串时拼接结果逐字节不变，
+ *   仅当非空时才多拼一段进哈希；testIdentity() 新增 3 组断言直接验证
+ *   这条兼容性。09_IdempotencyManager.gs 的 createTaskIfNotExists()
+ *   把 meta.workflow_id || '' 作为这个新参数传入。
+ *   41_BusinessRuleEngine.gs / 28_WorkflowEngine.gs 零改动——两条路径
+ *   本来就在 meta 里带 workflow_id，机制自动生效。
+ *
+ *   状态：runUIBridgeSlice3Gate() 2026-08-20 完整重跑，7/7 全部通过，
+ *   含之前失败的 Cross-Contamination 那条。「十一」记录的"Written，
+ *   尚未验证"状态到此解除，Slice 3 三层模型（BusinessRule/
+ *   WorkflowTemplate/WorkflowInstance）闭环验证完成。
+ *
+ *   下一步（未完成）：真实浏览器手动走一遍 Capture as Template →
+ *   Instantiate Now 这条交互，确认 UI 体验本身（尤其 template name
+ *   输入框、Instantiate 成功后 Tasks/Projects 面板是否正确刷新）——
+ *   这一步 Gate 测试覆盖不到，只能人工点。
+ *
+ *   本次同一轮对话里另外定下、但还没开始实现的：批准 UI-I1~I5
+ *   （Sort/Filter/Edit Task/Edit Project/Priority/Done/Cancel）独立于
+ *   Task Identity 这条线推进；UI-I6（拖拽排序）冻结待 ADR（见「十二」
+ *   第 5 条）。三条线互不阻塞，各自独立交付、独立汇报，不合并成一个
+ *   "UI Phase 完成"关口。
+ */
+
 
