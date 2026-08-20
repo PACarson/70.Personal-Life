@@ -82,13 +82,19 @@ var IdempotencyManager = (function () {
   function createTaskIfNotExists(title, meta, chatId) {
     meta = meta || {};
 
+    // 【2026-08-20 Identity_Impact_Audit.md Track 1】meta.workflow_id 非空时
+    // 传给 scopeKey：目前只有 41_BusinessRuleEngine.instantiateFromTemplate
+    // 和 28_WorkflowEngine.spawnNextWorkflowIfNeeded 这两条路径会带
+    // workflow_id，其余全部既有调用路径 meta 里都没有这个字段，scopeKey
+    // 传空字符串，算出来的 identity 跟这次改动之前逐字节相同。
     var identity = IdentityEngine.generateTaskIdentity(
       chatId,
       title,
       IdentityEngine.resolveIdentityDueValue(meta),
       meta.recurring  || '',
       meta.priority   || 'MEDIUM',
-      meta.category   || 'GENERAL'
+      meta.category   || 'GENERAL',
+      meta.workflow_id || ''
     );
 
     var acquired = _acquireSoftLock_(chatId);

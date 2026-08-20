@@ -85,8 +85,25 @@ var IdentityEngine = (function () {
   /**
    * 任务 Identity。组合字段：
    * chat_id | normalized_title | due_date | repeat_rule | priority | category
+   * [ | scopeKey ]（可选第 7 段，见下）
+   *
+   * 【2026-08-20 新增 scopeKey，见 Identity_Impact_Audit.md Track 1】
+   * scopeKey 缺省/空字符串时，拼出来的字符串、算出来的哈希跟加这个
+   * 参数之前逐字节相同——现存全部调用路径（聊天捕获 06_TaskIntentParser /
+   * 周期任务续期 21_RecurringEngine / Note→Task 42_ConversionEngine.
+   * convertNoteToTask）都不传这个参数，哈希不受影响；Project→Task
+   * 转换 42_ConversionEngine.convertProjectToTask 只传 project_id，
+   * 不传 workflow_id，同样不受影响。
+   *
+   * 只有 09_IdempotencyManager.createTaskIfNotExists() 在 meta.workflow_id
+   * 非空时才会传非空 scopeKey 进来（当前只有 41_BusinessRuleEngine.
+   * instantiateFromTemplate 和 28_WorkflowEngine.spawnNextWorkflowIfNeeded
+   * 这两条路径会带 workflow_id），用来区分"同一个 workflow_shape 反复
+   * instantiate / 续期"产生的、title/due_date/priority/category 都可能
+   * 相同、但分属不同 Workflow 实例的 Task——不这样区分，
+   * 会被 IdempotencyManager 误判成同一请求的重复提交而复用旧 Task。
    */
-  function generateTaskIdentity(chatId, title, dueDate, repeatRule, priority, category) {
+  function generateTaskIdentity(chatId, title, dueDate, repeatRule, priority, category, scopeKey) {
     var parts = [
       String(chatId || ''),
       normalizeTitle(title),
@@ -95,6 +112,9 @@ var IdentityEngine = (function () {
       String(priority || 'MEDIUM'),
       String(category || 'GENERAL')
     ];
+    if (scopeKey) {
+      parts.push(String(scopeKey));
+    }
     return sha256_(parts.join('|'));
   }
 
@@ -184,6 +204,17 @@ var IdentityEngine = (function () {
     var t1 = generateTaskIdentity('123', '提醒我去买菜', '2026-07-01', '', 'MEDIUM', 'SHOPPING');
     var t2 = generateTaskIdentity('123', '去买菜！', '2026-07-01', '', 'MEDIUM', 'SHOPPING');
     Logger.log('t1 === t2 (不同说法)? ' + (t1 === t2) + '  (expected: true)');
+
+    // 【2026-08-20 新增】scopeKey 向后兼容 + 区分能力测试
+    var t3 = generateTaskIdentity('123', '提醒我去买菜', '2026-07-01', '', 'MEDIUM', 'SHOPPING');
+    Logger.log('t1 === t3 (不传 scopeKey，向后兼容)? ' + (t1 === t3) + '  (expected: true)');
+
+    var t4 = generateTaskIdentity('123', '提醒我去买菜', '2026-07-01', '', 'MEDIUM', 'SHOPPING', 'WKF-A');
+    var t5 = generateTaskIdentity('123', '提醒我去买菜', '2026-07-01', '', 'MEDIUM', 'SHOPPING', 'WKF-B');
+    var t6 = generateTaskIdentity('123', '提醒我去买菜', '2026-07-01', '', 'MEDIUM', 'SHOPPING', 'WKF-A');
+    Logger.log('t1 === t4 (传了 scopeKey，跟不传结果不同)? ' + (t1 === t4) + '  (expected: false)');
+    Logger.log('t4 === t5 (不同 workflow scopeKey，identity 不同)? ' + (t4 === t5) + '  (expected: false)');
+    Logger.log('t4 === t6 (相同 workflow scopeKey，identity 相同)? ' + (t4 === t6) + '  (expected: true)');
 
     var p1 = generateProjectIdentity('123', '厨房翻新', '');
     var p2 = generateProjectIdentity('123', '清洁', 'PRJ-A');
