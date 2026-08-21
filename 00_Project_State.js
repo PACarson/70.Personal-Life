@@ -540,6 +540,43 @@
  *   runUIBridgeSlice3Gate()（因为改动触碰了 20_TaskEngine.js，
  *   两个既有 Gate 都间接依赖它）。Track 1 视为"实施 + 治理留痕"
  *   双重完成，可以据此推进 Track 2。
+ *
+ * 【2026-08-21/22 补充，真实环境跑出的结果，撤回上面"双重完成"的
+ * 结论】runIdentityScopeKeyRegressionGate() 在真实环境 5/6 通过，
+ * testIdentityScope_UpdateTaskPreservesScope_ 失败："编辑后 identity
+ * 应该等于新字段+原 workflow_id 重算结果，实际不等"。
+ * runSprint3AcceptanceGate()、runUIBridgeSlice3Gate() 两个都 100%
+ * 通过，说明这次改动没有破坏任何原本就在跑的东西——问题出在一个此前
+ * 从没被真正验证过的路径上，不是一次回归。
+ *
+ * 排查结论（代码追踪，非猜测）：identity 纯哈希逻辑本身是对的——
+ * 6 项里另外 5 项都通过，其中包含直接验证 scopeKey 差异化的两项，
+ * 以及绕开真实 Sheet、只用内存事件验证 ProjectionRebuilder 折叠逻辑
+ * 的那项。真正可疑的是"从真实 Sheet 里把 workflow_id 读回来"这一步：
+ * 05_SheetUtils.upsertRowByKey_（写）和
+ * 12_TaskQueryEngine.getTask（读）都是按 Sheet 表头实际有哪些列名
+ * 来决定读/写哪些字段（headerMap.hasOwnProperty(key) 才写；
+ * getTask 只在 headerMap 里出现的列名才会出现在返回对象上）——
+ * 如果 Carson 真实 Tasks 表的表头这一行本来就没有 workflow_id 这一列，
+ * 这个字段会被这两处静默丢弃，不报错、不提示。这会是一个在这次改动
+ * 之前就存在的数据缺口（Sprint 1 引入 workflow_id 时，如果表头没有
+ * 同步加这一列），这次只是第一次有代码路径需要把 workflow_id
+ * "写进去再读出来"——之前所有用到 workflow_id 的地方（
+ * spawnNextWorkflowIfNeeded/instantiateFromTemplate）都只在创建那一刻
+ * 用内存里的值，从来没有真的读回过 Sheet，所以从来没有暴露过这个问题。
+ *
+ * 需要 Carson 确认（沙盒里没有真实 Spreadsheet，这一步没法代查）：
+ * Tasks 表的表头第一行，是否真的存在一列叫 workflow_id。如果确认
+ * 缺失，这本身可能是一个比这次改动范围更大的问题——同一批 Sprint 1
+ * 字段（project_id/sequence_index/parent_task_id/
+ * depends_on_task_ids/branch_group/branch_resolution_policy/
+ * source_project_id/十一个 Metadata 字段）会不会也有同样的表头缺口，
+ * 值得一并核实，不只是补 workflow_id 一列。Track 1 的核心哈希逻辑
+ * 判定正确，但这一条编辑路径回归测试的真实环境验证目前是"失败，
+ * 原因指向环境/数据问题，不是这次代码逻辑本身"，不算完成，等 Carson
+ * 确认表头情况后再决定怎么修（补表头列，还是要不要顺带给
+ * upsertRowByKey_/getTask 加一条"写入了却因为表头缺列被静默丢弃"的
+ * 提示，这两种修法影响面不一样，不该我自己替 Carson 决定）。
  */
 
 
@@ -610,4 +647,14 @@
  *   粘贴进真实 GAS 项目后跑 runUIBridgeInteractionsGate() + 人工走一遍
  *   UI 才能拿到确认——沙盒里没有 Carson 的真实 Spreadsheet 和浏览器，
  *   这两步没法代跑。
+ *
+ * 【2026-08-21/22 补充，真实环境结果】13/14 通过。唯一失败的
+ * testUIInteractions_SuggestPriority_NeverAutoApplies_ 是测试自己的
+ * bug，不是 UIBridge 的问题：mock 让 AIConnector.callAIForJSON_ 返回
+ * priority:'CRITICAL'，但 suggestPriorityWithAI_ 真实校验只认
+ * HIGH/MEDIUM/LOW（这条限制是我自己发现、写进
+ * 00_Known_Limitations.gs「三」的，结果自己写 mock 的时候没对上）——
+ * 已改成 'HIGH'。其余 13 项（Edit Task/Project、Done/Cancel 含幂等、
+ * Accept Suggestion 落盘、Filter 两项）真实环境全部通过，UI-I2~I5 的
+ * 服务端契约视为确认完成。Sort 仍待人工浏览器验证（前端 JS，见「五」）。
  */

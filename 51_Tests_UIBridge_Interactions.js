@@ -136,14 +136,19 @@ function testUIInteractions_SuggestPriority_NeverAutoApplies_() {
   var originalAI = AIConnector.callAIForJSON_;
 
   try {
-    AIConnector.callAIForJSON_ = function () { return { priority: 'CRITICAL', reasoning: '模拟：截止日期很近' }; };
+    // suggestPriorityWithAI_ 的合法值目前只有 HIGH/MEDIUM/LOW（不含
+    // CRITICAL，见 00_Known_Limitations.gs「三」2026-08-21 补充——这是
+    // 我自己发现并记录的限制，mock 必须遵守，不能拿真实校验通不过的
+    // 值来测）。用 HIGH 跟任务起始的 LOW 仍然是有意义的不同值，足够
+    // 验证"仅询问不生效"这条不变量。
+    AIConnector.callAIForJSON_ = function () { return { priority: 'HIGH', reasoning: '模拟：截止日期很近' }; };
 
     task = TaskEngine.createTask('询问 AI 优先级的任务', { priority: 'LOW' }, testChatId);
 
     var result = ui_suggestPriority(task.task_id, { chatId: testChatId });
     if (!result.ok) { Logger.log('❌ 应该成功: ' + JSON.stringify(result)); pass = false; }
     else {
-      if (result.priority !== 'CRITICAL') { Logger.log('❌ 建议值应该是 mock 返回的 CRITICAL'); pass = false; }
+      if (result.priority !== 'HIGH') { Logger.log('❌ 建议值应该是 mock 返回的 HIGH'); pass = false; }
       if (result.current_priority !== 'LOW') { Logger.log('❌ current_priority 应该反映编辑前的真实值 LOW'); pass = false; }
     }
 
@@ -152,7 +157,7 @@ function testUIInteractions_SuggestPriority_NeverAutoApplies_() {
       Logger.log('❌ 仅仅"询问"AI 不应该改变 priority 本身，实际变成了: ' + afterSuggest.priority);
       pass = false;
     }
-    if (afterSuggest.priority_ai_recommended !== 'CRITICAL') {
+    if (afterSuggest.priority_ai_recommended !== 'HIGH') {
       Logger.log('❌ priority_ai_recommended 应该记录这次生成的建议，实际: ' + afterSuggest.priority_ai_recommended);
       pass = false;
     }
