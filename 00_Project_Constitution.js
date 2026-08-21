@@ -1,874 +1,460 @@
-/**
- * 00_Project_Constitution.gs
- * Productivity OS v4.7 — 项目宪法
- *
- * 本文件只放这个 OS 自己的东西。平台级原则（IMIOR、UDP、Engine 命名规范等）
- * 的权威定义在 Personal AI Core 项目的 00_Project_Constitution.gs，这里只做
- * 「这个 OS 具体怎么套用」的记录，不重复定义，避免以后两边措辞不一致（drift）。
- *
- * 新窗口交接时，先贴这份文件 + Core 项目的 00_Project_Constitution.gs +
- * 00_ADR.gs + 00_Roadmap.gs + 00_Architecture_Review.gs（后者记录了
- * 尚未关闭的 Review 发现，尤其是测试覆盖缺口，见该文件「五、待决问题」）。
- *
- * LAST_UPDATED: 2026-07-13 — V4.7 Due Time Support 落地（完整设计见
- * 00_Architecture_Review.gs「七、Review #3」，Carson 2026-07-13 批准后
- * 实现）：Event Definition Standard 的 TASK_CREATED/TASK_UPDATED 两条
- * Payload/Example 补充 due_time/due_datetime 字段说明。Reminder 调度、
- * 通知发送不在本项目职责范围内（Productivity OS 只负责任务自己知道
- * 自己什么时候到期），这条边界本次未变。
- *
- * 2026-07-11 — 完成 UEF（Universal Engineering Framework）
- * v1.0 ratify 后本项目第一次正式 Domain Profile Architecture Review，
- * 完整记录见新增的 00_Architecture_Review.gs。Governance 目录从 7 份
- * 扩到 8 份，P4 Governance 一节相应补充引用（详见下方 P4）。同时
- * 00_ADR.gs 补记两条此前只有行内论证、没有正式 ADR 条目的"维持现状"
- * 决定（ADR-2026-07-11-006/007，见 Review Finding D1-1），
- * 00_Roadmap.gs 版本头从落后的 v4.4 修正为 v4.6（见 Review Finding
- * D3-1）。均为文档修正/补记，不改变任何已实现的架构决定本身。
- *
- * 2026-07-11 — 文档补充（不改代码，版本号仍为 v4.6）：新增
- * 00_Command_Reference.gs（What——Telegram 指令匹配规则/查询时间窗口/
- * 打分公式/去重规则/归档批处理时间点等"具体数值型"规则）和
- * 00_Known_Limitations.gs（Not Yet——category/priority 不做自然语言
- * 推断、updateTask() Internal API、Weekly/Monthly Dashboard 与
- * suggestPriority() 暂未接 Telegram 指令，均由 Carson 当面确认为刻意
- * 边界而非 bug）。Governance 目录至此固定为 7 份文件，P4 Governance
- * 一节相应补充两条引用，详见两份新文件各自的文件头说明。
- *
- * 2026-07-06 — V4.6：第五轮外部审计 HIGH RISK 1+4（TaskStatistics
- * 并发漂移 + 冗余高频写入，两条一起解决）——TaskStatistics 从"事件驱动实时
- * 投影"降级为"每日批量重算"，10_ProjectionEngine.gs 移除 _bumpStatistics_，
- * 完整架构论证见 00_ADR.gs ADR-2026-07-06-005。相应更新了 P6 CQRS 铁律2/4/5、
- * Event Definition Standard 的 Projection Updated 字段、P4 4.5 Operations、
- * Architecture Principles 第1条。
- *
- * V4.3：Architecture / Governance Upgrade（纯文档升级，见 00_Roadmap.gs
- * "Architecture Evolution"）：
- *   1. 新增 Architecture Principles（本 OS 最高设计哲学，10 条）。
- *   2. 新增 Engine Contract Standard（以后所有新 Engine 必须遵守的文件头标准）。
- *   3. 新增 Dependency Rules（Presentation→Application→Domain→Infrastructure
- *      四层的 Allowed/Forbidden 正式规则）。
- *   4. 新增 Event Definition Standard（Event 文档化标准）。
- *   5. Universal Domain OS Blueprint 升级到最终结构（新增 Domain / Operations
- *      两个顶层分类，见「零之六」），P4 落地映射新增 2.5 Domain / 4.5 Operations
- *      两块（原有 0-5 编号内容不变）。
- *   6. Schema Authority 正式规则记录为 00_ADR.gs 的 ADR-2026-07-06-002。
- *   7. 00_ADR.gs 的 ADR-2026-07-06 补充 Metadata 区块。
- *   8. 新增 00_Roadmap.gs（长期规划，独立于 State/ADR）。
- */
-
 // ============================================================
-// Architecture Principles（架构最高设计哲学，V4.3 新增）
+//  00_Project_Constitution.gs
+//  News OS — 核心原则 · 架构规则 · Coding Laws
+//
+//  PURPOSE: 任何 AI / 开发者接手必须先读这个文件
+//  RULE:    本文件只写原则，不写代码
+//  UPDATE:  每次架构变动必须更新本文件
 // ============================================================
 
-/**
- * 这 10 条是本 OS 所有设计判断的最高准则，优先级高于任何具体实现细节——
- * 如果某个具体做法（哪怕已经写进代码）跟下面某一条冲突，应该改的是做法，
- * 不是原则。每条给出 WHY（为什么需要这条）/ WHAT（原则本身）/ HOW（本 OS
- * 现在具体怎么落地这条），确保这不是一份口号清单，而是可以拿来对照检查
- * 代码的标准。
- *
- * ── 1. Single Source of Truth ────────────────────────────────────────────
- * WHY：如果"事实"可以来自多个地方（比如 Tasks 表和 Events 表都被当成权威
- *      来源），两边一旦不一致就没有办法判断哪个是对的，只能靠猜。
- * WHAT：Events 是唯一事实来源；所有 Read Model 永远可以从 Events 重建。
- * HOW：Events 表只能被 02_EventBus.publish() 追加写入（P6 铁律1）；Tasks/
- *      ActiveTasks/TaskStatistics/TaskFilters 全部可以用
- *      11_ProjectionRebuilder.gs 的 rebuildAllProjections() 从零重建，
- *      重建结果理论上应该跟增量维护的结果完全一致（这也是
- *      verifyProjection()/compareProjectionWithEvents() 存在的意义）。
- *      TaskStatistics 是唯一的例外情况：它有两条重建路径——
- *      rebuildStatisticsProjection()（从 Events 全量重放，走的是
- *      rebuildAllProjections() 那条路，保证"从最原始事实来源也能重建"
- *      这条原则不被打破）和 recomputeStatisticsFromTasks_()（从 Tasks
- *      表聚合，更便宜，V4.6 起作为日常维护手段，见
- *      00_ADR.gs ADR-2026-07-06-005）。
- *
- * ── 2. Pure Function First ───────────────────────────────────────────────
- * WHY：带副作用（读写 Sheet/Events/网络）的代码难测试、难复用、难推理；
- *      纯函数只要输入一样，输出永远一样，可以放心在任何上下文调用。
- * WHAT：View/Search/Priority/Analytics 等 Engine 优先设计成纯函数。
- * HOW：24_ViewEngine.gs / 23_SearchEngine.gs / 22_PriorityEngine.gs /
- *      26_AnalyticsEngine.gs（除了明确标注例外的 replayCompletionTrend_()）
- *      全部只接收调用方已经读出来的 task 数组，返回新数据，不摸任何
- *      Sheet/Events，见 00_File_Map.gs「Architecture Layer Map」里这几个
- *      文件的 Domain 层归类。
- *
- * ── 3. Event is Fact ──────────────────────────────────────────────────────
- * WHY：如果历史记录可以被修改，"审计"和"重建"都失去意义——你没办法相信
- *      重建出来的状态就是当初真实发生过的那些操作的结果。
- * WHAT：Event 永远不可修改，只能追加。
- * HOW：02_EventBus.gs 只暴露 publish()（追加）和 getAllEvents()/
- *      getEventsByType()（只读），没有任何 update/delete Event 的 API；
- *      Google Sheets 的 appendRow 本身也是只追加语义。
- *
- * ── 4. Read Models are Disposable ────────────────────────────────────────
- * WHY：如果 Read Model 一旦损坏就没法修，运维压力会极大；反过来，只要
- *      "可以随时丢掉重建"，Read Model 的一致性问题就从"灾难"降级成
- *      "跑个函数的事"。
- * WHAT：Projection 可以删除后重新构建。
- * HOW：11_ProjectionRebuilder.gs 的 rebuildTasksProjection() /
- *      rebuildActiveTasksProjection() / rebuildStatisticsProjection() /
- *      rebuildTaskFiltersProjection()，每一个都是"读 Events 全量重算，
- *      覆写对应 Sheet"，不依赖 Sheet 现有内容，可以在任意时刻对任意状态
- *      的 Sheet 安全执行。
- *
- * ── 5. Decision Never Executes ───────────────────────────────────────────
- * WHY：一旦"给建议的模块"同时也能"直接执行"，系统的行为就不再是"用户
- *      决定的"，而是"某个打分公式决定的"——用户会在不知情的情况下被
- *      AI 的判断替代，这是本 OS 明确不接受的边界（见 Core 项目宪法 P4）。
- * WHAT：Decision Engine 永远不给用户执行，只产生建议。
- * HOW：22_PriorityEngine.gs 的 computePriorityScore/computeUrgencyScore/
- *      suggestPriority 全部是纯计算，返回值只是数字/字符串，本身没有
- *      任何函数会调用 20_TaskEngine.updateTask 之类的写入 API——采纳
- *      建议必须由调用方（06_TaskIntentParser.gs 或用户）主动触发一次
- *      独立的 updateTask 调用。
- *
- * ── 6. Views Never Persist ───────────────────────────────────────────────
- * WHY：见 00_ADR.gs ADR-2026-07-06 的完整论证——"今天/本周/逾期"这类值
- *      依赖查询发生的那一刻，不满足"同一份 Events 历史任何时候重放结果
- *      都相同"这个 Projection 的基本性质，硬要持久化只会引入新的不一致
- *      来源。
- * WHAT：View/Dashboard 永远按需生成，不得落盘。
- * HOW：24_ViewEngine.gs / 25_DashboardEngine.gs 都不写任何 Sheet；本项目
- *      没有、以后也不应该有物理 Dashboard Sheet（ADR-2026-07-06 的正式
- *      条款）。
- *
- * ── 7. Single Responsibility ─────────────────────────────────────────────
- * WHY：一个模块什么都做，出问题时不知道该看哪里；职责单一才能"看文件名
- *      就知道去哪改"。
- * WHAT：每一层只负责一件事情。
- * HOW：12_TaskQueryEngine 只取数据、24_ViewEngine 只整理数据、
- *      25_DashboardEngine 只组合展示（ADR-2026-07-06 明确写成正式条款）；
- *      21_RecurringEngine 只管续期规则、22_PriorityEngine 只管打分、
- *      23_SearchEngine 只管过滤匹配——见下方 Engine Contract Standard，
- *      每个 Engine 文件头必须显式声明自己的 Responsibilities，写多了会
- *      在 review 时很显眼。
- *
- * ── 8. Dependency Direction ──────────────────────────────────────────────
- * WHY：循环依赖会让人没办法只看一个文件就理解它的行为——改 A 要连带看
- *      B，改 B 又要连带看 A，交接成本随项目变大指数上升。
- * WHAT：依赖只能向下，不得循环。
- * HOW：见下方新增的「Dependency Rules」小节（Presentation → Application →
- *      Domain → Infrastructure）和 00_File_Map.gs「Architecture Layer Map」，
- *      每个文件被归类到唯一一层，箭头只能往下指；仅有的一个例外（
- *      21_RecurringEngine.gs → 09_IdempotencyManager.gs）被明确记录，
- *      不再新增第二个。
- *
- * ── 9. AI Suggests, Human Confirms ───────────────────────────────────────
- * WHY：跟第 5 条呼应，但这条是从"人"的视角重申——本 OS 里任何标记为
- *      Decision/Suggestion 的输出，最终生效与否必须经过人的一次主动
- *      表态，而不是被动接受。
- * WHAT：AI 永远建议，用户决定。
- * HOW：/priority 指令展示的是 PriorityEngine 的建议排序和分数
- *      （06_TaskIntentParser._buildPriorityReply_），用户看到分数后如果
- *      想真的调整某个任务的 priority，需要另外发一条 updateTask 相关的
- *      指令——展示建议和执行变更永远是两个独立的动作。
- *
- * ── 10. Everything Rebuildable ───────────────────────────────────────────
- * WHY：这是第 1/4 条（Single Source of Truth / Read Models are Disposable）
- *      的总纲——如果承诺了"一切皆可重建"，就必须真的对每一张 Read Model
- *      表都兑现这个承诺，不能挑着来。
- * WHAT：所有状态都必须可以重新生成。
- * HOW：Tasks/ActiveTasks/TaskStatistics/TaskFilters 四张表全部有对应的
- *      rebuild 函数（11_ProjectionRebuilder.gs）；ArchiveTasks 理论上也
- *      可以从"Tasks 里 DONE/CANCELLED 超过 retention 天数"这条规则重新
- *      跑一遍归档逻辑重建（13_ActiveTasksEngine.gs 的 runDailyArchive 本身
- *      就是幂等的，多跑一次不会重复归档同一行）；唯一不可重建的是 Events
- *      本身——这是 Single Source of Truth 的必然结果：源头不可能从别的
- *      地方重建出来，否则它就不是源头了。
- */
+// ─────────────────────────────────────────────────────────────
+// §1  SYSTEM IDENTITY
+// ─────────────────────────────────────────────────────────────
+//
+//  Name    : News OS v1.4
+//  Purpose : Auto-collect Malaysian news → score → Telegram brief —
+//            now extending into a personal Knowledge OS (Layer 4+)
+//  Runtime : Google Apps Script (V8 engine)
+//  Database: Google Sheets (10 sheets, 1 spreadsheet)
+//  Output  : Telegram bot (HTML parse_mode)
+//  Schedule: 4× / day — 07:00 | 12:00 | 18:00 | 21:00 (KL Time)
+//  AI used : L1-L3 (core pipeline) — NONE, 100% rule-based, by design
+//            L4 Knowledge Engine — Gemini (structured-output entity
+//            extraction), hard-isolated from L1-L3 per rule A7 below
+//  AI next : L5 Trend (NO AI — pure counting) → L6 Insight (AI,
+//            pattern→meaning) → L7 Decision (AI, personalized
+//            ranking). Each layer gated behind the previous one
+//            proving out first — see Project_State §5/§6.
 
-// ============================================================
-// 零、Universal Domain OS Blueprint（标准模板，V4 新增）
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// §2  LAYER ARCHITECTURE STATUS  (v1.4 — Steven's CTO ruling)
+// ─────────────────────────────────────────────────────────────
+//
+//  News OS is no longer just "a news bot" — it's the foundation of
+//  a personal Knowledge OS. The end goal (Steven's own framing):
+//  Personal AI / Investment OS / Property OS should never need to
+//  read raw News_Archive. They should query Knowledge_Library /
+//  Trend_Library / Insight_Library and get back things like "Johor
+//  SEZ has come up 213 times in 18 months" — structured intelligence,
+//  not a pile of headlines. THIS is why Knowledge_Library's schema
+//  matters more than it looks like it should for "a news bot."
+//
+//  Full planned architecture, L1-L7:
+//
+//  ┌──────┬──────────────┬───────────────────────┬─────────────┐
+//  │ Layer│ Name         │ Sheet (in → out)       │ STATUS      │
+//  ├──────┼──────────────┼───────────────────────┼─────────────┤
+//  │  L1  │ Collection   │ RSS → News_Inbox        │ ✅ DONE     │
+//  │  L2  │ Filter       │ News_Clean → Filtered   │ ✅ DONE     │
+//  │  L3  │ Brief        │ Filtered → Daily_Brief  │ ✅ DONE     │
+//  │      │              │   → Telegram            │             │
+//  │  L4  │ Knowledge    │ Filtered →              │ 🚧 BUILT,   │
+//  │      │              │   Knowledge_Library     │   7-day     │
+//  │      │              │                         │   TRIAL     │
+//  │  L5  │ Trend        │ Knowledge_Library →     │ ⏳ NOT      │
+//  │      │              │   Trend_Library         │   BUILT     │
+//  │  L6  │ Insight      │ Trend_Library →         │ ⏳ NOT      │
+//  │      │              │   Insight_Library       │   BUILT     │
+//  │  L7  │ Decision     │ Insight_Library →       │ ⏳ NOT      │
+//  │      │              │   Decision_Library      │   BUILT     │
+//  └──────┴──────────────┴───────────────────────┴─────────────┘
+//
+//  L1-L3 = "News OS"      (the original system, production-stable)
+//  L4-L7 = "Knowledge OS" (the new direction, built incrementally,
+//                          one layer at a time, never all at once)
+//
+//  ── WHY ONE LAYER AT A TIME (Steven's explicit instruction) ────
+//  Do NOT build L5/L6/L7 alongside or ahead of L4. Until L4 has run
+//  for real, nobody knows if entities extract cleanly, if cost is
+//  reasonable, or if Gemini's classification holds up. Building L7
+//  on an unproven L4 means debugging four layers at once when
+//  something looks wrong — impossible to isolate. Each layer is
+//  gated behind the previous one being validated. See the trial
+//  rule below and Project_State §5/§6 for the live status.
+//
+//  ── WHY L4 DIDN'T WAIT FOR THE OLD 30-DAY RULE ─────────────────
+//  P8 below (NO AI UNTIL STABLE) was written to protect L1-L3 from
+//  AI-introduced instability. Steven's ruling: that protection is
+//  about BLAST RADIUS, not a calendar. L4 only ever reads from
+//  News_Filtered and writes to its own Knowledge_Library table — it
+//  is structurally incapable of corrupting L1-L3, even on day one,
+//  PROVIDED the isolation guarantee in A7 actually holds (own
+//  try/catch, runs after the brief, never writes back into pipeline
+//  sheets). That's a different risk profile than "add AI to the
+//  scoring engine itself," which is exactly the kind of change the
+//  30-day rule still fully applies to.
+//
+//  ── THE ACTUAL GATE: 7 DAYS, NOT 30 ─────────────────────────────
+//  Steven's explicit ruling, replacing the original 30-day default
+//  for the Knowledge Layer specifically:
+//    "7天已经足够发现：Entity乱不乱 / 成本高不高 / 分类准不准"
+//  7 days is enough to learn what 30 days would also tell you here,
+//  because the three things that matter — entity quality, cost,
+//  classification sanity — show up fast and don't need a calendar
+//  month of repetition to become visible. L5 (13_TrendEngine.gs)
+//  does not start until this trial is reviewed and Steven signs off.
+//  See Project_State §5 for the trial checklist and live dates.
+//
+//  ── WHAT KNOWLEDGE_LIBRARY IS FOR (the actual point of L4) ──────
+//  Steven's framing, worth keeping verbatim in spirit: Trend_Library
+//  is just counts — useful, but not the asset. Knowledge_Library is
+//  the asset. It's structured, queryable, and is what every future
+//  system (Personal AI, Investment OS, Property OS) will read
+//  instead of raw news. Schema design on this sheet should be
+//  treated with the weight of "this is what 2027-you queries," not
+//  "this is a side table for a news bot."
 
-/**
- * 以下是平台级「Universal Domain OS Blueprint」的标准模板，供本项目内部
- * 交接、review、以及未来任何新 Domain OS（Property OS/Shopping OS/等）
- * 对齐参考。这是模板本身（跟具体某个 Domain 无关的通用结构），下面
- * 「一、P4」是这份模板在 Productivity OS 具体落地时每一格填的是哪个文件。
- *
- * Universal Domain OS Blueprint
- *
- * ├── 0. Governance
- * │   ├── Project Constitution   — 本 OS 的宪法：定位/边界/铁律/架构决策
- * │   ├── Project State          — 状态快照：已完成/进行中/已知Bug/下一步
- * │   ├── File Map                — 文件职责 + 模块依赖方向
- * │   └── ADR (Optional)          — 单项重大架构决策记录（本项目暂时把 ADR
- * │                                 级别的决策直接写进 Constitution 对应
- * │                                 小节并注明日期，未单独开 ADR 文件）
- * │
- * ├── 1. Foundation
- * │   ├── Configuration           — 敏感配置 + 业务常量枚举
- * │   ├── Schema                  — 各 Read Model 表的表头定义（唯一权威来源）
- * │   ├── Identity                — 业务对象去重用的确定性身份生成（纯函数）
- * │   ├── Event Definitions       — 本 OS 负责写入的事件类型清单
- * │   ├── Permissions             — 谁能写哪张表 / 哪类事件
- * │   └── Versioning               — 版本号 + 变更时间戳
- * │
- * ├── 2. Runtime（Domain Pattern，一次请求的完整生命周期）
- * │   ├── Request                 — 接收原始输入（自然语言/指令）
- * │   ├── Planner                 — 识别意图 + 抽取参数，不落盘
- * │   ├── Decision                 — 给出建议/评分，永不自动执行
- * │   ├── User Confirmation        — 需要用户明确确认才会进入 Execution
- * │   ├── Execution                 — 真正调用业务逻辑（create/update/...）
- * │   ├── Event                     — 写入事实到 Events 表（Write Model）
- * │   ├── Projection                 — Events → Read Model 的增量更新
- * │   └── Query                      — 唯一对外的查询入口，只读 Read Model
- * │
- * ├── 3. Intelligence
- * │   ├── Knowledge                  — 需要维护的参考数据
- * │   ├── Analytics                   — 统计类数字（完成率/逾期率/workload等）
- * │   ├── Prediction                   — 预测类模型（跟 Decision 的"建议"不同，
- * │                                      Prediction 通常基于历史数据推断
- * │                                      未来，不是规则打分）
- * │   ├── Suggestions                  — 面向用户的主动建议（跟 Decision 的
- * │                                      区别：Decision 是"这次请求该怎么判"，
- * │                                      Suggestions 是主动推送的、不依赖
- * │                                      某次具体请求）
- * │   ├── Insights                      — 行为洞察/长期趋势观察
- * │   └── Learning                       — 从历史反馈调整未来建议（本 OS
- * │                                      暂无实现，见下方 P4 第3层）
- * │
- * ├── 4. Integration
- * │   ├── Bridge                          — 跟其他 Domain OS 互相触发
- * │   ├── Connectors                       — 连接外部第三方服务
- * │   ├── APIs                             — 对外暴露的 REST/其他 API
- * │   ├── Import / Export                   — 批量导入导出
- * │   └── External Systems                  — 外部系统集成点
- * │
- * └── 5. Testing
- *     ├── Unit Tests                          — 单个函数/模块级别的测试
- *     ├── Integration Tests                    — 多模块协作的端到端测试
- *     ├── Migration Tests                       — Schema/Read Model 迁移验证
- *     └── Validation                             — Read Model 与 Write Model
- *                                                的一致性校验
- *
- * 使用方式：新开一个 Domain OS 时，按这张表逐格盘点"这一格我有没有对应
- * 实现，如果没有是刻意留白还是遗漏"，写进该 OS 自己的 Constitution P4。
- * 刻意留白的格子照样写"（暂无，原因）"，不要留空——这样下一次交接/审计
- * 能一眼看出"没做"和"忘了做"的区别。
- */
+// ─────────────────────────────────────────────────────────────
+// §3  CORE PRINCIPLES  (不可违反)
+// ─────────────────────────────────────────────────────────────
+//
+//  P1. PIPELINE ONLY
+//      Data flows in ONE direction only:
+//      Collect → Dedup → Score → Brief → Telegram
+//                                  ↓
+//                   Archive → Truncate → Knowledge (housekeeping,
+//                   runs AFTER Brief is sent, each step isolated —
+//                   see A8. Brief delivery never waits on these.)
+//      No backwards flow. No skipping stages.
+//      (v1.4 reorder: Brief used to run after Archive. Moved earlier
+//      because generateBrief() only ever reads News_Filtered — it
+//      has no dependency on Archive/Truncate/Knowledge at all. A
+//      360s trigger timeout in housekeeping previously meant the
+//      brief silently never sent that run. See Project_State §4.)
+//
+//  P2. STATELESS FUNCTIONS
+//      Every function reads its own state from Sheets.
+//      No in-memory state between function calls.
+//      All persistent state = Google Sheets.
+//
+//  P3. BATCH WRITES ONLY
+//      All Sheets writes: range.setValues(2D_array)
+//      NEVER:            cell.setValue(value)  ← causes timeout
+//      Exception:        single status fix (max 1 cell)
+//
+//  P4. DATE-SAFE ALWAYS
+//      NEVER: String(date).startsWith('2026-')
+//      ALWAYS: _ds(date) === '2026-06-07'
+//      WHY: Sheets silently converts date strings to Date objects
+//
+//  P5. HTML TELEGRAM ONLY
+//      NEVER MarkdownV2 — one wrong char = entire message fails
+//      ALWAYS HTML mode: escHtml() for text, raw URL for links
+//      ALWAYS fallback: HTML fail → strip tags → plain text
+//
+//  P6. ARCHIVE IS PERMANENT
+//      News_Archive is NEVER truncated, NEVER deleted
+//      Inbox + Clean = 7 days only (operational buffer)
+//      (Originally written as "powers v3.0 RAG/Personal Memory" — as
+//      of v1.4, Knowledge_Library is the more direct target for that,
+//      since it's already structured; News_Archive remains the
+//      permanent raw-headline backstop underneath it. See
+//      Project_State §7.)
+//
+//  P7. LOG EVERYTHING
+//      Every function: sysLog() on success, errLog() in catch
+//      System_Log sheet = the source of truth for debugging
+//
+//  P8. NO AI UNTIL STABLE  (scoped exception added v1.4 — see A7)
+//      Rule: run 30 days stable → then add AI to the CORE pipeline
+//      v1.1 is rule-based by design, not by limitation
+//      EXCEPTION (v1.4): the Knowledge Layer (12_KnowledgeEngine.gs
+//      onward) is explicitly exempt from the 30-day wait. This rule
+//      exists to protect L1-L3 (Collect/Dedup/Filter/Brief) from
+//      AI-introduced instability — but the Knowledge Layer only ever
+//      READS from News_Filtered and WRITES to its own tables, so it
+//      structurally cannot destabilize L1-L3 even on day one. The
+//      isolation guarantee in A7 is what makes this exception safe —
+//      it is not a relaxation of caution, it's a different risk
+//      profile. The 30-day rule still fully applies to any AI work
+//      that would touch the core pipeline itself.
 
-// ============================================================
-// 零之二、核心流程（CQRS + Runtime Domain Pattern，V4 新增）
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// §4  ARCHITECTURE RULES
+// ─────────────────────────────────────────────────────────────
+//
+//  A1. MODULE ISOLATION
+//      Each .gs file = one responsibility
+//      Modules do NOT call each other directly
+//      Only 03_Orchestrators.gs chains modules
+//
+//  A2. CONFIG IS THE API
+//      User customizes via Config sheet (A:J), not code
+//      keepKw (A) | filterKw (C) | settings (E:F) | sources (H:J)
+//      New user-facing settings go in Config, not in code
+//
+//  A3. SCORE ENGINE OWNS FILTERING
+//      06_ScoreEngine.gs is the ONLY place that decides pass/fail
+//      filterKw = hard reject (skip immediately)
+//      score < 1 = soft reject (failed scoring)
+//      Do NOT add filtering logic in other modules
+//
+//  A4. ORCHESTRATORS OWN SCHEDULING
+//      03_Orchestrators.gs is the ONLY file that chains modules
+//      Trigger functions live here only
+//      runMorningBrief() owns the autoTruncateTables() call — runs
+//      AFTER generateBrief() now, not before (see A7)
+//
+//  A5. TELEGRAM OWNS SENDING
+//      09_Telegram.gs is the ONLY file that calls Telegram API
+//      No other file makes HTTP calls to Telegram directly
+//
+//  A6. SINGLE SPREADSHEET
+//      All data in one Google Spreadsheet, 10 named sheets
+//      Sheet names are CONSTANTS — never rename without updating code
+//
+//  A7. BRIEF DELIVERY HAS PRIORITY OVER ALL HOUSEKEEPING  (v1.4,
+//      generalized after a real 360s trigger timeout — see
+//      Project_State §4)
+//      generateBrief() only ever reads News_Filtered — it has NO
+//      dependency on archiveNews(), autoTruncateTables(), or the
+//      Knowledge Layer. So inside runMorningBrief()/runEveningBrief():
+//        - collect → dedup → filter → generateBrief() run FIRST,
+//          together in ONE try/catch — this is the critical path
+//        - archiveNews(), autoTruncateTables(), and any Knowledge-
+//          Layer module (12_KnowledgeEngine.gs and future siblings
+//          13_TrendEngine / 14_InsightEngine / 15_DecisionEngine)
+//          run AFTER, each in ITS OWN separate try/catch
+//        - each housekeeping step's public entry point should ALSO
+//          wrap its own body in try/catch internally and never
+//          re-throw (belt-and-suspenders — see extractKnowledge()
+//          in 12_KnowledgeEngine.gs for the pattern)
+//        - Knowledge-Layer modules specifically: read FROM pipeline
+//          sheets but never write back INTO them — one-way branch
+//          only, same spirit as P1
+//      WHY: a hard GAS execution timeout is NOT a catchable
+//      exception — no try/catch *inside* a step protects anything
+//      that was supposed to run *after* it if that earlier step
+//      times out the whole trigger. The only real protection is
+//      ORDER: put the one thing that actually matters (the brief)
+//      ahead of anything that's merely "nice to keep working."
+//      This is also what makes the P8 Knowledge-Layer exception
+//      safe — if this ordering/isolation is ever violated, P8's
+//      exception no longer holds.
 
-/**
- * 本 OS 的两条核心流程，是上面 Blueprint 里「1. Foundation」和
- * 「2. Runtime」在数据流向上的具体体现，交接时建议跟 Blueprint 模板一起看：
- *
- * 流程 A：CQRS 写入链路（Write Model → Read Model）
- *
- *   Events（唯一 Write Model，只追加）
- *     ↓ Projection（10_ProjectionEngine.gs，增量，O(1)）
- *   Tasks（全量 Read Model，含所有状态）
- *     ↓ Projection（同上，同步）
- *   ActiveTasks（工作台，只有非终态任务）
- *     ↓ Archive Engine（13_ActiveTasksEngine.runDailyArchive，每日定时，低频）
- *   ArchiveTasks（冷归档库，只增不删）
- *
- *   同一条 Events 流也并行驱动：
- *   Events → TaskFilters（搜索用扁平投影，10_ProjectionEngine._upsertTaskFilters_）
- *
- *   TaskStatistics 不在上面这条"Events 驱动"的链路里（V4.6 起）——它由
- *   Tasks 表每天批量重新聚合一次（11_ProjectionRebuilder.
- *   recomputeStatisticsFromTasks_，15_Setup.gs 的每日触发器），完整架构
- *   论证见 00_ADR.gs ADR-2026-07-06-005。这是本 OS 里唯一一张"降级为
- *   低频批量维护而不是事件驱动实时投影"的 Read Model 表，之所以特别
- *   拎出来说明，是因为它打破了"Read Model 都是 Events 增量驱动"这个
- *   看起来理所当然的印象——保留这张表是因为已经证实的事情是"同步维护
- *   它没有任何查询路径依赖、还有并发漂移风险"，不是"这张表本身没用"，
- *   所以选择保留表结构、只降级维护频率，而不是删除整张表。
- *
- *   铁律：Events 只能追加；Tasks/ActiveTasks/TaskFilters 只能被 Projection
- *   （增量）或 ProjectionRebuilder（全量重建，仅限迁移/修复）写入；
- *   TaskStatistics 只能被 11_ProjectionRebuilder.recomputeStatisticsFromTasks_()
- *   （每日批量）或 rebuildStatisticsProjection()（灾难恢复，从 Events
- *   全量重放）写入；ArchiveTasks 只能被 Archive Engine 写入。任何查询
- *   路径都不允许反过来读 Events 重放当查询用（唯一例外见流程B下方
- *   "例外"）。
- *
- * 流程 B：Runtime Domain Pattern（一次 Telegram 请求的生命周期）
- *
- *   Request（06_TaskIntentParser.parseTaskIntent，接收原始文字）
- *     ↓
- *   Planner（同文件内，识别意图 TASK_CREATE/TASK_DONE/TASK_TODAY/... + 抽参数）
- *     ↓
- *   Decision（22_PriorityEngine，仅在 /priority 等需要评分排序的路径上介入，
- *            只产出建议分数，不改任何数据）
- *     ↓
- *   User Confirmation（用户已经在发指令这个动作本身里做了确认——
- *            "done TSK-xxx" / "cancel TSK-xxx" 都是用户主动明确的指令，
- *            不需要额外一轮"你确定吗"，除非未来接入 inline keyboard 二次确认）
- *     ↓
- *   Execution（20_TaskEngine.createTask/updateTask/completeTask/cancelTask，
- *            经由 09_IdempotencyManager 的锁 + 幂等去重）
- *     ↓
- *   Event（02_EventBus.publish，唯一写入口，写完立即同步调 Projection）
- *     ↓
- *   Projection（10_ProjectionEngine.dispatch，增量更新全部 Read Model）
- *     ↓
- *   Query（12_TaskQueryEngine，本流程之外的"读"路径入口——注意 Query 不是
- *            这条写入链路的下一步，而是任何时候需要展示数据时独立进入的
- *            并行路径，只读 Read Model，见流程A）
- *
- *   例外（唯一允许偏离"Query 只读 Read Model"这条规则的场景）：
- *     26_AnalyticsEngine.replayCompletionTrend_() 为了算历史时间序列
- *     （"过去8周每周完成几个"），会重放 Events——因为这类数据 Read Model
- *     的"当前状态快照"结构性地不包含。这是本 OS 唯一被允许重放 Events 的
- *     函数，且明确不在任何 Telegram 指令路径上（见
- *     00_Project_Constitution.gs P6 铁律4、00_File_Map.gs 26_AnalyticsEngine
- *     小节）。
- */
+// ─────────────────────────────────────────────────────────────
+// §5  CODING LAWS  (违反会产生 Bug)
+// ─────────────────────────────────────────────────────────────
+//
+//  L1. FORBIDDEN PARAMETER NAMES
+//      NEVER use as function parameters:
+//        type, date, time, name, value, text, event, data
+//      WHY: GAS V8 runtime conflicts → ReferenceError
+//      USE INSTEAD:
+//        type → briefType
+//        date → briefDate  OR  dateStr  OR  rowDate
+//        time → briefTime  OR  timeStr
+//        name → sheetName  OR  feedName
+//
+//  L1b. NO RAW getUi() OUTSIDE onOpen() / confirm dialogs
+//      ❌ SpreadsheetApp.getUi().alert('...')
+//      ✅ _alert('Title', 'message')   ← from 01_Utils.gs
+//      WHY: getUi() throws if function is run from the Apps Script
+//           editor (▶ Run) instead of a Sheet menu click.
+//           _alert() console.log()s always (visible in Execution log)
+//           and tries getUi().alert() in try/catch as a bonus popup.
+//      EXCEPTION: YES/NO confirmation dialogs (e.g. clearAllData)
+//           genuinely need menu context — wrap in try/catch and
+//           print instructions if no UI context exists.
+//
+//  L2. DATE COMPARISON PATTERN
+//      ✅ if (_ds(row[0]) === today) { ... }
+//      ✅ var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+//      ❌ if (String(row[0]).startsWith(today)) { ... }
+//      ❌ if (row[0] == today) { ... }
+//
+//  L3. DATE STORAGE PATTERN
+//      ✅ Utilities.formatDate(dt, TZ, 'yyyy-MM-dd HH:mm:ss')
+//      ❌ new Date().toString()
+//      ❌ dt.toISOString()
+//      WHY: toString()/ISO format causes Sheets auto-convert
+//
+//  L4. BATCH WRITE PATTERN
+//      ✅ sheet.getRange(startRow, 1, rows.length, cols).setValues(array2D)
+//      ❌ rows.forEach(r => sheet.appendRow(r))  ← slow, timeout risk
+//      Exception: appendRow() OK for single rows (log, brief record)
+//      ❌ ALSO APPLIES TO DELETES: for(...) sh.deleteRow(i) in a loop
+//         is the same anti-pattern — each call reflows the whole
+//         sheet. This actually happened: autoTruncateTables() did
+//         exactly this, sat as dead/unreachable code for an unknown
+//         stretch (see Constitution history / Project_State §4), and
+//         on its first real run — with a large backlog — caused a
+//         real 360s trigger timeout that silently skipped a brief.
+//      ✅ To delete many rows by a filter condition: read the whole
+//         range once, filter in memory, then ONE clearContent() +
+//         ONE setValues() of just the rows to keep. See
+//         autoTruncateTables() in 07_Archive.gs for the pattern.
+//
+//  L5. TELEGRAM MESSAGE PATTERN
+//      ✅ escHtml(title) inside <a href="url">...</a>
+//      ✅ sendTg(token, chatId, htmlText, optionalKeyboard)
+//      ❌ MarkdownV2 formatting (*bold*, _italic_, [text](url))
+//      ❌ Direct UrlFetchApp to Telegram outside 09_Telegram.gs
+//
+//  L6. ERROR HANDLING PATTERN
+//      ✅ try { ... } catch(e) { errLog('Module', e.message); }
+//      ✅ if (!token || token.startsWith('PASTE_')) { errLog(); return; }
+//      ❌ Silent failures (no log, no return)
+//
+//  L7. SCORE TABLE LOCATION  (changed in v1.2)
+//      SCORE_TABLE + IMPACT_LABELS live in 06_ScoreEngine.gs
+//      NOT in 00_Config.gs — large objects were moved out to
+//      isolate parse-error risk (a single typo in a 50-entry
+//      object must not break TZ/NEWS_FEEDS/getConfig() for
+//      every other file in the project)
+//      To change scoring: edit SCORE_TABLE in 06_ScoreEngine.gs
+//      Do NOT duplicate scoring logic in other files
+//      Do NOT move SCORE_TABLE back into 00_Config.gs
+//
+//  L8. NO DUPLICATE FUNCTION DEFINITIONS  (v1.2 lesson learned)
+//      GAS does NOT error on two functions with the same name —
+//      it silently keeps only the LAST one defined in load order.
+//      This already happened once: 06_ScoreEngine.gs had
+//      filterNews() defined twice (copy-paste accident while
+//      moving SCORE_TABLE around). No error was thrown — it just
+//      silently used the second copy.
+//      RULE: before pasting a function into a file, grep the file
+//      first to confirm it doesn't already exist there.
+//      Every pipeline file should have exactly ONE definition of
+//      its main function: collectNews, dedupNews, filterNews,
+//      archiveNews, generateBrief — one each, no exceptions.
+//
+//  L9. ALWAYS SET timeoutSeconds ON UrlFetchApp CALLS  (v1.4.2,
+//      two real production timeouts before this was caught)
+//      ✅ UrlFetchApp.fetch(url, { muteHttpExceptions:true, timeoutSeconds: 12 })
+//      ✅ UrlFetchApp.fetchAll(requests) — for 2+ URLs, ALWAYS prefer
+//         this over a fetch()-in-a-loop. It fires every request
+//         CONCURRENTLY; total time becomes close to the SLOWEST
+//         single request, not the SUM of all of them. Each request
+//         object in the array takes the same params as fetch(),
+//         including timeoutSeconds — set it on every one.
+//      ❌ UrlFetchApp.fetch(url, { muteHttpExceptions:true })  ← no
+//         bound — defaults to 360s, i.e. the ENTIRE trigger ceiling,
+//         per single call
+//      ❌ Looping fetch() calls for N URLs — even WITH timeoutSeconds
+//         set, this is O(N) sequential network round-trips. Use
+//         fetchAll() instead whenever fetching more than one URL.
+//      WHY: timeoutSeconds IS a real, documented UrlFetchApp
+//      parameter (confirmed against the current official docs:
+//      developers.google.com/apps-script/reference/url-fetch/
+//      url-fetch-app) — but it is NOT set by default, and its
+//      default if omitted is 360s. A single hanging external request
+//      (rate-limiting, a dead server, whatever) can silently consume
+//      the WHOLE 6-minute trigger ceiling. This caused two separate
+//      real production timeouts (Jun 18 and Jun 20, 2026) before the
+//      second one's investigation actually found the real cause —
+//      the first attempt assumed (wrongly, without checking docs)
+//      that no such parameter existed at all, and "fixed" it with a
+//      between-iterations elapsed-time check instead — which cannot
+//      interrupt a request already in flight, so it didn't actually
+//      work. See Project_State §4 for the full incident writeup.
+//      Suggested values by call type (adjust if real-world latency
+//      proves these wrong): RSS/news feeds 10-15s, REST APIs you
+//      control or trust (Telegram, etc.) 15-20s, LLM/batched AI
+//      calls 30-60s (legitimately slower, still must be bounded).
 
-// ============================================================
-// 零之三、Engine Contract Standard（Engine 文件头标准，V4.3 新增）
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// §6  NEVER DO  (hard stops)
+// ─────────────────────────────────────────────────────────────
+//
+//  ✗  Delete rows from News_Archive
+//  ✗  Use MarkdownV2 in Telegram messages
+//  ✗  Call setValue() OR deleteRow() in a loop — batch instead (L4)
+//  ✗  Use type / date / time as parameter names
+//  ✗  Compare dates without _ds()
+//  ✗  Call AI APIs in the CORE pipeline (L1-L3 stay rule-based) —
+//     the Knowledge Layer (L4+) is the sole, explicit exception,
+//     and only because it's isolated per A7/P8
+//  ✗  Put user-facing config in .gs code (use Config sheet) —
+//     this includes AI model names (Gemini 2.0 Flash was shut down
+//     a few months after launch; whatever model is current WILL
+//     need to change again)
+//  ✗  Call Telegram API outside 09_Telegram.gs
+//  ✗  Store state in global JS variables between runs
+//  ✗  Call UrlFetchApp.fetch()/fetchAll() without an explicit
+//     timeoutSeconds — see L9. Caused two real production timeouts.
+//  ✗  Loop fetch() for multiple URLs — use fetchAll() (L9)
 
-/**
- * 以后所有新增 Engine 文件，文件头注释必须包含以下字段（顺序不强制，
- * 字段本身不能少）。这是本 OS 的 Single Responsibility 原则（见上方
- * Architecture Principles 第7条）落到文件层面的具体检查清单：review 一个
- * 新 Engine 时，只要这些字段填不出来（比如说不清楚 Forbidden Dependencies
- * 是什么），往往说明这个 Engine 的职责切得不够干净。
- *
- * 字段定义：
- *   Responsibilities        — 这个 Engine 负责的业务能力，一两句话
- *   Owns                     — 这个 Engine 独有、其他模块不该重复实现的逻辑
- *   Reads                    — 输入数据来源（task[]、单个 task、还是别的）
- *   Writes                   — 会不会写任何东西（Sheet/Events/其他）
- *   Public API               — 对外暴露的函数签名清单
- *   Dependencies             — 依赖哪些其他文件/模块
- *   Forbidden Dependencies   — 明确不允许依赖什么（呼应 Dependency Rules）
- *   Pure Function            — YES/NO，是否纯函数（无副作用）
- *   Replay Events            — YES/NO，是否允许重放 Events（本 OS 目前只有
- *                             26_AnalyticsEngine.replayCompletionTrend_()
- *                             这一个函数是 YES，其余全部 NO）
- *   Projection               — YES/NO，是否会被当成 Read Model 投影写入方
- *   Thread Safety            — 是否需要考虑并发（大多数纯函数 Engine 不需要，
- *                             涉及 Sheet 写入或锁的模块需要说明）
- *   Side Effects             — 除了返回值之外还会造成什么可观察的变化
- *                             （发消息、写日志、写 Sheet 等）
- *   Notes                    — 其他交接时需要知道的背景/取舍
- *
- * 示例（PriorityEngine）：
- *
- *   Responsibilities : Priority Score / Urgency Score / 优先级建议
- *   Owns             : 优先级打分公式（手动 priority 权重 + 时间紧迫度）
- *   Reads            : task[]（由调用方传入，不自己读 Sheet）
- *   Writes           : none
- *   Public API       : computeUrgencyScore(task, now?), computePriorityScore
- *                      (task, now?), suggestPriority(task), rankByPriority
- *                      (tasks)
- *   Dependencies     : 05_SheetUtils.gs（parseDueDate_/round1_/shallowCopy_，
- *                      纯计算工具，不是 Sheet I/O）
- *   Forbidden        : Sheet, Events, Telegram/Output
- *   Pure             : YES
- *   Replay Events    : NO
- *   Projection       : NO
- *   Thread Safety    : 不需要（无共享可变状态）
- *   Side Effects     : NO
- *   Notes            : 见 Architecture Principles 第5条（Decision Never
- *                      Executes）——本 Engine 任何函数都不写任务，只返回
- *                      分数/建议字符串。
- *
- * 现有 Engine 的 Contract 速查表（本次审计时一次性补全，以后新增/修改
- * Engine 时随手更新这张表，保持跟代码同步）：
- *
- *   Engine                  | Reads      | Writes | Pure | Replay | Projection
- *   ------------------------|------------|--------|------|--------|------------
- *   20_TaskEngine           | task[]/1个 | Events | NO   | NO     | NO（安全兜底
- *                           |            | (兜底  |      |        | 例外见 P6铁律3）
- *                           |            | 写Sheet)|     |        |
- *   21_RecurringEngine      | task(1个)  | 无直接 | NO   | NO     | NO
- *                           |            | 写(委托Idem) |  |        |
- *   22_PriorityEngine       | task[]     | none   | YES  | NO     | NO
- *   23_SearchEngine         | task[]     | none   | YES  | NO     | NO
- *   24_ViewEngine           | task[]     | none   | YES  | NO     | NO
- *   25_DashboardEngine      | task[]     | none   | YES  | NO     | NO
- *   26_AnalyticsEngine      | task[]     | none   | YES* | 部分NO/ | NO
- *                           |            |        |      | 部分YES |
- *   12_TaskQueryEngine      | Sheet      | none   | NO   | NO     | NO（读方，
- *                           |            |        |      |        | 唯一读Sheet的
- *                           |            |        |      |        | 查询入口）
- *   10_ProjectionEngine     | Event      | Sheet  | NO   | NO     | YES（本OS
- *                           |            |        |      |        | 唯一权威
- *                           |            |        |      |        | Projection
- *                           |            |        |      |        | 写入方）
- *
- *   * 26_AnalyticsEngine.computeStatistics 是 Pure=YES/Replay=NO；同文件的
- *     replayCompletionTrend_() 是 Pure=NO（依赖当前时间做分桶）/Replay=YES，
- *     两个函数的 Contract 不同，这是本表用"部分/部分"标注的原因——一个
- *     Engine 文件里可以有 Contract 不同的函数，只要各自在文件头写清楚。
- */
+// ─────────────────────────────────────────────────────────────
+// §7  TIMEZONE RULE
+// ─────────────────────────────────────────────────────────────
+//
+//  ALL time operations use TZ = 'Asia/Kuala_Lumpur'
+//  Defined in 00_Config.gs as:  var TZ = 'Asia/Kuala_Lumpur';
+//  NEVER hardcode timezone string anywhere else
+//  ALWAYS:  Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd')
 
-// ============================================================
-// 零之四、Dependency Rules（依赖方向正式规则，V4.3 新增）
-// ============================================================
+// ─────────────────────────────────────────────────────────────
+// §8  CONSTANT PLACEMENT RULE  (v1.2)
+// ─────────────────────────────────────────────────────────────
+//
+//  00_Config.gs holds ONLY:
+//    VERSION, TZ, TOP_N           — simple primitives
+//    NEWS_FEEDS                   — array of {name,url}, built-in feeds
+//    getConfig(), verifyConfig()  — functions
+//
+//  06_ScoreEngine.gs holds:
+//    SCORE_TABLE, IMPACT_LABELS   — large objects (parse-risk isolated)
+//
+//  04_Collector.gs holds:
+//    GN_SEARCH_BASE, GN_LOC       — local to this file only,
+//                                   used ONLY for building Config H:J
+//                                   domain-based site: search URLs
+//
+//  RULE: when adding a new constant, ask "how big is this object,
+//  and which file actually uses it?" Large objects (10+ entries)
+//  go in the file that uses them, not in 00_Config.gs. Small
+//  primitives shared by everything go in 00_Config.gs.
 
-/**
- * 本 OS 内部按 Clean Architecture 风格分四层（这是文件级别的微观分层，
- * 跟 Universal Domain OS Blueprint 的宏观分类——见零之六——是两套不同
- * 目的的分类体系，同一个文件在两套体系里的"层"名字不一定相同，不要混淆：
- * Blueprint 回答"这个文件属于哪个业务能力范畴"，Dependency Rules 回答
- * "这个文件可以依赖谁、不可以依赖谁"）：
- *
- *   Presentation
- *     ↓
- *   Application
- *     ↓
- *   Domain
- *     ↓
- *   Infrastructure
- *
- * 依赖只能往下指——上层可以调用下层，下层永远不能反过来调用上层。
- * 每一层的 Allowed / Forbidden：
- *
- * Presentation（06_TaskIntentParser.gs）
- *   Allowed  : 调用 Application 层（09/11/12/15/20）、Domain 层的纯文本/
- *              转换类辅助函数（如 21_RecurringEngine.ruleToLegacyString）、
- *              Infrastructure 层的纯文本工具（05_SheetUtils._cleanTitle_）
- *   Forbidden: 不得直接读写 Sheet 或 Events（不得调用 02_EventBus.publish/
- *              getAllEvents，不得调用 05_SheetUtils 的 getSheet_/
- *              getHeaderMap_/upsertRowByKey_ 等 Sheet I/O 函数）
- *
- * Application（09_IdempotencyManager.gs, 08_DeduplicationEngine.gs,
- *              11_ProjectionRebuilder.gs, 12_TaskQueryEngine.gs,
- *              15_Setup.gs, 20_TaskEngine.gs）
- *   Allowed  : 调用 Domain 层、调用 Infrastructure 层
- *   Forbidden: 不得反向依赖 Presentation（不得引用
- *              06_TaskIntentParser.gs 里的任何函数或文案格式化逻辑）
- *
- * Domain（07_IdentityEngine.gs, 09_TemporalParser.gs,
- *         21_RecurringEngine.gs, 22_PriorityEngine.gs, 23_SearchEngine.gs,
- *         24_ViewEngine.gs, 25_DashboardEngine.gs, 26_AnalyticsEngine.gs）
- *   Allowed  : 同层互相调用（如 25_DashboardEngine → 24_ViewEngine /
- *              26_AnalyticsEngine）、调用 Infrastructure 层里"不做 Sheet/
- *              Event I/O 的纯计算工具"（如 05_SheetUtils 的 round1_/
- *              round2_/isOverdue_/parseDueDate_/shallowCopy_）
- *   Forbidden: 不得读写 Sheet（禁止调用 02_EventBus.publish/getAllEvents，
- *              禁止调用 05_SheetUtils 的 Sheet I/O 函数）；不得依赖
- *              Application 或 Presentation 层（唯一记录在案的例外见下方
- *              「已知例外」）；View/Search/Priority/Analytics 四个纯函数
- *              Engine 不得知道"Telegram"是什么（不得拼 Telegram 消息
- *              格式、不得引用除 chat_id 以外任何呈现相关字段）
- *
- * Infrastructure（01_SecureConfig.gs, 02_EventBus.gs, 03_Output.gs,
- *                 05_SheetUtils.gs, 10_ProjectionEngine.gs,
- *                 13_ActiveTasksEngine.gs）
- *   Allowed  : 被任意上层调用；同层互相调用（如 02_EventBus.publish 内部
- *              调 10_ProjectionEngine.dispatch，两者都是 Infrastructure，
- *              不算跨层，不是例外）
- *   Forbidden: 不得调用 Presentation/Application/Domain 任何一层（不得
- *              反向依赖上层模块）
- *
- * 已知例外（Known Exceptions，明确记录，不再新增第二个）：
- *
- *   21_RecurringEngine.gs（Domain）→ 09_IdempotencyManager.gs（Application）
- *   spawnNextIfNeeded() 为了生成"下一次 recurring 实例"，复用的是跟用户
- *   手动建任务完全相同的幂等去重路径（同一个 identity 判重逻辑），这是
- *   刻意选择复用而不是让 RecurringEngine 重新实现一遍幂等/去重——重新
- *   实现意味着两套判重逻辑要保持同步演进，长期看风险比"记录一个例外"
- *   更大。这是本 OS 唯一一处 Domain 依赖 Application 的地方。
- *
- * 对应到需求方给出的具体禁止项：
- *   禁止：Infrastructure 调用 Presentation → 见上方 Infrastructure Forbidden
- *   禁止：View 读取 Sheet → 24_ViewEngine.gs 属于 Domain，见 Domain Forbidden
- *   禁止：Dashboard 读取 Event → 25_DashboardEngine.gs 属于 Domain，同上
- *   禁止：Priority 调用 Telegram → 22_PriorityEngine.gs 属于 Domain，
- *         Domain Forbidden 最后一条明确覆盖
- */
-
-// ============================================================
-// 零之五、Event Definition Standard（Event 文档化标准，V4.3 新增）
-// ============================================================
-
-/**
- * 以后任何新增事件类型，文档化时必须包含以下字段。目前不要求为此单独建
- * 一个 04_EventDefinitions.gs 文件——如果以后事件类型数量多到 02_EventBus.gs
- * 文件头注释放不下，再考虑拆出独立文件（这属于 Schema Authority 同一类
- * "先记录标准，等真的需要再拆文件"的判断，见零之六 Operations 和下方
- * ADR-2026-07-06-002）。
- *
- * 字段定义：
- *   Event Name             — 事件类型字符串（大写下划线）
- *   Purpose                — 这个事件代表业务上发生了什么
- *   Payload                — payload 字段的形状
- *   Required Fields        — payload 里哪些字段是必须的
- *   Projection Updated     — 这个事件会触发哪些 Read Model 表更新
- *   Example                — 一个具体的 payload 例子
- *   Version                — 这个事件定义是从哪个版本开始存在/变更的
- *   Source Module          — 唯一允许发布这个事件的模块
- *   Destination Projection — 哪个 Projection 函数负责消费它
- *
- * 本 OS 现有 5 个事件类型，按此标准补全文档（一次性补全存量，以后新增
- * 事件类型必须照此格式补充）。V4.6 起 TaskStatistics 不再由任何单个
- * Event 同步驱动（见 00_ADR.gs ADR-2026-07-06-005），所以下面每条的
- * Projection Updated 都不再列 TaskStatistics——它现在由
- * 11_ProjectionRebuilder.recomputeStatisticsFromTasks_() 每日批量重算，
- * 不属于任何单个事件的投影范围：
- *
- * ── TASK_CREATED ──────────────────────────────────────────────────────────
- *   Purpose         : 一个新任务被创建
- *   Payload         : 完整 task 对象（task_id/identity/timestamp/title/
- *                     category/status/due_date/due_time/due_datetime/
- *                     recurring/priority/context/budget/notes/description/
- *                     tags/chat_id/completed_at/reminder_count/archived）
- *                     【V4.7 新增，Due Time Support】due_time（'HH:mm' 或
- *                     ''）、due_datetime（due_date+due_time 派生的 ISO
- *                     字符串，没有具体时间时为 ''，见 20_TaskEngine.gs
- *                     _computeDueDatetime_）
- *   Required Fields : task_id, title, chat_id
- *   Projection Updated: Tasks（新增行）, ActiveTasks（新增行）,
- *                     TaskFilters（新增行）
- *   Example         : { task_id:"TSK-20260706-A1B2C3", title:"交房租",
- *                     category:"ADMIN", status:"PENDING",
- *                     due_date:"2026-07-10", due_time:"10:00",
- *                     due_datetime:"2026-07-10T10:00:00", priority:"HIGH",
- *                     chat_id:"123" }
- *   Version         : V3（原 20_ProductivityModule.gs 起），V4.7 起新增
- *                     due_time/due_datetime
- *   Source Module   : 20_TaskEngine.createTaskDirect_（只能被
- *                     09_IdempotencyManager.createTaskIfNotExists 间接触发）
- *   Destination Projection: 10_ProjectionEngine.projectTaskCreated_
- *
- * ── TASK_UPDATED（V4新增）────────────────────────────────────────────────
- *   Purpose         : 一个已存在任务的可编辑字段被修改
- *   Payload         : { task_id, 以下任意子集: title/category/priority/
- *                     due_date/due_time/due_datetime/recurring/context/
- *                     budget/notes/description/tags/identity（identity 仅
- *                     在上述字段任一变更时由 20_TaskEngine.updateTask 自动
- *                     附带，见 V4.2 HIGH RISK 2 修复；due_datetime 仅在
- *                     due_date 或 due_time 任一变更时由 updateTask 自动
- *                     重算附带，不接受外部直接传入，见 V4.7 Due Time
- *                     Support）}
- *   Required Fields : task_id
- *   Projection Updated: Tasks（覆写变更字段）, ActiveTasks（若任务当前
- *                     非终态）, TaskFilters（重新拼 searchable_text）
- *   Example         : { task_id:"TSK-20260706-A1B2C3", priority:"CRITICAL" }
- *   Version         : V4（20_TaskEngine.updateTask 新增），V4.2 起可能带
- *                     identity 字段，V4.7 起可能带 due_time/due_datetime
- *   Source Module   : 20_TaskEngine.updateTask（唯一发布方，不经过
- *                     IdempotencyManager，见 00_File_Map.gs 架构铁律5）
- *   Destination Projection: 10_ProjectionEngine.projectTaskUpdated_
- *
- * ── TASK_COMPLETED ────────────────────────────────────────────────────────
- *   Purpose         : 一个任务被标记完成
- *   Payload         : { task_id }
- *   Required Fields : task_id
- *   Projection Updated: Tasks（status=DONE, completed_at=事件时间戳）,
- *                     ActiveTasks（删除对应行）
- *   Example         : { task_id:"TSK-20260706-A1B2C3" }
- *   Version         : V3
- *   Source Module   : 20_TaskEngine.completeTask（V4.2 起先校验任务存在，
- *                     V4.4/V4.5 起先校验非终态，见 MEDIUM RISK 1/
- *                     ADR-2026-07-06-004 修复）
- *   Destination Projection: 10_ProjectionEngine.projectTaskCompleted_
- *
- * ── TASK_CANCELLED ────────────────────────────────────────────────────────
- *   Purpose         : 一个任务被取消
- *   Payload         : { task_id }
- *   Required Fields : task_id
- *   Projection Updated: Tasks（status=CANCELLED）, ActiveTasks（删除对应行）
- *   Example         : { task_id:"TSK-20260706-A1B2C3" }
- *   Version         : V3
- *   Source Module   : 20_TaskEngine.cancelTask（V4.2 起先校验任务存在）
- *   Destination Projection: 10_ProjectionEngine.projectTaskCancelled_
- *
- * ── REMINDER_SENT ─────────────────────────────────────────────────────────
- *   Purpose         : 针对某个任务发送了一次提醒
- *   Payload         : { task_id, sent_at? }
- *   Required Fields : task_id
- *   Projection Updated: Tasks（reminder_count +1）
- *   Example         : { task_id:"TSK-20260706-A1B2C3", sent_at:"2026-07-06T09:00:00Z" }
- *   Version         : V3
- *   Source Module   : Reminder OS（跨项目发布，本项目只负责消费/投影，见
- *                     02_EventBus.gs 文件头关于"谁负责哪类事件"的说明）
- *   Destination Projection: 10_ProjectionEngine.projectReminderSent_
- */
-
-// ============================================================
-// 零之六、Universal Domain OS Blueprint 最终结构（V4.3 升级）
-// ============================================================
-
-/**
- * 零（本文件最上方的「Universal Domain OS Blueprint（标准模板）」小节）
- * 记录的是这份 Blueprint 第一次被引入本项目时的模板草稿（6 个顶层分类）。
- * 本节记录的是同一份 Blueprint 演进后的最终结构（8 个顶层分类），两处都
- * 保留、不互相删除——保留旧版本是为了让以后的人能看到"这份模板是怎么
- * 演进过来的"，这本身也是一种交接价值（呼应 Architecture Principles 里
- * "Single Responsibility"和"Everything Rebuildable"背后的同一种态度：
- * 宁可多留一点上下文，也不要让人靠猜）。以后新开 Domain OS，请对照本节
- * 的最终结构，不要对照零的草稿版本。
- *
- * Universal Domain OS Blueprint（最终结构）
- *
- * Architecture
- * ├── Governance
- * ├── Foundation
- * ├── Runtime
- * ├── Domain
- * ├── Intelligence
- * ├── Integration
- * ├── Operations
- * └── Testing
- *
- * 跟草稿版本（零）的两处结构性差异：
- *
- * 1. Domain 从 Runtime 里独立出来成为顶层分类。
- *    草稿版本把"业务能力"（TaskEngine/RecurringEngine/PriorityEngine/
- *    SearchEngine/DashboardEngine/AnalyticsEngine 这些 Engine 本身）混在
- *    Runtime（Request→Planner→Decision→...→Query 这条请求生命周期）里
- *    一起描述，容易让人误以为"Engine 是生命周期的一个步骤"。最终结构把
- *    两者拆开：
- *      Runtime = 请求的生命周期本身（一次调用经过哪些阶段）
- *      Domain  = 业务能力（这些阶段具体调用的是哪些 Engine，这些 Engine
- *                承载什么业务规则）
- *    两者关系：Runtime 的 Decision/Execution 等阶段，运行时会调用 Domain
- *    层的具体 Engine 来完成这一步——Runtime 回答"发生了什么顺序"，Domain
- *    回答"每一步具体是谁在干活、干的是什么业务逻辑"。
- *
- * 2. 新增 Operations 顶层分类。
- *    Migration / Backup / Repair / Diagnostics / Health Check /
- *    Monitoring / Rebuild / Recovery 这些能力，本质上不是"处理一次用户
- *    请求"（不属于 Runtime），而是"维护系统本身"——运维人员/开发者主动
- *    触发，不是响应外部输入。草稿版本没有单独的位置安放这类能力，容易
- *    被随手归进 Testing 或 Runtime，这次给它一个独立分类。
- *
- * 本项目在最终结构下的落地映射，见下方 P4 新增的「2.5 Domain」和
- * 「4.5 Operations」两块（编号刻意不改动原有 0-5，只做插入式新增，
- * 避免所有引用旧编号的文档/注释都要跟着改）。
- */
-
-// ============================================================
-// 一、这个 OS 是什么
-// ============================================================
-
-/**
- * P1. 定位
- *     Productivity OS 是一个完整的「任务操作系统」，管 Task 的完整生命周期：
- *     创建/更新/查询/完成/取消/recurring 续期/优先级建议/搜索/多维度视图/
- *     仪表盘/统计分析/冷归档。V4 把这些能力拆成 9 个独立 Engine（见下方
- *     P4 Blueprint 映射表），不再是单一模块。
- *
- * P2. 部署形态（不变）
- *     独立 Apps Script 项目，以 Library 形式被 Personal AI Core 引入
- *     （Identifier: ProductivityOS）。不接 Telegram webhook，被 Core 的
- *     04_Main.gs 调用。Library 依赖方向单向：Core → ProductivityOS。
- *     本项目不依赖、不调用 Core 的任何代码。
- *
- * P3. 数据边界（不变）
- *     跟 Personal AI Core / Reminder OS 共享同一个 Google Spreadsheet
- *     （SPREADSHEET_ID 三边一致）。本项目拥有 Tasks / ActiveTasks /
- *     ArchiveTasks / TaskStatistics / TaskFilters 五张表的写入权。Events 表
- *     是共享的追加日志，本项目只追加自己的 TASK_ 开头和 REMINDER_SENT 事件。
- *
- * P4. Universal Domain OS Blueprint 在本项目的落地
- *
- *   0. Governance
- *      Project Constitution / Project State / File Map
- *        → 这三份文件（00_ 开头）。
- *      ADR (Optional)
- *        → 00_ADR.gs（V4.1 起本项目开始正式收录 ADR，目前共 7 条：
- *          ADR-2026-07-06 Dashboard 架构决策、ADR-2026-07-06-002 Schema
- *          Authority、ADR-2026-07-06-003 Per-User Soft Lock、
- *          ADR-2026-07-06-004 Projection 消费端幂等、ADR-2026-07-06-005
- *          TaskStatistics 降级为每日批量重算、ADR-2026-07-11-006
- *          RecurringEngine 复用 IdempotencyManager（补记）、
- *          ADR-2026-07-11-007 SheetUtils/TemporalParser 裸全局函数维持
- *          现状（补记），见下方 P7 简述 + 00_ADR.gs 完整版）。
- *      Command & Business Rule Reference（V4.6 文档补充新增）
- *        → 00_Command_Reference.gs——全部 Telegram 指令的匹配规则、
- *          查询时间窗口定义、Priority/Statistics 打分公式、去重与幂等
- *          规则、归档/统计批处理时间点等"具体数值型"规则的集中记录处。
- *          跟本文件的分工：这里（Constitution）记录 WHY/架构原则，
- *          00_Command_Reference.gs 记录 WHAT/具体规则数值，避免以后
- *          审计一条条规则时要翻遍全部 Engine 文件头才能核实。
- *      Known Limitations（V4.6 文档补充新增）
- *        → 00_Known_Limitations.gs——记录"刻意不做 / 已实现但暂未对外
- *          暴露"的能力边界（Not Yet），比如 category/priority 不做自然
- *          语言推断、updateTask() 目前是 Internal API、Weekly/Monthly
- *          Dashboard 与 suggestPriority() 暂未接 Telegram 指令。避免
- *          Review/审计把这些已确认的刻意边界误判成 bug 或遗漏。
- *      Architecture Review（2026-07-11 新增，UEF v1.0 引入后新增的
- *      Governance 分类）
- *        → 00_Architecture_Review.gs——本项目对照 Universal Engineering
- *          Framework（UEF，管"怎么被设计/评审/交付"，跟本文件开头的
- *          Universal Domain OS Blueprint 管"怎么组织"是平行关系）跑的
- *          正式 Domain Profile Architecture Review 记录，与 00_ADR.gs
- *          的分工：ADR 记录"做了什么决定"，本文件记录"这个项目现在
- *          是否符合一套外部标准、哪里不符合"。
- *
- *      至此本项目 Governance 目录固定为 8 份文件：Project Constitution
- *      （Why）/ Project State（当前快照）/ ADR（Decision）/ File Map
- *      （Where）/ Command Reference（What）/ Known Limitations（Not Yet）
- *      / Roadmap（Future）/ Architecture Review（Compliance），每份文件
- *      职责单一、不互相重复。
- *
- *   1. Foundation
- *      Configuration        → 01_SecureConfig.gs（敏感配置）+
- *                              20_TaskEngine.gs 里的 ProductivityConfig
- *                              （业务常量：category/priority/recurring 枚举）
- *      Schema                → 15_Setup.gs（Tasks/ActiveTasks/ArchiveTasks/
- *                              TaskStatistics/TaskFilters 五张表的表头定义，
- *                              唯一权威来源，别处不重复写字段列表；正式
- *                              规则见 00_ADR.gs ADR-2026-07-06-002 Schema
- *                              Authority）
- *      Identity               → 07_IdentityEngine.gs（本地副本，纯函数）
- *      Event Definitions      → 02_EventBus.gs 文件头注释里的事件类型清单
- *                              （TASK_CREATED/UPDATED/COMPLETED/CANCELLED/
- *                              REMINDER_SENT）；V4.3 起按统一标准逐个字段
- *                              补全文档，完整版见零之五 Event Definition
- *                              Standard
- *      Permissions            → 00_File_Map.gs「架构铁律」小节（谁能写哪张表/
- *                              哪类事件）
- *      Versioning             → 本文件头的 LAST_UPDATED + 各文件头的版本号
- *
- *   2. Runtime（Domain Pattern，Core P6.2 Level 2 在本项目的落地）
- *      Request                → 06_TaskIntentParser.gs（parseTaskIntent）
- *      Planner                → 06_TaskIntentParser.gs 同文件内解析
- *                              （识别意图 + 抽取参数，不落盘）
- *      Decision               → 22_PriorityEngine.gs（优先级/紧急度建议，
- *                              只建议不执行，见 P5）
- *      User Confirmation      → Telegram inline keyboard 或直接文字确认
- *                              （TASK_DONE/TASK_CANCEL 需要用户明确发指令）
- *      Execution              → 20_TaskEngine.gs（create/update/complete/
- *                              cancel）+ 21_RecurringEngine.gs（续期生成，
- *                              经由 TaskEngine 同一路径）
- *      Event                  → 02_EventBus.gs（Events 表唯一写入口）
- *      Projection             → 10_ProjectionEngine.gs（实时增量）+
- *                              11_ProjectionRebuilder.gs（全量重建/修复）
- *      Query                  → 12_TaskQueryEngine.gs（Task Query Engine，
- *                              唯一对外查询入口，见下方 P6 CQRS 铁律）
- *
- *   2.5 Domain（V4.3 新增，从 Runtime 分离出来的业务能力层，见零之六）
- *      TaskEngine             → 20_TaskEngine.gs（create/update/complete/
- *                              cancel 四个业务操作，Task 这个业务对象的
- *                              核心能力）
- *      Recurring              → 21_RecurringEngine.gs（重复规则/下一次到期
- *                              日计算/续期生命周期）
- *      Priority               → 22_PriorityEngine.gs（优先级/紧急度打分与
- *                              建议）
- *      Search                 → 23_SearchEngine.gs（多维度过滤/全文搜索）
- *      View                   → 24_ViewEngine.gs（Today/Week/Overdue 等
- *                              逻辑视图）
- *      Dashboard              → 25_DashboardEngine.gs（多视图组合展示）
- *      Analytics              → 26_AnalyticsEngine.gs（完成率/逾期率等统计）
- *      与 Runtime 的关系：上面「2. Runtime」的 Decision/Execution 等阶段，
- *      运行时具体调用的就是这里列出的 Engine——Runtime 回答"一次请求经过
- *      哪些阶段"，Domain 回答"每个阶段具体是谁在干活"。这条区分是本次
- *      V4.3 治理升级新加的，见零之六的完整论证。
- *
- *   3. Intelligence
- *      Knowledge              →（暂无，Task domain 目前没有需要维护的参考数据）
- *      Analytics              → 26_AnalyticsEngine.gs（完成率/逾期率/提醒
- *                              统计/recurring 统计/workload）
- *      Prediction              →（暂无，Priority/Urgency Score 属于 Decision
- *                              范畴，不是预测模型，归 22_PriorityEngine.gs）
- *      Suggestions            → 22_PriorityEngine.gs（优先级建议，永不自动
- *                              执行，只建议）
- *      Insights                →（暂无，复用 Core 的 93_MemoryEngine 等，
- *                              本项目没有自己的副本）
- *      Learning                →（暂无）
- *
- *   4. Integration
- *      Bridge                  →（暂无，本项目目前不需要连外部系统）
- *      Connectors              →（暂无）
- *      APIs                    →（暂无，本项目对外只有 Library 导出函数，
- *                              没有独立 REST API）
- *      Import / Export         →（暂无）
- *      External Systems        →（暂无）
- *
- *   4.5 Operations（V4.3 新增，见零之六——"维护系统本身"而不是"处理一次
- *                  用户请求"，明确不属于 Runtime）
- *      Migration              → 11_ProjectionRebuilder.gs 的
- *                              migrateSchemaV4()（列迁移，幂等）
- *      Backup                  →（暂无，本项目的"备份"依赖 Google Sheets
- *                              自带的版本历史，没有额外实现）
- *      Repair                   → 15_Setup.gs 的 repairSheetHeaders()/
- *                              _repairOneSheetHeader_（V4.2 修复为整行
- *                              比对，见 00_Project_State.gs MEDIUM RISK 3）
- *      Diagnostics               → 15_Setup.gs 的 runDiagnostics()
- *      Health Check               →（暂无独立函数，runDiagnostics() 里
- *                              顺带做了 Sheet 存在性检查，未来如果需要
- *                              独立于"跑一遍完整诊断"的轻量健康检查，
- *                              再单独拆一个函数）
- *      Monitoring                 →（暂无，本项目目前靠 Logger.log +
- *                              02_EventBus.gs 的 _alertAdminProjectionFailure_
- *                              做被动告警，没有主动监控）
- *      Rebuild                     → 11_ProjectionRebuilder.gs 的
- *                              rebuildTasksProjection()/
- *                              rebuildActiveTasksProjection()/
- *                              rebuildStatisticsProjection()/
- *                              rebuildTaskFiltersProjection()/
- *                              rebuildAllProjections()（以上均为人工手动
- *                              触发）；V4.6 新增
- *                              recomputeStatisticsFromTasks_()（每日自动，
- *                              由 15_Setup.gs 的 triggerDailyStatisticsRecompute
- *                              触发器调用，是 TaskStatistics 现在的常规
- *                              维护方式，见 00_ADR.gs ADR-2026-07-06-005）
- *      Recovery                     → 11_ProjectionRebuilder.gs 的
- *                              repairProjection()（rebuildAllProjections
- *                              的别名）
- *
- *   5. Testing
- *      Unit Tests               → 各 Engine 文件内的 test* 函数（如
- *                              07_IdentityEngine.testIdentity()、
- *                              09_IdempotencyManager.testWebhookRetry()）
- *      Integration Tests        → 15_Setup.gs 的 runDiagnostics()
- *      Migration Tests           → 11_ProjectionRebuilder.gs 的
- *                              verifyProjection() / compareProjectionWithEvents()
- *      Validation                → 11_ProjectionRebuilder.gs 的
- *                              _verifyActiveTasksConsistency_() 等
- *
- * P5. 不变的东西（沿用 Core 宪法，这里重申）
- *       - AI 只建议，不自动执行（Core P4）——22_PriorityEngine.gs 的
- *         Decision 阶段（优先级/紧急度）永远只是提案，真正创建/更新/完成/
- *         取消任务要么是用户明确发消息/点按钮触发，要么是已确认的 recurring
- *         规则自动续期（这个例外在 V3 就存在，V4 不变）。
- *       - Execution 层发指令，Event 是真正的写入事实，两者是先后关系，
- *         不是同一件事的两种说法（Core P6.2）。
- *
- * P6. CQRS 铁律（V4 新增，本次架构升级的核心）
- *       1. Events 是唯一的 Write Model，只能追加，不能重放着当查询用。
- *       2. Tasks / ActiveTasks / ArchiveTasks / TaskFilters 都是 Read Model
- *          （Projection），只能被 10_ProjectionEngine.gs（增量）和
- *          11_ProjectionRebuilder.gs（全量重建，仅限迁移/修复场景手动
- *          运行）写入。TaskStatistics 是例外——V4.6 起它不再由
- *          10_ProjectionEngine.gs 同步维护，只能被
- *          11_ProjectionRebuilder.recomputeStatisticsFromTasks_()（每日
- *          批量，从 Tasks 表算）或 rebuildStatisticsProjection()（灾难
- *          恢复，从 Events 全量重放）写入，完整原因见
- *          00_ADR.gs ADR-2026-07-06-005。
- *       3. 任何 Telegram 指令（经由 06_TaskIntentParser.gs）禁止直接调用
- *          EventBus.getAllEvents() / deriveTaskState_()，一律经过
- *          12_TaskQueryEngine.gs 读 Read Model。
- *       4. 唯一允许重放 Events 的例外是 26_AnalyticsEngine.gs 里明确标注为
- *          「历史趋势」的函数（如 replayCompletionTrend_()）——因为「过去N周
- *          每周完成几个」这种时间序列数据，Read Model 的当前状态快照结构性
- *          地不包含，只有 Events 的时间轴才有。除此之外 AnalyticsEngine 的
- *          日常统计（completionRate/overdueRate等当前值，即
- *          computeStatistics()）只读调用方传入的 task 数组（来自 Tasks
- *          Read Model），从不直接触碰 TaskStatistics 这张表本身——
- *          TaskStatistics 是给"需要低成本快照读取"的场景预留的缓存，
- *          不是 AnalyticsEngine 的数据来源。
- *       5. 12_TaskQueryEngine.gs 是唯一允许直接读 Tasks/ActiveTasks/
- *          TaskFilters 这几张 Sheet 的模块（TaskStatistics 目前没有任何
- *          查询路径读取，见 P6 铁律2 和 00_ADR.gs ADR-2026-07-06-005）。
- *          View/Priority/Search/Dashboard/Analytics 五个 Engine 都是纯
- *          函数：接收 TaskQueryEngine 已经读出来的任务数组做内存运算，
- *          自己不摸 Sheet、不摸 Events。
- *
- * P7. Dashboard 不额外落盘（正式架构决策，完整版见 00_ADR.gs ADR-2026-07-06）
- *       简述：Dashboard（Today/Weekly/Monthly/Statistics）依赖"查询发生的
- *       那一刻"，不满足 Projection 的基本性质（同一份 Events 历史在不同
- *       时刻重放结果应该相同），所以不属于第2层 Projection，而是独立的
- *       第4层 View/Presentation（Write Model → Projection → Query Layer →
- *       View Layer 四层模型，完整论证、正式条款、引擎职责划分见 ADR-2026-07-06）。
- *       12_TaskQueryEngine（取数据）→ 24_ViewEngine（整理数据）→
- *       25_DashboardEngine（组合展示）三层职责单一、互不知道呈现介质是什么，
- *       未来换 Web/App/语音前端时可以直接复用，只需要新写呈现层替换
- *       06_TaskIntentParser。
- */
+// ─────────────────────────────────────────────────────────────
+// §9  ENGINEERING / AI-ASSISTED DEVELOPMENT GOVERNANCE
+//     (added 2026-08-19 — Universal Governance Propagation)
+// ─────────────────────────────────────────────────────────────
+//
+//  PURPOSE: governs how changes to THIS repository's own files get
+//  made and saved during development. Separate from §3 P1-P8
+//  (product behavior), §4 A1-A7 (module boundaries), and §5 L1-L9
+//  (runtime correctness) — this section is a development-PROCESS
+//  rule, not a product rule. Does not modify, gate, or reopen any
+//  of those, the L4 trial, or the L5-L7 build restriction.
+//
+//  SOURCE: canonical rule is Universal_Engineering_Framework v1.12
+//  §0.6 items 3-4 (Universal/Master repo; see Universal-Recovery-
+//  Manifest.md). This section locally adopts that rule's operational
+//  obligation for News OS — it intentionally does not restate the
+//  full Universal text. v1.12 remains authoritative if the two ever
+//  appear to diverge.
+//
+//  G1. NO END-OF-SESSION-ONLY EXPORT
+//      Any material change to this project's own files — made by a
+//      human developer or an AI coding assistant — must not depend
+//      on a single export at the end of a work session as its only
+//      save point.
+//      For each materially changed file:
+//        MODIFY → VALIDATE → PERSIST TO THE APPROVED LOCATION
+//        IMMEDIATELY → INDEPENDENTLY VERIFY THE PERSISTED COPY IS
+//        READABLE → RECORD A CHECKPOINT → only then move to the
+//        next file.
+//      A higher-level checkpoint (Engine: several files that form
+//      one cohesive unit; Sprint: several Engines) is additive on
+//      top of this file-level discipline — it never replaces it.
+//      Most single News OS changes ARE the Engine for practical
+//      purposes, given A1's one-file-one-responsibility boundary;
+//      the Engine/Sprint levels matter once a change spans several
+//      of this project's own files as one unit.
+//
+//  G2. NOT THE SAME AS THIS PROJECT'S OTHER USES OF SIMILAR WORDS
+//      This section's "checkpoint" = a record that a FILE CHANGE was
+//      saved and confirmed readable. It is explicitly NOT:
+//        - P2's "persistent state" (Google Sheets holding the app's
+//          own RUNTIME data — a different, already-existing concept)
+//        - the "checkpoints" in File_Map §6 troubleshooting (sysLog()
+//          markers inside a single trigger execution, used to debug
+//          360s timeouts)
+//        - P7 / the Knowledge Layer's "source of truth" (which SHEET
+//          is authoritative for a piece of data)
+//        - "verified" as used elsewhere in Project_State (confirming
+//          a technical claim against Apps Script's own docs)
+//      SCOPE: saving/persisting/recovering this repository's OWN
+//      files during development. Does not cover deployment, testing,
+//      or Sheets/data migration.

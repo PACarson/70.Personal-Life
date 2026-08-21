@@ -40,20 +40,31 @@
  *   Owns                  : {ok,code,message} 错误信封格式；Web Identity
  *                           解析规则
  *   Reads                 : 17_NoteQueryEngine, 12_TaskQueryEngine（非
- *                           终态过滤）, 14_ProjectQueryEngine
+ *                           终态过滤）, 14_ProjectQueryEngine, 22_PriorityEngine
+ *                           （UI-I3，只读 suggestPriorityWithAI_，不产生
+ *                           独立 Event——见「UI-I1~I5」一节）
  *   Writes                : none（自己不发 Event，全部通过既有 Command）
  *   Public API            : ui_getOpenNotes(), ui_createNote(content),
  *                           ui_convertNoteToTask(noteId)，
- *                           ui_getConvertibleTasks(), ui_getActiveProjects(),
+ *                           ui_getConvertibleTasks(filters), ui_getActiveProjects(filters),
  *                           ui_convertTaskToProject(taskId),
  *                           ui_convertProjectToTask(projectId)，
  *                           ui_captureProjectAsTemplate(projectId, ruleName),
- *                           ui_instantiateTemplate(templateId)
+ *                           ui_instantiateTemplate(templateId)，
+ *                           ui_updateTask(taskId, changes),
+ *                           ui_updateProject(projectId, changes),
+ *                           ui_suggestPriority(taskId),
+ *                           ui_completeTask(taskId), ui_cancelTask(taskId),
+ *                           ui_completeProject(projectId), ui_cancelProject(projectId)
  *                           （除 ui_captureProjectAsTemplate 外都带一个
- *                           仅测试用的 _testOverrides 参数，前端永远
- *                           不传；capture 不需要，见该函数注释）
+ *                           仅测试用的 _testOverrides 参数，永远是最后一个
+ *                           参数，前端永远不传；capture 不需要，见该函数
+ *                           注释。ui_getConvertibleTasks/ui_getActiveProjects
+ *                           2026-08-21 新增的 filters 是前端会传的真实参数，
+ *                           排在 _testOverrides 之前，不受这条限制）
  *   Dependencies           : 29_NoteEngine.gs、42_ConversionEngine.gs、
- *                           41_BusinessRuleEngine.gs、
+ *                           41_BusinessRuleEngine.gs、20_TaskEngine.gs、
+ *                           27_ProjectEngine.gs、22_PriorityEngine.gs、
  *                           17_NoteQueryEngine.gs、12_TaskQueryEngine.gs、
  *                           14_ProjectQueryEngine.gs、01_SecureConfig.gs
  *   Forbidden Dependencies  : Sheet 直接读写、Events 直接发布
@@ -206,13 +217,29 @@ function ui_convertNoteToTask(noteId, _testOverrides) {
  * 只返回非终态 Task（PENDING/BLOCKED/WAITING）——跟 Business_Rules「一」
  * 里 Task→Project 的前置校验对齐（终态 Task 转 Project 没有意义）。
  * TaskQueryEngine.getTasks 只支持单值精确匹配，多状态过滤在这里做。
+ *
+ * 【UI-I1，2026-08-21 新增 filters】只接受 category / priority 两个
+ * 精确匹配键，透传给 TaskQueryEngine.getTasks 的既有 filters 参数
+ * （单值精确匹配，大小写不敏感），再叠加上面的非终态过滤——顺序不能
+ * 反过来（先精确过滤再非终态，效果一样，但保持跟原实现同样的"先拿
+ * 精确匹配结果、非终态用 Array.filter 兜底"结构，改动面最小）。
+ * 不接受 status 作为 filters 键——面板本身的定义就是"非终态"，允许
+ * 调用方传 status 会跟这条已有约束混淆语义，真要看终态 Task 应该是
+ * 另一个独立视图，不是这个面板加一个参数就能兼顾的。
+ * @param {object} [filters]  {category, priority}，均可省略
  * @param {object} [_testOverrides]
  */
-function ui_getConvertibleTasks(_testOverrides) {
+function ui_getConvertibleTasks(filters, _testOverrides) {
   try {
     var chatId = _resolveChatId_(_testOverrides);
     var NONTERMINAL = ['PENDING', 'BLOCKED', 'WAITING'];
-    var tasks = TaskQueryEngine.getTasks(chatId).filter(function (t) {
+    var queryFilters = null;
+    if (filters && (filters.category || filters.priority)) {
+      queryFilters = {};
+      if (filters.category) queryFilters.category = filters.category;
+      if (filters.priority) queryFilters.priority = filters.priority; // priority_user，见 ADR-2026-07-24-009
+    }
+    var tasks = TaskQueryEngine.getTasks(chatId, queryFilters).filter(function (t) {
       return NONTERMINAL.indexOf(String(t.status || '').toUpperCase()) !== -1;
     });
     return { ok: true, tasks: tasks };
@@ -222,12 +249,23 @@ function ui_getConvertibleTasks(_testOverrides) {
 }
 
 /**
+ * 【UI-I1，2026-08-21 新增 filters】ProjectQueryEngine.getActiveProjects
+ * 本身不接受 filters 参数（固定非终态），改用它的姐妹函数 getProjects
+ * （通用精确匹配）+ 这里本地做同一份非终态过滤，效果对无 filters 的
+ * 调用完全不变。filters.status 只用来在"非终态"这个大集合内部再收窄
+ * （比如只看 BLOCKED 的），不接受终态值——传了也会被下面的非终态
+ * .filter() 兜底吞掉，不会意外泄漏已完成/已取消的 Project。
+ * @param {object} [filters]  {status}，可省略
  * @param {object} [_testOverrides]
  */
-function ui_getActiveProjects(_testOverrides) {
+function ui_getActiveProjects(filters, _testOverrides) {
   try {
     var chatId = _resolveChatId_(_testOverrides);
-    var projects = ProjectQueryEngine.getActiveProjects(chatId);
+    var NONTERMINAL = ['DRAFT', 'READY', 'IN_PROGRESS', 'WAITING', 'BLOCKED'];
+    var queryFilters = (filters && filters.status) ? { status: filters.status } : null;
+    var projects = ProjectQueryEngine.getProjects(chatId, queryFilters).filter(function (p) {
+      return NONTERMINAL.indexOf(String(p.status || '').toUpperCase()) !== -1;
+    });
     return { ok: true, projects: projects };
   } catch (e) {
     return _wrapError_(e);
@@ -373,6 +411,265 @@ function ui_instantiateTemplate(templateId, _testOverrides) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Template（可能已经被删除）' };
     }
     return { ok: true, project: result.project, workflow: result.workflow, tasks: result.tasks };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+// ============================================================
+// UI-I1~I5（2026-08-21，Carson 批准消息「Track 2」——独立于 Track 1
+// Identity 那条线，见 00_Project_State.gs「十四」）
+//
+// UI-I1 Sort+Filter：Sort 全部前端做（QueryEngine 目前没有排序能力，
+// 见 00_Project_State.gs 记录的既有决定，本次不新增）；Filter 用
+// TaskQueryEngine/ProjectQueryEngine 本来就有的精确匹配 filters 参数，
+// 已经在上面 ui_getConvertibleTasks/ui_getActiveProjects 里加好。
+// UI-I2 Edit：ui_updateTask/ui_updateProject。
+// UI-I3 Priority：ui_suggestPriority——"AI Suggests, Human Confirms"
+// 落到 Priority 字段的具体实现，见 00_Data_Ownership.gs「一」/
+// ADR-2026-07-24-009：排序/筛选/展示只读 priority（=ADR 里的
+// priority_user），不读 priority_ai_recommended；后者只作为"建议"
+// 单独展示，采纳需要用户显式发起一次 ui_updateTask，不会自动生效。
+// UI-I4/I5 Done/Cancel：ui_completeTask/ui_cancelTask/
+// ui_completeProject/ui_cancelProject，直接复用既有 Command，本文件
+// 只做 not_found/already_X/invalid_state → {ok,code,message} 的翻译。
+// ============================================================
+
+/**
+ * updateTask(null) 同时代表"任务不存在"和"没有任何合法字段被改动"两种
+ * 不同情况，无法从返回值本身区分——这里用 TaskQueryEngine.getTask
+ * （本文件已声明的既有 Reads 依赖）自己先判断一次是不是"不存在"，
+ * 不是新增 Domain 逻辑，只是让 Bridge 层的错误信息准确。
+ * changes 直接透传给 TaskEngine.updateTask，字段白名单/合法值校验
+ * 完全由既有 UPDATABLE_FIELDS + CFG 枚举负责，本函数不重复这层校验
+ * （不引入 UI-only 的校验逻辑）。
+ * @param {string} taskId
+ * @param {object} changes  透传给 TaskEngine.updateTask 的 changes
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, task:object}|
+ *           {ok:false, code:'MISSING_TASK_ID'|'NOT_FOUND'|'NO_CHANGES'|string, message}}
+ */
+function ui_updateTask(taskId, changes, _testOverrides) {
+  try {
+    if (!taskId) {
+      return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+
+    var existing = TaskQueryEngine.getTask(taskId, chatId);
+    if (!existing) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除）' };
+    }
+
+    var updated = TaskEngine.updateTask(taskId, changes || {}, chatId);
+    if (!updated) {
+      // 已经排除了"不存在"，走到这里只可能是 changes 里没有任何一个
+      // UPDATABLE_FIELDS 认得的合法字段/合法值——不是错误，是"提交了但
+      // 没有可保存的改动"，跟 ADR-015 的 BLOCKED 同一种处理方式：明确
+      // 的 code，不是笼统报错。
+      return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
+    }
+    return { ok: true, task: updated };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * 跟 ui_updateTask 同一套理由：先用 ProjectQueryEngine.getProject 自己
+ * 判断一次"不存在"，让 NOT_FOUND / NO_CHANGES 两种情况在 Bridge 层
+ * 就区分清楚。
+ * @param {string} projectId
+ * @param {object} changes  透传给 ProjectEngine.updateProject 的 changes
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, project:object}|
+ *           {ok:false, code:'MISSING_PROJECT_ID'|'NOT_FOUND'|'NO_CHANGES'|string, message}}
+ */
+function ui_updateProject(projectId, changes, _testOverrides) {
+  try {
+    if (!projectId) {
+      return { ok: false, code: 'MISSING_PROJECT_ID', message: '缺少 projectId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+
+    var existing = ProjectQueryEngine.getProject(projectId, chatId);
+    if (!existing) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Project（可能已经被删除）' };
+    }
+
+    var updated = ProjectEngine.updateProject(projectId, changes || {}, chatId);
+    if (!updated) {
+      return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
+    }
+    return { ok: true, project: updated };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI-I3。只产出"建议"，绝不直接改 priority（= priority_user）——
+ * 见本节头部注释引用的 ADR-2026-07-24-009。唯一的写操作是把这次生成
+ * 的建议本身记到 priority_ai_recommended（22_PriorityEngine 生成建议
+ * 这件事本身要落盘，ADR 原文"用户未采纳前不影响任何排序/展示逻辑"
+ * 隐含的前提就是这个字段在"生成时"已经有值，不是只在"采纳时"才写）
+ * ——通过既有 TaskEngine.updateTask 写，不是本文件直接发 Event。
+ * priority_ai_recommended 不在 IDENTITY_AFFECTING_FIELDS 里，这次写入
+ * 不触发 identity 重算。
+ *
+ * relatedContext 只补一个 project_title（如果这个 Task 挂在某个
+ * Project 下）——sibling_task_titles 需要再多一次查询换来的边际帮助
+ * 有限，这次不做，PriorityEngine.suggestPriorityWithAI_ 本身也把它
+ * 设计成可选。
+ *
+ * @param {string} taskId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, priority:string, reasoning:string, current_priority:string}|
+ *           {ok:false, code:'MISSING_TASK_ID'|'NOT_FOUND'|'AI_RESPONSE_INVALID'|string, message}}
+ */
+function ui_suggestPriority(taskId, _testOverrides) {
+  try {
+    if (!taskId) {
+      return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+
+    var task = TaskQueryEngine.getTask(taskId, chatId);
+    if (!task) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除）' };
+    }
+
+    var relatedContext = {};
+    if (task.project_id) {
+      var project = ProjectQueryEngine.getProject(task.project_id, chatId);
+      if (project) relatedContext.project_title = project.title;
+    }
+
+    var suggestion = PriorityEngine.suggestPriorityWithAI_(task, relatedContext);
+
+    TaskEngine.updateTask(taskId, { priority_ai_recommended: suggestion.priority }, chatId);
+
+    return {
+      ok: true,
+      priority: suggestion.priority,
+      reasoning: suggestion.reasoning || '',
+      current_priority: task.priority || 'MEDIUM'
+    };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI-I4（Task）。not_found → NOT_FOUND；already_done → 视为成功（用户
+ * 想要的最终状态本来就是"完成"，重复点击不应该报错）；invalid_state
+ * （已经是 CANCELLED/CONVERTED/NOT_SELECTED 等终态）→ 明确 code + 说明
+ * 当前状态，不是笼统报错。
+ * @param {string} taskId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, already_done:boolean, next_task:(object|null)}|
+ *           {ok:false, code:'MISSING_TASK_ID'|'NOT_FOUND'|'INVALID_STATE'|string, message}}
+ */
+function ui_completeTask(taskId, _testOverrides) {
+  try {
+    if (!taskId) {
+      return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var result = TaskEngine.completeTask(taskId, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除）' };
+    }
+    if (result.invalid_state) {
+      return { ok: false, code: 'INVALID_STATE', message: '这个 Task 已经是 ' + result.current_status + '，没法标记完成' };
+    }
+    return { ok: true, already_done: !!result.already_done, next_task: result.next_task || null };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI-I5（Task）。同 ui_completeTask 的三段式翻译，already_cancelled
+ * 同样视为成功（幂等）。
+ * @param {string} taskId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, already_cancelled:boolean}|
+ *           {ok:false, code:'MISSING_TASK_ID'|'NOT_FOUND'|'INVALID_STATE'|string, message}}
+ */
+function ui_cancelTask(taskId, _testOverrides) {
+  try {
+    if (!taskId) {
+      return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var result = TaskEngine.cancelTask(taskId, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除）' };
+    }
+    if (result.invalid_state) {
+      return { ok: false, code: 'INVALID_STATE', message: '这个 Task 已经是 ' + result.current_status + '，没法取消' };
+    }
+    return { ok: true, already_cancelled: !!result.already_cancelled };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI-I4（Project）。跟 ui_completeTask 同一套翻译规则，already_completed
+ * 视为成功。ProjectEngine.completeProject 目前不检查子 Task/子 Project
+ * 是否都已完成（不是本次改动引入的行为，既有 Engine 就是这样设计的，
+ * Track 2 不改 Domain 逻辑，照既有契约调用）。
+ * @param {string} projectId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, already_completed:boolean}|
+ *           {ok:false, code:'MISSING_PROJECT_ID'|'NOT_FOUND'|'INVALID_STATE'|string, message}}
+ */
+function ui_completeProject(projectId, _testOverrides) {
+  try {
+    if (!projectId) {
+      return { ok: false, code: 'MISSING_PROJECT_ID', message: '缺少 projectId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var result = ProjectEngine.completeProject(projectId, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Project（可能已经被删除）' };
+    }
+    if (result.invalid_state) {
+      return { ok: false, code: 'INVALID_STATE', message: '这个 Project 已经是 ' + result.current_status + '，没法标记完成' };
+    }
+    return { ok: true, already_completed: !!result.already_completed };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI-I5（Project）。
+ * @param {string} projectId
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, already_cancelled:boolean}|
+ *           {ok:false, code:'MISSING_PROJECT_ID'|'NOT_FOUND'|'INVALID_STATE'|string, message}}
+ */
+function ui_cancelProject(projectId, _testOverrides) {
+  try {
+    if (!projectId) {
+      return { ok: false, code: 'MISSING_PROJECT_ID', message: '缺少 projectId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var result = ProjectEngine.cancelProject(projectId, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Project（可能已经被删除）' };
+    }
+    if (result.invalid_state) {
+      return { ok: false, code: 'INVALID_STATE', message: '这个 Project 已经是 ' + result.current_status + '，没法取消' };
+    }
+    return { ok: true, already_cancelled: !!result.already_cancelled };
   } catch (e) {
     return _wrapError_(e);
   }

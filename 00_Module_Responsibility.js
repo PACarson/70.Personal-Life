@@ -497,8 +497,8 @@
  */
 
 // ============================================================
-// 十四、50_UIBridge.gs（UI Phase 0 → Slice 1/2/3，最后更新 2026-08-18，
-//      见 00_Project_State.gs「九」「十」「十一」、
+// 十四、50_UIBridge.gs（UI Phase 0 → Slice 1/2/3 → UI-I1~I5，最后更新
+//      2026-08-21，见 00_Project_State.gs「九」「十」「十一」「十四」、
 //      UI_Architecture_Audit_Phase0.md）
 // ============================================================
 
@@ -510,15 +510,40 @@
  *   Owns                  : {ok,code,message} 错误信封格式；Web Identity
  *                           解析规则（Session.getEffectiveUser().
  *                           getEmail()）
- *   Reads                 : 17_NoteQueryEngine.getOpenNotes
+ *   Reads                 : 17_NoteQueryEngine, 12_TaskQueryEngine（非
+ *                           终态过滤）, 14_ProjectQueryEngine,
+ *                           22_PriorityEngine（UI-I3，2026-08-21 新增，
+ *                           只读 suggestPriorityWithAI_）
+ *                           【2026-08-21 补记】这一行此前（2026-08-18）
+ *                           只记了 Slice 1 用到的
+ *                           17_NoteQueryEngine.getOpenNotes 一项——
+ *                           Slice 2/3 早就用到了 12_TaskQueryEngine/
+ *                           14_ProjectQueryEngine，当时没有同步补录，
+ *                           这次一并补上，不是本次新增的依赖。
  *   Writes                : none（自己不发 Event，全部通过既有 Command）
  *   Public API            : doGet(e)，ui_getOpenNotes(),
  *                           ui_createNote(content),
- *                           ui_convertNoteToTask(noteId)
- *                           （后三个都带一个仅测试用的第二参数，前端
- *                           永远不传）
+ *                           ui_convertNoteToTask(noteId)，
+ *                           ui_getConvertibleTasks(filters), ui_getActiveProjects(filters),
+ *                           ui_convertTaskToProject(taskId),
+ *                           ui_convertProjectToTask(projectId)，
+ *                           ui_captureProjectAsTemplate(projectId, ruleName),
+ *                           ui_instantiateTemplate(templateId)，
+ *                           ui_updateTask(taskId, changes),
+ *                           ui_updateProject(projectId, changes),
+ *                           ui_suggestPriority(taskId),
+ *                           ui_completeTask(taskId), ui_cancelTask(taskId),
+ *                           ui_completeProject(projectId), ui_cancelProject(projectId)
+ *                           （除 doGet/ui_captureProjectAsTemplate 外都带
+ *                           一个仅测试用的 _testOverrides 参数，永远是
+ *                           最后一个参数，前端永远不传。同上，2026-08-18
+ *                           这里只记了 Slice 1 的 3 个函数，这次一并补
+ *                           Slice 2/3 早就有的 6 个 + 本次新增的 7 个）
  *   Dependencies           : 29_NoteEngine.gs、42_ConversionEngine.gs、
- *                           17_NoteQueryEngine.gs、01_SecureConfig.gs
+ *                           41_BusinessRuleEngine.gs、20_TaskEngine.gs、
+ *                           27_ProjectEngine.gs、22_PriorityEngine.gs、
+ *                           17_NoteQueryEngine.gs、12_TaskQueryEngine.gs、
+ *                           14_ProjectQueryEngine.gs、01_SecureConfig.gs
  *   Forbidden Dependencies  : Sheet 直接读写、Events 直接发布
  *   Pure Function            : NO
  *   Side Effects              : YES（间接，通过调用既有 Command）
@@ -555,6 +580,15 @@
  *                           Instantiate 两次互不污染）均已通过真实环境
  *                           测试或人工浏览器验证，见 00_Project_
  *                           State.gs「九」「十」「十一」。
+ *
+ *                           UI-I1~I5（2026-08-21）测试：
+ *                           51_Tests_UIBridge_Interactions.gs，14 个测试，
+ *                           覆盖 Edit Task/Project、Priority（AI mock，
+ *                           断言"仅生成建议不自动改 priority"这条
+ *                           ADR-2026-07-24-009 的核心不变量）、Done/
+ *                           Cancel（含幂等）、Filter 服务端一半。Sort
+ *                           是纯前端 JS，这套 GAS 测试体系覆盖不到，
+ *                           需要人工浏览器验证，见该测试文件文件头。
  *
  *                           Slice 3 已知缺口（这次没有解决）：
  *                           19_BusinessRuleQueryEngine.gs 没有"列出

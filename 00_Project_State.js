@@ -470,3 +470,144 @@
  */
 
 
+// ============================================================
+// 十四、Track 1 Implementation Preflight + 正式 Regression Gate
+//      落地（2026-08-21）——补上「十三」跳过的治理步骤
+// ============================================================
+
+/**
+ *   背景：「十三」记录的 2026-08-20 实施（07_IdentityEngine.gs +
+ *   09_IdempotencyManager.gs）本身是对的，但 Carson 当时的批准消息
+ *   明确要求先做一道 Implementation Preflight（4 项确认）、再实施，
+ *   且要求正式 regression test 覆盖至少 6 个场景——这两项治理动作在
+ *   「十三」的记录里没有独立留痕，只有 testIdentity() 里 3 组
+ *   Logger.log 断言，不构成正式、可重复运行、带 pass/fail 汇总的
+ *   Gate。本节补上这道治理步骤，不是重做实施。
+ *
+ *   Implementation Preflight 四项确认结果：
+ *   1. scopeKey 缺省时哈希逐字节不变——用一个跟本项目完全独立、从零
+ *      实现的参照哈希函数在 Node 沙盒里对 07_IdentityEngine.gs 的
+ *      generateTaskIdentity() 跑真实断言（不是读代码猜测），4 组样例
+ *      + undefined/''/null 三种缺省写法全部通过。
+ *   2. 只有新 context-aware 调用路径传 workflow_id——逐一追踪全仓库
+ *      调用 createTaskIfNotExists/createTask 的路径：06_TaskIntentParser
+ *      （聊天捕获）、21_RecurringEngine（周期续期）、
+ *      42_ConversionEngine 的 convertNoteToTask/convertProjectToTask，
+ *      确认均不传 workflow_id（legacy，行为不变）；
+ *      41_BusinessRuleEngine.instantiateFromTemplate、
+ *      28_WorkflowEngine.spawnNextWorkflowIfNeeded 确认均传
+ *      workflow_id（context-aware，符合预期）。
+ *   3. ProjectionRebuilder 对 legacy Task identity 不受影响——确认
+ *      11_ProjectionRebuilder.gs 的 rebuildTasksProjection() /
+ *      rebuildActiveTasksProjection() 均遵循"payload 已带 identity
+ *      就直接照抄，只有缺失时才在线重算"的既有约定，逻辑本身零改动。
+ *   4.（新发现，不在原始 4 项字面范围内，但属于同一类"确认不会意外
+ *      破坏其它行为"）：20_TaskEngine.gs 的 updateTask() 在
+ *      identity-affecting 字段变更时会重算 identity，但重算调用漏传
+ *      了 scopeKey——这条路径此前（testIdentity 写断言时）没有被
+ *      注意到，因为 updateTask() 至今没有真实调用方（见
+ *      00_Known_Limitations.gs 二"Current callers: none via
+ *      Telegram"），一直是 dead path。但 Track 2 的 UI-I2（Edit Task）
+ *      即将成为它第一个真实调用方——一旦上线，编辑 context-aware
+ *      Task 的标题/日期/优先级/分类会让它的 identity 退化回不带
+ *      scope 的旧公式，重新引入 Track 1 本来要修的碰撞风险，只是
+ *      触发时机从"创建时"变成"编辑时"。因为：(a) 与 Track 1 已批准
+ *      原则（workflow_id 作为 scope key）完全同类，不是新规则；
+ *      (b) 修法是同一个已批准、向后兼容的 scopeKey 参数，纯增量；
+ *      (c) Track 2 马上要让这条路径第一次被真实触发；三者叠加，
+ *      判断为应该在本轮一并修复，而不是留到 Track 2 上线后才发现。
+ *      已修复（20_TaskEngine.gs updateTask()，加一个参数，见该处
+ *      2026-08-20 修复注释），且已加回归测试直接验证修复生效
+ *      （见下）。此前"07/09 范围内，41/28 不改"的范围声明本身不变——
+ *      这一处是范围声明写下时（基于当时审计总结）遗漏的第三个落点，
+ *      不是重新打开已批准范围。
+ *
+ *   正式 Regression Gate：新增 39_Tests_IdentityScopeKey.js，单一入口
+ *   runIdentityScopeKeyRegressionGate()，覆盖 Carson 批准消息列出的
+ *   6 项 + 上面第 4 点的修复验证，共 6 个测试函数。其中纯函数三项
+ *   （legacy unchanged / same-different workflow / no collision with
+ *   legacy）已经用独立参照实现在 Node 里跑过真实断言，全部通过；
+ *   真实环境三项（repeat instantiate / updateTask 编辑路径 /
+ *   ProjectionRebuilder 折叠逻辑）需要 Carson 把改动过的文件（
+ *   20_TaskEngine.js、新增的 39_Tests_IdentityScopeKey.js）粘贴进
+ *   真实 GAS 项目后跑 runIdentityScopeKeyRegressionGate() 才能拿到
+ *   真实 Sheet/EventBus 环境下的 pass/fail——沙盒里没有 Carson 的
+ *   真实 Spreadsheet，这一步没法代跑。
+ *
+ *   状态：Preflight 4 项确认全部通过（含新发现项，已修复）；正式
+ *   Regression Gate 已交付，等待 Carson 在真实环境跑一遍确认，随后
+ *   建议连带重跑一次 runSprint3AcceptanceGate() 和
+ *   runUIBridgeSlice3Gate()（因为改动触碰了 20_TaskEngine.js，
+ *   两个既有 Gate 都间接依赖它）。Track 1 视为"实施 + 治理留痕"
+ *   双重完成，可以据此推进 Track 2。
+ */
+
+
+// ============================================================
+// 十五、Track 2 — UI-I1~I5 落地（2026-08-21）
+// ============================================================
+
+/**
+ *   范围：Sort+Filter（I1）、Edit Task/Edit Project（I2）、Priority（I3）、
+ *   Done（I4）、Cancel（I5），独立于 Track 1 Identity 那条线（见「十四」）。
+ *
+ *   50_UIBridge.gs 新增 7 个函数：ui_updateTask、ui_updateProject、
+ *   ui_suggestPriority、ui_completeTask、ui_cancelTask、
+ *   ui_completeProject、ui_cancelProject；ui_getConvertibleTasks/
+ *   ui_getActiveProjects 扩展了一个可选 filters 前置参数（向后兼容，
+ *   唯一真实调用方 ui_index.html 原本零参数调用不受影响）。ui_index.html
+ *   新增：Sort+Filter 工具栏（Tasks/Projects 各一个）、Priority 控件
+ *   （直接改 + Ask AI + 建议展示/采纳/忽略）、Edit 内联表单（Task：
+ *   title/category/due_date；Project：title/description）、Done 按钮、
+ *   Cancel 按钮（点一次变成 Sure?/No 二次确认，不用浏览器原生
+ *   confirm()，跟既有内嵌交互风格一致）。
+ *
+ *   架构遵守：UI → UIBridge → Query/Command → Domain Engine → EventBus
+ *   → Projection 不变，没有往 UI 塞 Domain 逻辑，没有为了凑功能在 UI
+ *   层发明既有 Domain 没有的能力——updateTask/updateProject/
+ *   completeTask/cancelTask/completeProject/cancelProject 全部复用
+ *   既有 Command，UIBridge 只做 not_found/already_X/invalid_state →
+ *   {ok,code,message} 的翻译（同 Slice 1~3 已有惯例）。
+ *
+ *   两个值得记录的设计决定：
+ *   1. updateTask(null) 在"任务不存在"和"没有合法字段变化"两种情况下
+ *      返回同一个 null，UIBridge 没法从返回值区分——ui_updateTask/
+ *      ui_updateProject 改为先用既有 TaskQueryEngine.getTask/
+ *      ProjectQueryEngine.getProject（本来就是已声明的 Reads 依赖）自己
+ *      判断一次"存在与否"，让 NOT_FOUND 和 NO_CHANGES 在 Bridge 层就
+ *      区分清楚，不是新增 Domain 逻辑。
+ *   2. Priority 严格照 ADR-2026-07-24-009（"AI Suggests, Human
+ *      Confirms"）：ui_suggestPriority 只产出建议，唯一的写是把这次
+ *      生成的建议记到 priority_ai_recommended（通过既有 updateTask）；
+ *      priority 本身只有用户点"采纳"才会变，走的是同一个 updateTask，
+ *      不是另一条特殊通道；Sort/Filter 全程只读 priority，不读
+ *      priority_ai_recommended。
+ *
+ *   Preflight 过程中顺带发现并补上两处此前遗漏的治理留痕（不是本次
+ *   新引入的问题，是早就存在、这次因为要动同一批文件而顺带发现的）：
+ *   - 00_Module_Responsibility.gs「十四」50_UIBridge.gs 的 Engine
+ *     Contract 从 2026-08-18（Slice 1 时）之后就没跟上 Slice 2/3 早就
+ *     有的 Reads/Public API，这次连同 Track 2 的新增一起重新同步，
+ *     不是本次改动引入的滞后。
+ *   - Carson 批准 Track 2 时明确要求把"Sort 目前是前端方案"记成过渡
+ *     决定、不是最终架构——之前没有落到任何文件里，这次补进
+ *     00_Known_Limitations.gs「五」（新section）。同一次批准里提到的
+ *     "suggestPriorityWithAI_ 缺 CRITICAL 档"也一并补进
+ *     00_Known_Limitations.gs「三」，并更正了「四」里"三个 AI 函数都
+ *     没有暴露给用户"这句话——第 1 个（suggestPriorityWithAI_）现在
+ *     经 Web UI 暴露了，另外两个不变。
+ *
+ *   测试：新增 51_Tests_UIBridge_Interactions.js，14 个测试，单一入口
+ *   runUIBridgeInteractionsGate()，覆盖 I2~I5 的服务端契约 + I3 的
+ *   "AI 建议不自动生效"这条核心不变量（AIConnector.callAIForJSON_
+ *   mock，沿用 37_Tests_AIEngines.gs 的先例，不依赖真实网络/AI 凭证）。
+ *   I1 的 Filter 服务端一半有测试；Sort 是纯前端 JS，这套 GAS 测试体系
+ *   覆盖不到，需要人工浏览器验证四个排序选项。
+ *
+ *   状态：代码已交付，沙盒里跑了 JS 语法检查 + HTML 标签配平检查，
+ *   全部通过；真实 Sheet/EventBus 环境下的 14 个测试、以及浏览器里的
+ *   Sort/Edit/Priority/Done/Cancel 交互，需要 Carson 把改动过的文件
+ *   粘贴进真实 GAS 项目后跑 runUIBridgeInteractionsGate() + 人工走一遍
+ *   UI 才能拿到确认——沙盒里没有 Carson 的真实 Spreadsheet 和浏览器，
+ *   这两步没法代跑。
+ */

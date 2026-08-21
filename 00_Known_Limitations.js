@@ -13,7 +13,11 @@
  * 存在的直接目的是让 Claude/外部审计在做 Architecture Review 时，看到
  * 这里列出的行为，不要当成 bug 或遗漏去提修复建议。
  *
- * LAST_UPDATED: 2026-08-14 — 新增「四、Sprint 4 AI 建议函数」，记录
+ * LAST_UPDATED: 2026-08-21 — 「二、updateTask() Internal API」补充
+ * scopeKey 修复说明，见该节末尾【2026-08-21 补充】，以及
+ * 00_Project_State.gs「十四」。
+ *
+ * 2026-08-14 — 新增「四、Sprint 4 AI 建议函数」，记录
  * Recovery Audit 后确认的三个 AI 函数 Not Yet Exposed 状态，见
  * 00_ADR.gs ADR-2026-07-24-021。
  *
@@ -138,6 +142,21 @@
  * identity 重算。同样刻意不在 UPDATABLE_FIELDS 里——本次改动范围只覆盖
  * Task 创建流程（Carson 2026-07-17 决定 #2），"创建后修改提醒策略"是
  * 独立能力，未来需要时另开 ADR/Phase 评估，不是这次遗漏。
+ *
+ * 【2026-08-21 补充，Identity Impact Audit Track 1 Implementation
+ * Preflight 发现，见 00_Project_State.gs「十四」】上面"identity 重算
+ * 已经处理好"这句话，是在 generateTaskIdentity() 还没有 scopeKey 参数
+ * 的年代写的，当时成立。2026-08-20 该函数加了向后兼容的第 7 个可选
+ * 参数 scopeKey（context-aware Task 的 identity 纳入 workflow_id）之后，
+ * 这里的重算调用一度漏传了这个参数——不影响本节上面记录的"至今没有
+ * Telegram 调用方"这一事实（那句话仍然成立），但意味着"identity 重算
+ * 已经处理好"这个结论本身，在 scopeKey 引入之后曾经短暂失真：一旦
+ * updateTask() 有了第一个真实调用方（Track 2 UI-I2 Edit Task 即将
+ * 成为第一个），context-aware Task 被编辑 identity-affecting 字段时会
+ * 静默丢失 scope，退化成 legacy 公式。已修复（重算调用补上
+ * merged.workflow_id || ''，行为完全对齐创建路径的既有约定），现在
+ * "identity 重算已经处理好"这句话对 scopeKey 机制同样成立。本条不改变
+ * 本节其余结论（Anticipated future callers 列表、保留原因均不变）。
  */
 
 // ============================================================
@@ -160,6 +179,17 @@
  *    （06_TaskIntentParser._buildPriorityReply_）目前只展示原始
  *    Priority Score 和任务自己已有的 manual priority，不调用
  *    suggestPriority，也就不会把"建议标签"显示给用户。
+ *
+ * 【2026-08-21 补充，UI-I3 已知非阻塞缺口，Carson 提出】同一个文件里
+ * 走 AI 的那条（22_PriorityEngine.suggestPriorityWithAI_，见「四」）
+ * 目前只能回 HIGH/MEDIUM/LOW 三档——prompt 里显式把合法值写死成
+ * '"priority": "HIGH"|"MEDIUM"|"LOW"'，校验也只认这三个（validPriorities
+ * 数组不含 CRITICAL），意味着不管任务多紧急，AI 建议永远够不到
+ * CRITICAL，跟本条上面 suggestPriority() 纯公式那条（能给到 CRITICAL）
+ * 不对称。已跟 Carson 确认是已知、非阻塞的小缺口，暂不在本次改动范围内
+ * 修——真要修，改的是 22_PriorityEngine.gs 的 prompt 文案 + 校验数组，
+ * 不是 UIBridge/前端能修的（UI-I3 只是如实展示 Engine 给出的建议，不
+ * 应该在 Bridge 层悄悄给 AI 的合法值范围打补丁）。
  *
  * 两者共同点：函数本身已经写好、能正常工作、有对应的单元测试覆盖（如果
  * 有的话请在对应 Engine 文件里确认），只是还没有一个 Telegram 指令把它
@@ -217,4 +247,53 @@
  *     entity"的风险——这个风险只会出现在未来"人类确认后，调用方拿着
  *     建议去调 27/28/20 走创建流程"那一步的编排逻辑里，那部分逻辑目前
  *     还不存在（属于 Telegram 指令层的一部分，见上）。
+ *
+ * 【2026-08-21 补充，UI-I3】上面"Not yet exposed to users"这句话，对
+ * 第 1 个函数（suggestPriorityWithAI_）现在不完全准确了——50_UIBridge.gs
+ * 新增的 ui_suggestPriority() 把它接给了 Web UI（不是 Telegram，是
+ * 完全独立的暴露渠道），本节其余关于"整层没有 Telegram 指令"的推理
+ * 不受影响、仍然成立（没有新增任何 Telegram 指令，UI 和 Telegram 是
+ * 两条独立的入口）。第 2、3 个函数（suggestNewProject_ /
+ * generateWorkflowSuggestion_）仍然完全没有接出去，这条限制原样不变。
+ *
+ * 上面"三个函数都不创建/修改任何实体"这条也需要精确一下：
+ * suggestPriorityWithAI_ 本身仍然不创建/修改任何实体（没有改
+ * 22_PriorityEngine.gs）；但它现在有了第一个"人类确认后写回"的调用方——
+ * ui_suggestPriority() 会把这次生成的建议写进 priority_ai_recommended
+ * （单条已有 Task 的一个字段，通过既有 TaskEngine.updateTask 写，见
+ * ADR-2026-07-24-009），用户点"采纳"后同一个 updateTask 再把 priority
+ * 也改掉。这不构成本段原本担心的"orphan entity"风险——那个风险专指
+ * "建议要创建多个互相关联的新实体，创建到一半失败"（suggestNewProject_/
+ * generateWorkflowSuggestion_ 未来接的时候才会遇到），Priority 这条
+ * 从头到尾只碰一个已存在 Task 的字段，每次都是单个原子 updateTask 调用，
+ * 不存在"创建一半"的中间状态。suggestNewProject_/
+ * generateWorkflowSuggestion_ 未来真正接编排逻辑时，这段关于 orphan
+ * entity 风险的推理需要重新评估，不能直接套用 Priority 这条的结论。
+ */
+
+// ============================================================
+// 五、UI-I1 Sort 目前是前端方案——明确记录为过渡决定，不是最终架构
+//    （2026-08-21 新增，Carson 在批准 UI-I1~I5 时明确要求记录这条）
+// ============================================================
+
+/**
+ * 12_TaskQueryEngine.getTasks() / 14_ProjectQueryEngine.getProjects()
+ * 目前只支持 filters 的单值精确匹配（见两者函数体），不支持排序。
+ * UI-I1 的 Sort（Newest/Priority/Due date/Title，Task；Newest/Title/
+ * Status，Project）改在 ui_index.html 的浏览器端 JS 里做
+ * （sortTasks/sortProjects，纯函数，拿到 Bridge 返回的数组后本地排序，
+ * 不产生任何请求、不碰 Sheet）。
+ *
+ * 这是 Carson 明确批准的 V1 方案，理由是 QueryEngine 目前没有排序能力，
+ * 不想为了 Sort 现在就去改两个 QueryEngine 的契约——但明确要求把这一点
+ * 记成"过渡决定"，不是"这就是最终架构"。如果外部审计/Architecture
+ * Review 报告"排序逻辑应该在 QueryEngine 层，不应该在 UI 层"，先来这里
+ * 核对：这不是架构判断错误，是已经被记录、被接受的临时状态，真正要挪到
+ * 服务端的时候（比如数据量大到前端排序开始有感知延迟，或者其它调用方
+ * 也需要同样的排序能力），在 00_Roadmap.gs 排期，不是这次顺手做。
+ *
+ * 一个直接后果：Sort 逻辑跑在浏览器里，51_Tests_UIBridge_Interactions.gs
+ * 这类 GAS 测试函数没有办法执行或断言它（GAS 测试跑在 Apps Script
+ * 服务端，看不到浏览器里的 JS）——这不是测试覆盖的缺口，是这套测试体系
+ * 的既有边界，四个排序选项的正确性需要人工在浏览器里点一遍验证。
  */

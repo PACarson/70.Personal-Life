@@ -258,13 +258,32 @@ var TaskEngine = (function () {
       return payload.hasOwnProperty(f);
     });
     if (identityFieldChanged) {
+      // 【2026-08-20 修复，Identity Impact Audit Track 1 preflight 发现】
+      // 07_IdentityEngine/09_IdempotencyManager 在创建路径已经把 workflow_id
+      // 接入 generateTaskIdentity 的第 7 个可选 scopeKey 参数（context-aware
+      // Task 的 identity 计算里包含 workflow_id）。但这里（更新路径）之前
+      // 调用时漏传了这个参数——任何 identity-affecting 字段（title/
+      // due_date/due_time/recurring/priority/category）一旦被改动，
+      // 重算出来的 identity 会退回不带 scope 的旧公式，导致：
+      //   1. 该 Task 编辑前后 identity 不一致（同一个 workflow 内失去
+      //      "same workflow → same identity" 的稳定性）；
+      //   2. 退化后的 identity 可能跟另一条字段恰好相同的 legacy Task
+      //      冲突——正是 Track 1 本来要修的那类碰撞，只是从"创建时"
+      //      变成了"编辑时"触发。
+      // updateTask() 目前还没有 Telegram 指令调用（见
+      // 00_Known_Limitations.gs 二），但 UI-I2（Edit Task）马上要把它
+      // 接到 UI 上，这条路径届时会第一次被真实调用到，所以在此一并
+      // 修复，保持跟创建路径同一个约定：沿用该 Task 自己当前的
+      // workflow_id（legacy Task 该字段为空字符串，转成 scopeKey 空值，
+      // 结果跟改之前逐字节一致，不影响任何存量 Task）。
       var newIdentity = IdentityEngine.generateTaskIdentity(
         merged.chat_id || chatId || existing.chat_id,
         merged.title,
         IdentityEngine.resolveIdentityDueValue(merged),
         merged.recurring || '',
         merged.priority  || 'MEDIUM',
-        merged.category  || 'GENERAL'
+        merged.category  || 'GENERAL',
+        merged.workflow_id || ''
       );
       payload.identity = newIdentity;
       merged.identity   = newIdentity;

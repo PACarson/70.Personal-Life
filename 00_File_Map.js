@@ -120,6 +120,15 @@
  *   34_Tests_ReminderPolicy.gs（既有，不变）
  *   35_Tests_ProjectEngine.gs / 36_Tests_WorkflowEngine.gs / ...
  *      （预留，实现阶段按需创建，本设计包只占位号段）
+ *   39_Tests_IdentityScopeKey.js                                      【补录，
+ *                              2026-08-21，Identity Impact Audit Track 1
+ *                              正式 Regression Gate，单一入口
+ *                              runIdentityScopeKeyRegressionGate()】
+ *   51_Tests_UIBridge_Interactions.js                                  【补录，
+ *                              2026-08-21，UI-I1~I5 Regression Gate，
+ *                              单一入口 runUIBridgeInteractionsGate()。
+ *                              编号不在 34-39 这段（已占满），紧跟在它
+ *                              测试的 50_UIBridge.gs 后面】
  */
 
 // ============================================================
