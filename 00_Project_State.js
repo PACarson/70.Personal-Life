@@ -658,3 +658,67 @@
  * Accept Suggestion 落盘、Filter 两项）真实环境全部通过，UI-I2~I5 的
  * 服务端契约视为确认完成。Sort 仍待人工浏览器验证（前端 JS，见「五」）。
  */
+
+
+// ============================================================
+// 十六、Track 1B — Due-Date Canonicalization 实施就绪（2026-08-22）
+// ============================================================
+
+/**
+ *   批准依据：00_Due_Date_Canonicalization_Audit.md + ADR-2026-07-24-023
+ *   + Carson 2026-08-22 批准消息（Option C，10 条条件，明确的
+ *   Inventory → Dry-run → Backup → Write → Read-back Verify → Identity
+ *   regression → Recurring regression → Full Sprint regression 顺序）。
+ *
+ *   代码已交付（沙盒里语法检查 + 跨 3 个不同时区（UTC/Asia-Shanghai/
+ *   America-Los_Angeles）的 Node 独立验证全部通过，含逐字节复现
+ *   Carson 真实诊断数值的回归断言）：
+ *
+ *   1. 07_IdentityEngine.js：resolveIdentityDueValue() 内部新增
+ *      _canonicalizeDueValue_() 归一化，同时以 canonicalizeDueValue
+ *      名义暴露公开 API（给迁移脚本复用同一套算法，不重复实现）。
+ *      不改动 Track 1A 的 scopeKey 逻辑（Carson 条件 5）。
+ *   2. 11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.js（新增）：
+ *      Option A 的存量数据值迁移，5 个函数对应 Carson 要求的 5 个
+ *      阶段（Step1 Inventory ~ Step5 ReadBackVerify），状态持久化在
+ *      新增的 Due_Date_Migration_Log 分页里（不依赖单次执行内存，
+ *      因为几步之间大概率是分开的手动执行）。Step 4（Write）要求
+ *      显式传入确认字符串，不能在没看过 Dry-run/Backup 输出的情况下
+ *      顺手触发。Step 3（Backup）用 getSheet_('Tasks').getParent()
+ *      拿真实 Spreadsheet 对象再 .copy()——这个项目是 standalone
+ *      script，没有 getActiveSpreadsheet() 可用，见
+ *      05_SheetUtils.getSheet_ 文件头说明。
+ *   3. 53_Tests_DueDateCanonicalization.js（新增）：7 个测试，单一
+ *      入口 runDueDateCanonicalizationGate()，覆盖归一化函数本身
+ *      （含逐字节复现 Carson 真实诊断值的核心回归断言）、updateTask
+ *      编辑路径、以及 Carson 明确要求的 Recurring regression
+ *      （21_RecurringEngine 路径）。
+ *   4. ADR-2026-07-24-023：记录"due_date canonicalization 是 Domain
+ *      data contract / identity boundary 修复，不是 UI workaround"
+ *      这条 Carson 特别要求保留的定性。
+ *
+ *   Carson 10 条条件对照：① Preflight 已做（本轮所有代码改动前的
+ *   file:line 追查）；② Option C 已采用；③ Data-only migration（不碰
+ *   identity）；④ 无 identity migration；⑤ 未改 Track 1A scope-key
+ *   逻辑；⑥ Migration 含 checkpoint（Step 3 Backup）+ read-back
+ *   verification（Step 5）；⑦ 测试覆盖审计「十一」列出的项目；
+ *   ⑧ 本节即 Track 1B 独立报告；⑨ 不阻塞 UI-I1~I5；⑩ 不启动 Drag
+ *   UI-I6——十条均满足。
+ *
+ *   还需要 Carson 在真实环境按顺序手动执行（沙盒没有真实 Spreadsheet，
+ *   这几步没法代跑）：
+ *     Step 1~5（11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.gs）
+ *     → runDueDateCanonicalizationGate()（53）
+ *     → runIdentityScopeKeyRegressionGate()（39，Identity regression，
+ *       这次应该 6/6 全过，包括此前失败的
+ *       testIdentityScope_UpdateTaskPreservesScope_）
+ *     → runSprint3AcceptanceGate() / runUIBridgeSlice3Gate() /
+ *       runUIBridgeInteractionsGate()（Full Sprint regression）
+ *
+ *   Track 1A / Track 1B / Track 2 边界（Carson 明确要求记录）：
+ *     Track 1A（workflow_id）→ 独立完成
+ *     Track 1B（due_date canonicalization）→ 本节，独立实施就绪
+ *     Track 2（UI-I1~I5）→ 独立推进，不受本节影响
+ *     Drag Ordering ADR（UI-I6）→ 独立待写，不受本节影响
+ *   四者刻意保持互不阻塞，不合并成一次大改动。
+ */

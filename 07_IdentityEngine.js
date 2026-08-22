@@ -119,13 +119,59 @@ var IdentityEngine = (function () {
   }
 
   /**
+   * 【Track 1B，2026-08-22，00_Due_Date_Canonicalization_Audit.md Option B】
+   * 把可能是 Sheet 读回来的 Date 对象的 due 值，归一化回创建时那种
+   * canonical string——对已经是 string 的输入是逐字节原样返回的
+   * no-op，只有真的是 Date 对象时才转换。
+   *
+   * 用脚本真实时区（Session.getScriptTimeZone()）下这个 Date 是否恰好
+   * 落在当天 00:00:00 来判断"这原本是纯日期(due_date)还是带时间
+   * (due_datetime)"——纯日期字符串被 Sheets 误判后，落地的一定是"本地
+   * 时区午夜"这个特征时间点（09_TemporalParser 产出的纯日期字符串从来
+   * 不带其他时间信息）；真的带时间的 due_datetime 极少会恰好落在午夜，
+   * 就算判断错，最坏结果也只是把一个"确实是午夜"的带时间任务当成纯
+   * 日期处理，只是损失时分秒精度，不会算出错误的日历日期。
+   *
+   * 这是本函数唯一新增的逻辑；对 100% 走 string 输入的既有路径（创建时
+   * 恒为 string，见审计「二」）完全不变，不影响任何既有 identity。
+   *
+   * 【2026-08-22】以 canonicalizeDueValue 名义暴露在公开 API 上——
+   * 11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.gs 的迁移脚本需要
+   * 用完全同一套算法算"迁移前业务日期"和"迁移后业务日期"，不能自己
+   * 重复实现一份可能悄悄跑偏的逻辑。
+   * @param {*} value
+   * @returns {string}
+   */
+  function _canonicalizeDueValue_(value) {
+    if (!value) return '';
+    if (!(value instanceof Date)) return String(value);
+
+    var tz = Session.getScriptTimeZone();
+    var isMidnight = (
+      Utilities.formatDate(value, tz, 'HH:mm:ss') === '00:00:00'
+    );
+    return isMidnight
+      ? Utilities.formatDate(value, tz, 'yyyy-MM-dd')
+      : Utilities.formatDate(value, tz, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+
+  /**
    * 为 generateTaskIdentity() 的 dueDate 参数位解析出正确的传入值——有
    * due_datetime 用 due_datetime，否则回退 due_date。
+   *
+   * 【Track 1B，2026-08-22】原始值经 _canonicalizeDueValue_ 处理——
+   * 见 00_Due_Date_Canonicalization_Audit.md。这也是
+   * 21_RecurringEngine.spawnNextIfNeeded 唯一的 due 值来源（它直接调用
+   * 本函数，21_RecurringEngine.js:209），因此这一处修复同时覆盖了审计
+   * 「四」第 4 条发现的、此前只靠巧合的 JS 类型转换链条撑住的那条
+   * recurring 路径，不需要在 21_RecurringEngine.js 里另外改动。
    * @param {Object} task
    * @returns {string}
    */
   function resolveIdentityDueValue(task) {
-    return ((task && task.due_datetime) || (task && task.due_date) || '');
+    return _canonicalizeDueValue_(
+      (task && task.due_datetime) || (task && task.due_date) || ''
+    );
   }
 
   /**
@@ -280,6 +326,7 @@ var IdentityEngine = (function () {
     normalizeUnicode: normalizeUnicode,
     generateTaskIdentity: generateTaskIdentity,
     resolveIdentityDueValue: resolveIdentityDueValue,
+    canonicalizeDueValue: _canonicalizeDueValue_,
     generateProjectIdentity: generateProjectIdentity,
     generateWorkflowIdentity: generateWorkflowIdentity,
     generateNoteIdentity: generateNoteIdentity,

@@ -984,3 +984,106 @@
  */
 
 
+// ============================================================
+// ADR-2026-07-24-023：due_date Canonicalization 是 Domain data
+//                      contract / identity boundary 修复，不是 UI
+//                      workaround
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-023
+ * Status          : Accepted
+ * Decision Date   : 2026-08-22
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 07_IdentityEngine.gs（resolveIdentityDueValue，
+ *                   新增 canonicalizeDueValue 公开）、
+ *                   11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.gs
+ *                   （新增，数据值迁移，一次性运行）
+ * Related ADR     : ADR-2026-07-24-022（Track 1A，workflow_id scope
+ *                   key——本 ADR 是 Track 1A 审计/实施过程中独立发现、
+ *                   刻意拆开处理的第二个问题，两者互不依赖）
+ *
+ * Context
+ *   Track 1A（workflow_id scope key）真实环境回归测试
+ *   （testIdentityScope_UpdateTaskPreservesScope_）失败，追查后发现
+ *   跟 workflow_id 逻辑本身无关——7 个喂进 generateTaskIdentity() 的
+ *   参数逐一比对，6 个一致，唯独 due 值不一致。根因：due_date 创建时
+ *   是 canonical string（如 "2026-08-25"），但 Google Sheets 会把这种
+ *   形状的字符串自动识别成 Date 类型存储，getTask() 读回来变成一个
+ *   JavaScript Date 对象；resolveIdentityDueValue() 原本对这个值不做
+ *   任何类型检查，直接透传，导致同一个 Task 的 due_date 在"创建时"
+ *   和"任意一次编辑后重算"两个时刻，喂进 identity 哈希的实际内容不同。
+ *
+ *   完整审计（含 A. Creation Path / B. Read-Update Path / C. 全仓库
+ *   caller 列表 / 生产数据 Impact / 时区分析 / 方案比较 / Legacy
+ *   Compatibility 六个维度的 file:line 证据）见
+ *   00_Due_Date_Canonicalization_Audit.md。
+ *
+ *   这不是 UI 层引入的问题——resolveIdentityDueValue() 这个函数、
+ *   它被 20_TaskEngine.updateTask() 和 21_RecurringEngine.
+ *   spawnNextIfNeeded() 调用这件事，在 UI-I2（Edit Task）存在之前就
+ *   已经是这样。UI-I2 只是这个函数第一个真实调用方（updateTask() 此前
+ *   00_Known_Limitations.gs 记录"无人调用"），是第一个把这条已经存在
+ *   的 Domain 层缺陷暴露到生产路径的入口，不是问题的来源。
+ *   21_RecurringEngine.spawnNextIfNeeded（completeTask 后自动续期
+ *   recurring 任务，早就是生产在用的核心功能）同样受影响，此前"没
+ *   出错"完全是靠 String(Date)→new Date(string) 一条没有设计过的 JS
+ *   隐式类型转换链条侥幸撑住（已用 Node 独立验证这条链条目前确实
+ *   往返正确，但不能长期依赖巧合）。
+ *
+ * Decision
+ *   采用 Option C（Both），两层修复同时存在，明确解决的是两个不同
+ *   问题，不是重复设计：
+ *
+ *   A. Storage-level：due_date（连同 due_datetime）列做一次性数据值
+ *      迁移——读出已经被误判成 Date 的存量单元格、按脚本真实时区换算
+ *      回业务日期字符串、写回，并复用既有
+ *      _setPlainTextFormatForNewColumns_()（Finding DT-2 同一个工具
+ *      函数）确保列本身是纯文本格式，防止之后再被 Sheets 静默转换。
+ *      只是数据值迁移，不是 identity 迁移——迁移过程本身不重算、不
+ *      改写任何 Task 的 identity 存量值。
+ *
+ *   B. Identity-level：resolveIdentityDueValue() 内部新增
+ *      _canonicalizeDueValue_() 归一化——对已经是 string 的输入逐字节
+ *      原样返回（no-op），只有真的是 Date 对象时才用
+ *      Utilities.formatDate(value, Session.getScriptTimeZone(), ...)
+ *      转回创建时那种 canonical string。这一层修复不依赖存储层现在
+ *      是什么状态，对 resolveIdentityDueValue() 的两个既有调用方
+ *      （20_TaskEngine.updateTask、21_RecurringEngine.
+ *      spawnNextIfNeeded）同时生效，不需要分别改动。
+ *
+ *   Legacy Identity Compatibility：canonicalize 对 100% 走 string 输入
+ *   的既有路径（创建时恒为 string——00_Known_Limitations.gs 记录
+ *   updateTask() 此前无人调用，意味着此前没有任何真实 identity 是
+ *   经由"读回 Date 对象再重算"这条路径产生的）是纯 no-op，不改变任何
+ *   既有 identity 存量值，不需要 migration、不需要 legacy
+ *   compatibility mode、不需要 versioned identity。
+ *
+ * Consequences
+ *   正面：20_TaskEngine.updateTask() 的 identity 重算重新正确（编辑
+ *   不影响 due_date 的字段后，identity 里的 due 值分量能正确还原成
+ *   跟创建时一致）；21_RecurringEngine.spawnNextIfNeeded 不再依赖
+ *   意外的类型转换巧合；due_date 存量数据本身的类型一致性问题得到
+ *   修复，不只是对 identity 计算有好处，对未来任何读 due_date 的新
+ *   功能都是。
+ *   需要接受的代价：Storage-level 的数据值迁移是一次性、需要人工在
+ *   真实 Spreadsheet 上按 Inventory → Dry-run → Backup → Write →
+ *   Read-back Verify 顺序手动执行的操作（见
+ *   11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.gs），不能全自动
+ *   代跑，需要 Carson 本人确认每一步的输出。
+ *
+ * Notes
+ *   这句话值得作为本 ADR 的核心提醒，供以后任何人看到
+ *   resolveIdentityDueValue() 时参考：**due_date 的 canonicalization
+ *   是一个 Domain data contract / identity boundary 修复，而不是 UI
+ *   workaround**——不应该被误解成"为了某个 UI bug 加的 helper"，
+ *   它解决的是 due_date 在"业务日期"这个 Domain 语义、和"真实
+ *   Sheet → Apps Script → Date 对象 → identity 重算"这条技术链路之间
+ *   本来就存在、只是此前没有被任何真实调用方触发过的类型/时区语义
+ *   不稳定问题。
+ *   Track 1A（workflow_id）与本 ADR（due_date）刻意保持两个独立的
+ *   change set，没有强技术依赖要求合并——完整边界划分见
+ *   00_Project_State.gs「十六」。UI-I1~I5 不因为本 ADR 而阻塞，
+ *   Drag Ordering ADR（UI-I6）也不因为本 ADR 而启动，各自独立推进。
+ */

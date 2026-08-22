@@ -129,6 +129,18 @@
  *                              单一入口 runUIBridgeInteractionsGate()。
  *                              编号不在 34-39 这段（已占满），紧跟在它
  *                              测试的 50_UIBridge.gs 后面】
+ *   53_Tests_DueDateCanonicalization.js                                【补录，
+ *                              2026-08-22，Track 1B Regression Gate，
+ *                              单一入口
+ *                              runDueDateCanonicalizationGate()】
+ *
+ * ── 附：Track 1B 迁移工具（不在原设计包号段内，跟 11_ProjectionRebuilder
+ *    同族，descriptive suffix 命名，跟既有 __SPRINT1_ADDITIONS 是同一种
+ *    约定）──────────────────────────────────────────────────────────
+ *   11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.js                【新增，
+ *                              2026-08-22，ADR-2026-07-24-023，
+ *                              Option A 存量数据值迁移，5 阶段手动
+ *                              执行流程，见该文件文件头】
  */
 
 // ============================================================
