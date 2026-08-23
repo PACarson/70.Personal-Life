@@ -141,6 +141,12 @@
  *                              2026-08-22，ADR-2026-07-24-023，
  *                              Option A 存量数据值迁移，5 阶段手动
  *                              执行流程，见该文件文件头】
+ *   00_Drag_Ordering_ADR.js                                            【新增，
+ *                              2026-08-23，UI-I6 架构决策分析，推荐
+ *                              模型 3（Context-scoped ordering
+ *                              entity），尚待 Carson 批准，UI-I6
+ *                              保持 BLOCKED_PENDING_ARCHITECTURE_
+ *                              DECISION】
  */
 
 // ============================================================

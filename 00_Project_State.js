@@ -722,3 +722,39 @@
  *     Drag Ordering ADR（UI-I6）→ 独立待写，不受本节影响
  *   四者刻意保持互不阻塞，不合并成一次大改动。
  */
+
+
+// ============================================================
+// 十七、Track 1A / Track 1B 正式关闭（2026-08-23，Carson 确认真实
+//      环境全部通过后要求正式 Closed）
+// ============================================================
+
+/**
+ *   Track 1A — Identity Impact Audit（workflow_id scope key）：
+ *     PASSED / CLOSED
+ *   Track 1B — Due Date Canonicalization + Identity Boundary：
+ *     PASSED / CLOSED
+ *
+ *   真实环境最终结果（Carson 确认）：
+ *     - Production migration（11_ProjectionRebuilder__DUE_DATE_VALUE_
+ *       MIGRATION.gs 五阶段）：VERIFIED
+ *     - runDueDateCanonicalizationGate()（53）：PASSED
+ *     - runIdentityScopeKeyRegressionGate()（39）：PASSED
+ *       （含此前失败、现在应验证通过的
+ *       testIdentityScope_UpdateTaskPreservesScope_）
+ *     - runSprint3AcceptanceGate()：PASSED
+ *     - runUIBridgeSlice3Gate() / runUIBridgeInteractionsGate()：PASSED
+ *
+ *   治理约定：Track 1A / Track 1B 不因为"看起来还能再优化"或者
+ *   "顺手就能改"被重新打开或重构——只有未来出现真实的回归证据
+ *   （某个 Gate 重新跑出失败、或者生产环境观察到 identity/due_date
+ *   相关的真实异常）才重新评估，不接受"觉得这里可以写得更好"这类
+ *   理由重新动这两个 Track 已经关闭的范围。
+ *
+ *   四条线现状（Carson 2026-08-23 确认）：
+ *     Track 1A → CLOSED
+ *     Track 1B → CLOSED
+ *     Track 2（UI-I1~I5）→ 独立推进中，见下方汇报
+ *     Drag Ordering ADR（UI-I6）→ 独立推进中，见 00_Drag_Ordering_
+ *     ADR.gs，UI-I6 本身保持 BLOCKED_PENDING_ARCHITECTURE_DECISION
+ */
