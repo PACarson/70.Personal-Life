@@ -20,6 +20,7 @@
       --warn: #c9a55b;
       --line: #2a2d33;
       --danger: #c4685c;
+      --success: #68a37f;
       --mono: 'IBM Plex Mono', ui-monospace, monospace;
       --sans: 'IBM Plex Sans', system-ui, sans-serif;
     }
@@ -90,15 +91,42 @@
     }
 
     /* ---------- Workspace ---------- */
-    .workspace { flex: 1; padding: 40px 48px; max-width: 640px; }
+    .workspace { flex: 1; padding: 40px 48px; max-width: 720px; }
     .panel { display: none; }
     .panel.visible { display: block; }
 
     .workspace h1 { font-family: var(--sans); font-size: 22px; font-weight: 600; margin: 0 0 6px; }
-    .workspace .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); margin: 0 0 28px; }
+    .workspace .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); margin: 0 0 20px; }
 
-    /* ---------- Composer (Notes only) ---------- */
-    .composer { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 28px; }
+    /* ---------- Toolbar (Sort + Filter) ---------- */
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 12px;
+      align-items: center;
+    }
+    .toolbar label { color: var(--ink-dim); margin-right: 4px; }
+    .toolbar select {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 8px;
+      outline: none;
+    }
+    .toolbar select:focus { border-color: var(--accent-dim); }
+
+    /* ---------- Composer (Notes) ---------- */
+    .composer { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 24px; }
     .composer textarea {
       width: 100%; resize: none; background: transparent; border: none; outline: none;
       color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5;
@@ -110,60 +138,95 @@
       margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line);
     }
 
+    /* ---------- Buttons ---------- */
     .btn {
       font-family: var(--mono); font-size: 12px; letter-spacing: 0.02em;
       border: 1px solid var(--accent-dim); background: transparent; color: var(--accent);
-      padding: 7px 14px; border-radius: 5px; cursor: pointer;
+      padding: 6px 12px; border-radius: 5px; cursor: pointer;
       transition: background 0.15s ease, border-color 0.15s ease;
     }
     .btn:hover:not(:disabled) { background: rgba(201, 154, 91, 0.1); border-color: var(--accent); }
     .btn:disabled { opacity: 0.4; cursor: default; }
-    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .btn-ghost { border-color: var(--line); color: var(--ink-dim); }
-    .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--ink-faint); }
+    .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--ink-faint); color: var(--ink); }
+    .btn-tiny { padding: 3px 8px; font-size: 11px; }
+    .btn-danger { border-color: rgba(196, 104, 92, 0.4); color: var(--danger); }
+    .btn-danger:hover:not(:disabled) { background: rgba(196, 104, 92, 0.1); border-color: var(--danger); }
+    .btn-success { border-color: rgba(104, 163, 127, 0.4); color: var(--success); }
+    .btn-success:hover:not(:disabled) { background: rgba(104, 163, 127, 0.1); border-color: var(--success); }
 
-    /* ---------- Lists (Notes / Tasks / Projects share this) ---------- */
-    .item-list { display: flex; flex-direction: column; gap: 10px; }
+    /* ---------- Item Cards ---------- */
+    .item-list { display: flex; flex-direction: column; gap: 12px; }
 
     .item-card {
       background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
-      padding: 14px 16px; display: flex; justify-content: space-between; align-items: flex-start;
-      gap: 12px; animation: rise 0.25s ease;
+      padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+      animation: rise 0.25s ease;
     }
     @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .item-card.leaving { animation: fall 0.25s ease forwards; }
     @keyframes fall { to { opacity: 0; transform: translateY(-4px) scale(0.98); max-height: 0; margin: 0; padding: 0; } }
 
-    .item-body { min-width: 0; }
-    .item-title { font-size: 14px; line-height: 1.45; word-break: break-word; }
-    .item-trace { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 6px; letter-spacing: 0.01em; }
-    .item-trace .sep { margin: 0 6px; color: var(--line); }
-    .item-blocked-reason {
-      font-family: var(--mono); font-size: 11px; color: var(--warn); margin-top: 8px;
-      padding-top: 8px; border-top: 1px dashed var(--line);
+    .item-header-row {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    }
+    .item-title { font-size: 14px; font-weight: 500; line-height: 1.45; word-break: break-word; }
+    .item-desc { font-size: 13px; color: var(--ink-dim); margin-top: 4px; line-height: 1.4; word-break: break-word; }
+
+    .item-trace {
+      font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.01em;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    }
+    .item-trace .sep { color: var(--line); }
+
+    .badge {
+      font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 3px;
+      background: var(--bg); border: 1px solid var(--line); color: var(--ink-dim);
+    }
+    .badge-priority-CRITICAL { border-color: var(--danger); color: var(--danger); }
+    .badge-priority-HIGH { border-color: var(--warn); color: var(--warn); }
+    .badge-priority-MEDIUM { border-color: var(--accent-dim); color: var(--accent); }
+    .badge-priority-LOW { border-color: var(--line); color: var(--ink-faint); }
+
+    .item-actions {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; padding-top: 8px;
+      border-top: 1px solid var(--line); justify-content: flex-end; align-items: center;
     }
 
-    .item-actions { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-
-    /* ---------- Capture-as-template inline form / result ---------- */
-    .capture-form {
-      display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
-      gap: 6px; flex-direction: column;
+    /* ---------- Inline Edit / Forms ---------- */
+    .edit-form, .capture-form {
+      display: none; margin-top: 10px; padding: 12px; background: var(--bg);
+      border: 1px dashed var(--line); border-radius: 6px; gap: 8px; flex-direction: column;
     }
-    .capture-form.visible { display: flex; }
+    .edit-form.visible, .capture-form.visible { display: flex; }
+    .edit-form input, .edit-form select, .edit-form textarea,
     .capture-form input {
-      background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
       color: var(--ink); font-family: var(--sans); font-size: 13px; padding: 6px 8px; outline: none;
     }
-    .capture-form input:focus { border-color: var(--accent-dim); }
-    .capture-form-row { display: flex; gap: 8px; justify-content: flex-end; }
+    .edit-form textarea { resize: vertical; min-height: 50px; }
+    .edit-form input:focus, .edit-form select:focus, .capture-form input:focus { border-color: var(--accent-dim); }
+    .form-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+    /* ---------- AI Priority Box ---------- */
+    .ai-priority-box {
+      display: none; margin-top: 8px; padding: 8px 12px; background: rgba(201, 154, 91, 0.05);
+      border: 1px solid var(--accent-dim); border-radius: 5px; font-family: var(--mono); font-size: 11px;
+    }
+    .ai-priority-box.visible { display: block; }
+    .ai-priority-box .reason { color: var(--ink-dim); margin-top: 4px; }
+    .ai-priority-box .box-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+
+    .item-blocked-reason {
+      font-family: var(--mono); font-size: 11px; color: var(--warn); margin-top: 8px;
+      padding: 6px 10px; background: rgba(201, 165, 91, 0.05); border: 1px dashed var(--warn); border-radius: 4px;
+    }
 
     .capture-result {
-      display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
-      font-family: var(--mono); font-size: 11px; color: var(--accent);
+      display: none; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--accent-dim);
+      border-radius: 5px; font-family: var(--mono); font-size: 11px; color: var(--accent);
     }
     .capture-result.visible { display: block; }
-    .capture-result .btn { margin-top: 8px; }
 
     .empty-state {
       text-align: center; padding: 48px 20px; color: var(--ink-dim); font-size: 13px;
@@ -179,7 +242,7 @@
       .nav { width: 100%; flex-direction: row; overflow-x: auto; padding: 12px; border-right: none; border-bottom: 1px solid var(--line); }
       .nav-brand { display: none; }
       .nav-item { padding: 8px 12px; white-space: nowrap; }
-      .workspace { padding: 24px 20px; max-width: none; }
+      .workspace { padding: 24px 16px; max-width: none; }
     }
   </style>
 </head>
@@ -197,6 +260,7 @@
 
     <main class="workspace">
 
+      <!-- Notes Panel -->
       <section class="panel visible" id="panel-notes">
         <h1>Notes</h1>
         <p class="sub">capture → convert · vertical slice 1</p>
@@ -211,27 +275,87 @@
 
         <div id="noteList" class="item-list"></div>
         <div id="notesEmpty" class="empty-state" style="display:none;">
-          Nothing captured yet — whatever's on your mind, write it above.
+          Nothing captured yet — write something above.
         </div>
       </section>
 
+      <!-- Tasks Panel -->
       <section class="panel" id="panel-tasks">
         <h1>Tasks</h1>
-        <p class="sub">open tasks · convert to project when scope grows · slice 2</p>
+        <p class="sub">open tasks · filter, edit, prioritize, complete</p>
+
+        <div class="toolbar" id="tasksToolbar">
+          <div>
+            <label>Sort:</label>
+            <select id="taskSortSelect">
+              <option value="newest">Newest</option>
+              <option value="priority">Priority (High→Low)</option>
+              <option value="due_date">Due Date</option>
+              <option value="title">Title (A-Z)</option>
+            </select>
+          </div>
+          <div>
+            <label>Category:</label>
+            <select id="taskCategoryFilter">
+              <option value="">All Categories</option>
+              <option value="GENERAL">GENERAL</option>
+              <option value="MAINTENANCE">MAINTENANCE</option>
+              <option value="SHOPPING">SHOPPING</option>
+              <option value="ADMIN">ADMIN</option>
+              <option value="HEALTH">HEALTH</option>
+              <option value="PROJECT">PROJECT</option>
+            </select>
+          </div>
+          <div>
+            <label>Priority:</label>
+            <select id="taskPriorityFilter">
+              <option value="">All Priorities</option>
+              <option value="CRITICAL">CRITICAL</option>
+              <option value="HIGH">HIGH</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="LOW">LOW</option>
+            </select>
+          </div>
+        </div>
+
         <div class="status-line" id="tasksStatus"></div>
         <div id="taskList" class="item-list"></div>
         <div id="tasksEmpty" class="empty-state" style="display:none;">
-          No open tasks right now.
+          No tasks found matching criteria.
         </div>
       </section>
 
+      <!-- Projects Panel -->
       <section class="panel" id="panel-projects">
         <h1>Projects</h1>
-        <p class="sub">active projects · convert to task once it's really just one thing · slice 2</p>
+        <p class="sub">active projects · manage scope, capture templates, complete</p>
+
+        <div class="toolbar" id="projectsToolbar">
+          <div>
+            <label>Sort:</label>
+            <select id="projectSortSelect">
+              <option value="newest">Newest</option>
+              <option value="status">Status</option>
+              <option value="title">Title (A-Z)</option>
+            </select>
+          </div>
+          <div>
+            <label>Status:</label>
+            <select id="projectStatusFilter">
+              <option value="">All Non-Terminal</option>
+              <option value="DRAFT">DRAFT</option>
+              <option value="READY">READY</option>
+              <option value="IN_PROGRESS">IN_PROGRESS</option>
+              <option value="WAITING">WAITING</option>
+              <option value="BLOCKED">BLOCKED</option>
+            </select>
+          </div>
+        </div>
+
         <div class="status-line" id="projectsStatus"></div>
         <div id="projectList" class="item-list"></div>
         <div id="projectsEmpty" class="empty-state" style="display:none;">
-          No active projects right now.
+          No active projects found matching criteria.
         </div>
       </section>
 
@@ -240,7 +364,7 @@
 
   <script>
     function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, function (c) {
+      return String(s || '').replace(/[&<>"']/g, function (c) {
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
       });
     }
@@ -264,7 +388,7 @@
       }, 250);
     }
 
-    // ---------------- Nav / panel switching ----------------
+    // ---------------- Nav / Panel Switching ----------------
     document.querySelectorAll('.nav-item.enabled').forEach(function (navEl) {
       navEl.addEventListener('click', function () {
         document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active'); });
@@ -274,7 +398,9 @@
       });
     });
 
-    // ---------------- Notes ----------------
+    // ============================================================
+    // Notes Module
+    // ============================================================
     var noteListEl = document.getElementById('noteList');
     var notesEmptyEl = document.getElementById('notesEmpty');
     var inputEl = document.getElementById('noteInput');
@@ -289,15 +415,19 @@
         var card = document.createElement('div');
         card.className = 'item-card';
         card.innerHTML =
-          '<div class="item-body">' +
-            '<div class="item-title">' + escapeHtml(note.content) + '</div>' +
-            '<div class="item-trace">' +
-              escapeHtml(note.creator || 'User') +
-              '<span class="sep">\u00b7</span>' + escapeHtml(note.created_method || 'Manual') +
-              '<span class="sep">\u00b7</span>' + relativeTime(note.created_time) +
+          '<div class="item-header-row">' +
+            '<div style="flex:1">' +
+              '<div class="item-title">' + escapeHtml(note.content) + '</div>' +
+              '<div class="item-trace" style="margin-top:6px;">' +
+                '<span>' + escapeHtml(note.creator || 'User') + '</span><span class="sep">\u00b7</span>' +
+                '<span>' + escapeHtml(note.created_method || 'Manual') + '</span><span class="sep">\u00b7</span>' +
+                '<span>' + relativeTime(note.created_time) + '</span>' +
+              '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="item-actions"><button class="btn btn-ghost convert-btn">Convert to Task</button></div>';
+          '<div class="item-actions">' +
+            '<button class="btn btn-ghost btn-tiny convert-btn">Convert to Task</button>' +
+          '</div>';
 
         card.querySelector('.convert-btn').addEventListener('click', function (ev) {
           convertNoteToTask(note.note_id, card, ev.currentTarget);
@@ -309,16 +439,16 @@
     function loadNotes() {
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) { notesStatus.textContent = 'Couldn\u2019t load notes \u2014 ' + result.message; notesStatus.className = 'status-line err'; return; }
+          if (!result.ok) { notesStatus.textContent = 'Failed: ' + result.message; notesStatus.className = 'status-line err'; return; }
           renderNotes(result.notes);
         })
-        .withFailureHandler(function () { notesStatus.textContent = 'Couldn\u2019t load notes \u2014 try refreshing.'; notesStatus.className = 'status-line err'; })
+        .withFailureHandler(function () { notesStatus.textContent = 'Connection error.'; notesStatus.className = 'status-line err'; })
         .ui_getOpenNotes();
     }
 
     function addNote() {
       var content = inputEl.value.trim();
-      if (!content) { notesStatus.textContent = 'Write something first.'; notesStatus.className = 'status-line err'; return; }
+      if (!content) return;
       addBtn.disabled = true;
       notesStatus.textContent = 'Saving\u2026';
       notesStatus.className = 'status-line';
@@ -326,12 +456,12 @@
       google.script.run
         .withSuccessHandler(function (result) {
           addBtn.disabled = false;
-          if (!result.ok) { notesStatus.textContent = 'Couldn\u2019t save \u2014 ' + result.message; notesStatus.className = 'status-line err'; return; }
+          if (!result.ok) { notesStatus.textContent = result.message; notesStatus.className = 'status-line err'; return; }
           inputEl.value = '';
           notesStatus.textContent = '';
           loadNotes();
         })
-        .withFailureHandler(function () { addBtn.disabled = false; notesStatus.textContent = 'Couldn\u2019t save \u2014 try again.'; notesStatus.className = 'status-line err'; })
+        .withFailureHandler(function () { addBtn.disabled = false; notesStatus.textContent = 'Error saving note.'; notesStatus.className = 'status-line err'; })
         .ui_createNote(content);
     }
 
@@ -342,17 +472,15 @@
         .withSuccessHandler(function (result) {
           if (!result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Convert to Task';
-            notesStatus.textContent = 'Couldn\u2019t convert \u2014 ' + result.message;
-            notesStatus.className = 'status-line err';
+            notesStatus.textContent = result.message; notesStatus.className = 'status-line err';
             return;
           }
           removeCard(cardEl, noteListEl, notesEmptyEl);
-          loadTasks(); // 新 Task 出现，Tasks 面板下次切过去应该看到它
+          loadTasks();
         })
         .withFailureHandler(function () {
           btnEl.disabled = false; btnEl.textContent = 'Convert to Task';
-          notesStatus.textContent = 'Couldn\u2019t convert \u2014 try again.';
-          notesStatus.className = 'status-line err';
+          notesStatus.textContent = 'Error converting note.'; notesStatus.className = 'status-line err';
         })
         .ui_convertNoteToTask(noteId);
     }
@@ -360,48 +488,214 @@
     addBtn.addEventListener('click', addNote);
     inputEl.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) addNote(); });
 
-    // ---------------- Tasks ----------------
+    // ============================================================
+    // Tasks Module (UI-I1 ~ UI-I5)
+    // ============================================================
     var taskListEl = document.getElementById('taskList');
     var tasksEmptyEl = document.getElementById('tasksEmpty');
     var tasksStatus = document.getElementById('tasksStatus');
     var taskCountEl = document.getElementById('taskCount');
+    var taskSortSelect = document.getElementById('taskSortSelect');
+    var taskCategoryFilter = document.getElementById('taskCategoryFilter');
+    var taskPriorityFilter = document.getElementById('taskPriorityFilter');
+
+    var rawTasksCache = [];
+
+    function sortTasks(tasks, criteria) {
+      var pWeights = { 'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1 };
+      var copy = tasks.slice();
+      if (criteria === 'newest') {
+        copy.sort(function(a, b) { return new Date(b.created_time || 0) - new Date(a.created_time || 0); });
+      } else if (criteria === 'priority') {
+        copy.sort(function(a, b) { return (pWeights[b.priority] || 0) - (pWeights[a.priority] || 0); });
+      } else if (criteria === 'due_date') {
+        copy.sort(function(a, b) {
+          if (!a.due_date) return 1;
+          if (!b.due_date) return -1;
+          return a.due_date.localeCompare(b.due_date);
+        });
+      } else if (criteria === 'title') {
+        copy.sort(function(a, b) { return (a.title || '').localeCompare(b.title || ''); });
+      }
+      return copy;
+    }
 
     function renderTasks(tasks) {
       taskListEl.innerHTML = '';
       tasksEmptyEl.style.display = tasks.length ? 'none' : 'block';
       taskCountEl.textContent = tasks.length || '';
 
-      tasks.forEach(function (task) {
+      var sorted = sortTasks(tasks, taskSortSelect.value);
+
+      sorted.forEach(function (task) {
         var card = document.createElement('div');
         card.className = 'item-card';
+
+        var pClass = 'badge-priority-' + (task.priority || 'MEDIUM');
+        var dueBadge = task.due_date ? '<span class="badge">' + escapeHtml(task.due_date + (task.due_time ? ' ' + task.due_time : '')) + '</span>' : '';
+        var catBadge = task.category ? '<span class="badge">' + escapeHtml(task.category) + '</span>' : '';
+
         card.innerHTML =
-          '<div class="item-body">' +
-            '<div class="item-title">' + escapeHtml(task.title) + '</div>' +
-            '<div class="item-trace">' +
-              escapeHtml(task.status || '') +
-              '<span class="sep">\u00b7</span>' + escapeHtml(task.priority || 'MEDIUM') +
-              '<span class="sep">\u00b7</span>' + relativeTime(task.created_time) +
+          '<div class="item-header-row">' +
+            '<div style="flex:1">' +
+              '<div class="item-title">' + escapeHtml(task.title) + '</div>' +
+              '<div class="item-trace" style="margin-top:6px;">' +
+                '<span class="badge ' + pClass + '">' + escapeHtml(task.priority || 'MEDIUM') + '</span>' +
+                dueBadge + catBadge +
+                '<span class="sep">\u00b7</span><span>' + relativeTime(task.created_time) + '</span>' +
+              '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="item-actions"><button class="btn btn-ghost convert-btn">Convert to Project</button></div>';
 
+          // Inline AI Box
+          '<div class="ai-priority-box">' +
+            '<div><strong>AI Suggestion:</strong> <span class="sugg-val"></span></div>' +
+            '<div class="reason"></div>' +
+            '<div class="box-actions">' +
+              '<button class="btn btn-ghost btn-tiny dismiss-ai-btn">Dismiss</button>' +
+              '<button class="btn btn-tiny accept-ai-btn">Accept</button>' +
+            '</div>' +
+          '</div>' +
+
+          // Inline Edit Form
+          '<div class="edit-form">' +
+            '<input type="text" class="edit-title-input" value="' + escapeHtml(task.title) + '" placeholder="Title">' +
+            '<div style="display:flex; gap:8px;">' +
+              '<select class="edit-category-select" style="flex:1;">' +
+                '<option value="GENERAL"' + (task.category==='GENERAL'?' selected':'') + '>GENERAL</option>' +
+                '<option value="MAINTENANCE"' + (task.category==='MAINTENANCE'?' selected':'') + '>MAINTENANCE</option>' +
+                '<option value="SHOPPING"' + (task.category==='SHOPPING'?' selected':'') + '>SHOPPING</option>' +
+                '<option value="ADMIN"' + (task.category==='ADMIN'?' selected':'') + '>ADMIN</option>' +
+                '<option value="HEALTH"' + (task.category==='HEALTH'?' selected':'') + '>HEALTH</option>' +
+                '<option value="PROJECT"' + (task.category==='PROJECT'?' selected':'') + '>PROJECT</option>' +
+              '</select>' +
+              '<input type="date" class="edit-duedate-input" value="' + escapeHtml(task.due_date || '') + '" style="flex:1;">' +
+            '</div>' +
+            '<div class="form-row">' +
+              '<button class="btn btn-ghost btn-tiny cancel-edit-btn">Cancel</button>' +
+              '<button class="btn btn-tiny save-edit-btn">Save</button>' +
+            '</div>' +
+          '</div>' +
+
+          // Action Buttons (UI-I2, I3, I4, I5)
+          '<div class="item-actions">' +
+            '<button class="btn btn-success btn-tiny done-btn">Done</button>' +
+            '<button class="btn btn-danger btn-tiny cancel-btn">Cancel</button>' +
+            '<button class="btn btn-ghost btn-tiny ask-ai-btn">Ask AI Priority</button>' +
+            '<button class="btn btn-ghost btn-tiny edit-btn">Edit</button>' +
+            '<button class="btn btn-ghost btn-tiny convert-btn">Convert to Project</button>' +
+          '</div>';
+
+        // Event Listeners
+        var aiBox = card.querySelector('.ai-priority-box');
+        var editForm = card.querySelector('.edit-form');
+
+        // Done
+        card.querySelector('.done-btn').addEventListener('click', function (ev) {
+          ev.currentTarget.disabled = true;
+          google.script.run.withSuccessHandler(function(res){
+            if (res.ok) removeCard(card, taskListEl, tasksEmptyEl);
+          }).ui_completeTask(task.task_id);
+        });
+
+        // Cancel with 2-step confirmation
+        var cancelBtn = card.querySelector('.cancel-btn');
+        cancelBtn.addEventListener('click', function (ev) {
+          if (cancelBtn.dataset.confirming !== 'true') {
+            cancelBtn.dataset.confirming = 'true';
+            cancelBtn.textContent = 'Sure?';
+            setTimeout(function(){ cancelBtn.dataset.confirming = 'false'; cancelBtn.textContent = 'Cancel'; }, 3000);
+          } else {
+            cancelBtn.disabled = true;
+            google.script.run.withSuccessHandler(function(res){
+              if (res.ok) removeCard(card, taskListEl, tasksEmptyEl);
+            }).ui_cancelTask(task.task_id);
+          }
+        });
+
+        // Ask AI Priority
+        // Ask AI Priority
+        card.querySelector('.ask-ai-btn').addEventListener('click', function (ev) {
+          var btn = ev.currentTarget;
+          btn.disabled = true;
+          btn.textContent = 'Thinking\u2026';
+          tasksStatus.textContent = '';
+          tasksStatus.className = 'status-line';
+
+          google.script.run
+            .withSuccessHandler(function(res){
+              btn.disabled = false;
+              btn.textContent = 'Ask AI Priority';
+              if (res.ok) {
+                aiBox.querySelector('.sugg-val').textContent = res.priority;
+                aiBox.querySelector('.reason').textContent = res.reasoning || '(No rationale)';
+                aiBox.classList.add('visible');
+                aiBox.querySelector('.accept-ai-btn').onclick = function() {
+                  google.script.run.withSuccessHandler(loadTasks).ui_updateTask(task.task_id, { priority: res.priority, priority_ai_recommended: res.priority });
+                };
+                aiBox.querySelector('.dismiss-ai-btn').onclick = function() {
+                  aiBox.classList.remove('visible');
+                };
+              } else {
+                tasksStatus.textContent = 'AI 建议失败: ' + res.message;
+                tasksStatus.className = 'status-line err';
+              }
+            })
+            .withFailureHandler(function(err){
+              btn.disabled = false;
+              btn.textContent = 'Ask AI Priority';
+              tasksStatus.textContent = 'AI 请求异常: ' + (err.message || err);
+              tasksStatus.className = 'status-line err';
+            })
+            .ui_suggestPriority(task.task_id);
+        });
+
+        // Edit
+        card.querySelector('.edit-btn').addEventListener('click', function () {
+          editForm.classList.add('visible');
+        });
+        card.querySelector('.cancel-edit-btn').addEventListener('click', function () {
+          editForm.classList.remove('visible');
+        });
+        card.querySelector('.save-edit-btn').addEventListener('click', function (ev) {
+          var newTitle = editForm.querySelector('.edit-title-input').value.trim();
+          var newCat = editForm.querySelector('.edit-category-select').value;
+          var newDue = editForm.querySelector('.edit-duedate-input').value;
+          if (!newTitle) return;
+          ev.currentTarget.disabled = true;
+          google.script.run.withSuccessHandler(function(res){
+            if (res.ok) loadTasks();
+          }).ui_updateTask(task.task_id, { title: newTitle, category: newCat, due_date: newDue });
+        });
+
+        // Convert to Project
         card.querySelector('.convert-btn').addEventListener('click', function (ev) {
           convertTaskToProject(task.task_id, card, ev.currentTarget);
         });
+
         taskListEl.appendChild(card);
       });
     }
 
     function loadTasks() {
+      var filters = {};
+      if (taskCategoryFilter.value) filters.category = taskCategoryFilter.value;
+      if (taskPriorityFilter.value) filters.priority = taskPriorityFilter.value;
+
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) { tasksStatus.textContent = 'Couldn\u2019t load tasks \u2014 ' + result.message; tasksStatus.className = 'status-line err'; return; }
+          if (!result.ok) { tasksStatus.textContent = result.message; tasksStatus.className = 'status-line err'; return; }
           tasksStatus.textContent = '';
-          renderTasks(result.tasks);
+          rawTasksCache = result.tasks || [];
+          renderTasks(rawTasksCache);
         })
-        .withFailureHandler(function () { tasksStatus.textContent = 'Couldn\u2019t load tasks \u2014 try refreshing.'; tasksStatus.className = 'status-line err'; })
-        .ui_getConvertibleTasks();
+        .withFailureHandler(function () { tasksStatus.textContent = 'Error loading tasks.'; tasksStatus.className = 'status-line err'; })
+        .ui_getConvertibleTasks(filters);
     }
+
+    taskSortSelect.addEventListener('change', function() { renderTasks(rawTasksCache); });
+    taskCategoryFilter.addEventListener('change', loadTasks);
+    taskPriorityFilter.addEventListener('change', loadTasks);
 
     function convertTaskToProject(taskId, cardEl, btnEl) {
       btnEl.disabled = true;
@@ -410,8 +704,7 @@
         .withSuccessHandler(function (result) {
           if (!result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Convert to Project';
-            tasksStatus.textContent = 'Couldn\u2019t convert \u2014 ' + result.message;
-            tasksStatus.className = 'status-line err';
+            tasksStatus.textContent = result.message; tasksStatus.className = 'status-line err';
             return;
           }
           removeCard(cardEl, taskListEl, tasksEmptyEl);
@@ -419,75 +712,168 @@
         })
         .withFailureHandler(function () {
           btnEl.disabled = false; btnEl.textContent = 'Convert to Project';
-          tasksStatus.textContent = 'Couldn\u2019t convert \u2014 try again.';
-          tasksStatus.className = 'status-line err';
+          tasksStatus.textContent = 'Error converting task.'; tasksStatus.className = 'status-line err';
         })
         .ui_convertTaskToProject(taskId);
     }
 
-    // ---------------- Projects ----------------
+    // ============================================================
+    // Projects Module (UI-I1 ~ UI-I5 + Slice 3)
+    // ============================================================
     var projectListEl = document.getElementById('projectList');
     var projectsEmptyEl = document.getElementById('projectsEmpty');
     var projectsStatus = document.getElementById('projectsStatus');
     var projectCountEl = document.getElementById('projectCount');
+    var projectSortSelect = document.getElementById('projectSortSelect');
+    var projectStatusFilter = document.getElementById('projectStatusFilter');
+
+    var rawProjectsCache = [];
+
+    function sortProjects(projects, criteria) {
+      var copy = projects.slice();
+      if (criteria === 'newest') {
+        copy.sort(function(a, b) { return new Date(b.created_time || 0) - new Date(a.created_time || 0); });
+      } else if (criteria === 'status') {
+        copy.sort(function(a, b) { return (a.status || '').localeCompare(b.status || ''); });
+      } else if (criteria === 'title') {
+        copy.sort(function(a, b) { return (a.title || '').localeCompare(b.title || ''); });
+      }
+      return copy;
+    }
 
     function renderProjects(projects) {
       projectListEl.innerHTML = '';
       projectsEmptyEl.style.display = projects.length ? 'none' : 'block';
       projectCountEl.textContent = projects.length || '';
 
-      projects.forEach(function (project) {
+      var sorted = sortProjects(projects, projectSortSelect.value);
+
+      sorted.forEach(function (project) {
         var card = document.createElement('div');
         card.className = 'item-card';
+
+        var descHtml = project.description ? '<div class="item-desc">' + escapeHtml(project.description) + '</div>' : '';
+
         card.innerHTML =
-          '<div class="item-body">' +
-            '<div class="item-title">' + escapeHtml(project.title) + '</div>' +
-            '<div class="item-trace">' +
-              escapeHtml(project.status || '') +
-              '<span class="sep">\u00b7</span>' + relativeTime(project.created_time) +
-            '</div>' +
-            '<div class="item-blocked-reason" style="display:none;"></div>' +
-            '<div class="capture-form">' +
-              '<input type="text" placeholder="Name this template\u2026 e.g. \u2018Client Onboarding\u2019" class="rule-name-input">' +
-              '<div class="capture-form-row">' +
-                '<button class="btn btn-ghost cancel-capture-btn">Cancel</button>' +
-                '<button class="btn save-capture-btn">Save</button>' +
+          '<div class="item-header-row">' +
+            '<div style="flex:1">' +
+              '<div class="item-title">' + escapeHtml(project.title) + '</div>' +
+              descHtml +
+              '<div class="item-trace" style="margin-top:6px;">' +
+                '<span class="badge">' + escapeHtml(project.status || 'DRAFT') + '</span>' +
+                '<span class="sep">\u00b7</span><span>' + relativeTime(project.created_time) + '</span>' +
               '</div>' +
+              '<div class="item-blocked-reason" style="display:none;"></div>' +
             '</div>' +
-            '<div class="capture-result"></div>' +
           '</div>' +
+
+          // Edit Form
+          '<div class="edit-form">' +
+            '<input type="text" class="edit-title-input" value="' + escapeHtml(project.title) + '" placeholder="Project Title">' +
+            '<textarea class="edit-desc-input" placeholder="Project Description">' + escapeHtml(project.description || '') + '</textarea>' +
+            '<div class="form-row">' +
+              '<button class="btn btn-ghost btn-tiny cancel-edit-btn">Cancel</button>' +
+              '<button class="btn btn-tiny save-edit-btn">Save</button>' +
+            '</div>' +
+          '</div>' +
+
+          // Capture Form
+          '<div class="capture-form">' +
+            '<input type="text" placeholder="Name this template\u2026 e.g. \u2018Client Onboarding\u2019" class="rule-name-input">' +
+            '<div class="form-row">' +
+              '<button class="btn btn-ghost btn-tiny cancel-capture-btn">Cancel</button>' +
+              '<button class="btn btn-tiny save-capture-btn">Save Template</button>' +
+            '</div>' +
+          '</div>' +
+
+          // Capture Result
+          '<div class="capture-result"></div>' +
+
+          // Actions
           '<div class="item-actions">' +
-            '<button class="btn btn-ghost convert-btn">Convert to Task</button>' +
-            '<button class="btn btn-ghost capture-btn">Capture as Template</button>' +
+            '<button class="btn btn-success btn-tiny done-btn">Complete</button>' +
+            '<button class="btn btn-danger btn-tiny cancel-btn">Cancel</button>' +
+            '<button class="btn btn-ghost btn-tiny edit-btn">Edit</button>' +
+            '<button class="btn btn-ghost btn-tiny convert-btn">Convert to Task</button>' +
+            '<button class="btn btn-ghost btn-tiny capture-btn">Capture as Template</button>' +
           '</div>';
 
+        // Edit handlers
+        var editForm = card.querySelector('.edit-form');
+        card.querySelector('.edit-btn').addEventListener('click', function () { editForm.classList.add('visible'); });
+        card.querySelector('.cancel-edit-btn').addEventListener('click', function () { editForm.classList.remove('visible'); });
+        card.querySelector('.save-edit-btn').addEventListener('click', function (ev) {
+          var newTitle = editForm.querySelector('.edit-title-input').value.trim();
+          var newDesc = editForm.querySelector('.edit-desc-input').value.trim();
+          if (!newTitle) return;
+          ev.currentTarget.disabled = true;
+          google.script.run.withSuccessHandler(function(res){
+            if (res.ok) loadProjects();
+          }).ui_updateProject(project.project_id, { title: newTitle, description: newDesc });
+        });
+
+        // Complete
+        card.querySelector('.done-btn').addEventListener('click', function (ev) {
+          ev.currentTarget.disabled = true;
+          google.script.run.withSuccessHandler(function(res){
+            if (res.ok) removeCard(card, projectListEl, projectsEmptyEl);
+          }).ui_completeProject(project.project_id);
+        });
+
+        // Cancel
+        var cancelBtn = card.querySelector('.cancel-btn');
+        cancelBtn.addEventListener('click', function () {
+          if (cancelBtn.dataset.confirming !== 'true') {
+            cancelBtn.dataset.confirming = 'true';
+            cancelBtn.textContent = 'Sure?';
+            setTimeout(function(){ cancelBtn.dataset.confirming = 'false'; cancelBtn.textContent = 'Cancel'; }, 3000);
+          } else {
+            cancelBtn.disabled = true;
+            google.script.run.withSuccessHandler(function(res){
+              if (res.ok) removeCard(card, projectListEl, projectsEmptyEl);
+            }).ui_cancelProject(project.project_id);
+          }
+        });
+
+        // Convert to Task
         card.querySelector('.convert-btn').addEventListener('click', function (ev) {
           convertProjectToTask(project.project_id, card, ev.currentTarget);
         });
+
+        // Capture as template
+        var captureForm = card.querySelector('.capture-form');
         card.querySelector('.capture-btn').addEventListener('click', function () {
-          card.querySelector('.capture-form').classList.add('visible');
-          card.querySelector('.rule-name-input').focus();
+          captureForm.classList.add('visible');
+          captureForm.querySelector('.rule-name-input').focus();
         });
         card.querySelector('.cancel-capture-btn').addEventListener('click', function () {
-          card.querySelector('.capture-form').classList.remove('visible');
+          captureForm.classList.remove('visible');
         });
         card.querySelector('.save-capture-btn').addEventListener('click', function (ev) {
           submitCapture(project.project_id, card, ev.currentTarget);
         });
+
         projectListEl.appendChild(card);
       });
     }
 
     function loadProjects() {
+      var filters = {};
+      if (projectStatusFilter.value) filters.status = projectStatusFilter.value;
+
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) { projectsStatus.textContent = 'Couldn\u2019t load projects \u2014 ' + result.message; projectsStatus.className = 'status-line err'; return; }
+          if (!result.ok) { projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err'; return; }
           projectsStatus.textContent = '';
-          renderProjects(result.projects);
+          rawProjectsCache = result.projects || [];
+          renderProjects(rawProjectsCache);
         })
-        .withFailureHandler(function () { projectsStatus.textContent = 'Couldn\u2019t load projects \u2014 try refreshing.'; projectsStatus.className = 'status-line err'; })
-        .ui_getActiveProjects();
+        .withFailureHandler(function () { projectsStatus.textContent = 'Error loading projects.'; projectsStatus.className = 'status-line err'; })
+        .ui_getActiveProjects(filters);
     }
+
+    projectSortSelect.addEventListener('change', function() { renderProjects(rawProjectsCache); });
+    projectStatusFilter.addEventListener('change', loadProjects);
 
     function convertProjectToTask(projectId, cardEl, btnEl) {
       btnEl.disabled = true;
@@ -497,14 +883,11 @@
           if (!result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Convert to Task';
             if (result.code === 'BLOCKED') {
-              // ADR-015：不是错误，是一条正常的"暂时不够格"业务规则反馈
-              // ——用 warning 语气展示原因，不用红色报错样式。
               var reasonEl = cardEl.querySelector('.item-blocked-reason');
               reasonEl.textContent = result.message;
               reasonEl.style.display = 'block';
             } else {
-              projectsStatus.textContent = 'Couldn\u2019t convert \u2014 ' + result.message;
-              projectsStatus.className = 'status-line err';
+              projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err';
             }
             return;
           }
@@ -513,8 +896,7 @@
         })
         .withFailureHandler(function () {
           btnEl.disabled = false; btnEl.textContent = 'Convert to Task';
-          projectsStatus.textContent = 'Couldn\u2019t convert \u2014 try again.';
-          projectsStatus.className = 'status-line err';
+          projectsStatus.textContent = 'Error converting project.'; projectsStatus.className = 'status-line err';
         })
         .ui_convertProjectToTask(projectId);
     }
@@ -529,27 +911,24 @@
 
       google.script.run
         .withSuccessHandler(function (result) {
-          btnEl.disabled = false; btnEl.textContent = 'Save';
+          btnEl.disabled = false; btnEl.textContent = 'Save Template';
           if (!result.ok) {
-            projectsStatus.textContent = 'Couldn\u2019t capture \u2014 ' + result.message;
-            projectsStatus.className = 'status-line err';
+            projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err';
             return;
           }
           cardEl.querySelector('.capture-form').classList.remove('visible');
           var resultEl = cardEl.querySelector('.capture-result');
           resultEl.innerHTML =
-            '\u2713 Captured as \u201c' + escapeHtml(ruleName) +
-            '\u201d (v' + result.template.version + ')' +
-            '<br><button class="btn instantiate-btn">Instantiate Now</button>';
+            '\u2713 Captured as \u201c' + escapeHtml(ruleName) + '\u201d (v' + result.template.version + ')' +
+            '<br><button class="btn btn-tiny instantiate-btn" style="margin-top:6px;">Instantiate Now</button>';
           resultEl.classList.add('visible');
           resultEl.querySelector('.instantiate-btn').addEventListener('click', function (ev) {
             submitInstantiate(result.template.template_id, resultEl, ev.currentTarget);
           });
         })
         .withFailureHandler(function () {
-          btnEl.disabled = false; btnEl.textContent = 'Save';
-          projectsStatus.textContent = 'Couldn\u2019t capture \u2014 try again.';
-          projectsStatus.className = 'status-line err';
+          btnEl.disabled = false; btnEl.textContent = 'Save Template';
+          projectsStatus.textContent = 'Error capturing template.'; projectsStatus.className = 'status-line err';
         })
         .ui_captureProjectAsTemplate(projectId, ruleName);
     }
@@ -562,24 +941,22 @@
         .withSuccessHandler(function (result) {
           if (!result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Instantiate Now';
-            projectsStatus.textContent = 'Couldn\u2019t instantiate \u2014 ' + result.message;
-            projectsStatus.className = 'status-line err';
+            projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err';
             return;
           }
-          resultEl.innerHTML = '\u2713 Created \u201c' + escapeHtml(result.project.title) + '\u201d \u2014 ' +
-            result.tasks.length + ' task' + (result.tasks.length === 1 ? '' : 's') + ', 1 workflow';
+          resultEl.innerHTML = '\u2713 Instantiated \u201c' + escapeHtml(result.project.title) + '\u201d (' +
+            result.tasks.length + ' tasks created)';
           loadProjects();
           loadTasks();
         })
         .withFailureHandler(function () {
           btnEl.disabled = false; btnEl.textContent = 'Instantiate Now';
-          projectsStatus.textContent = 'Couldn\u2019t instantiate \u2014 try again.';
-          projectsStatus.className = 'status-line err';
+          projectsStatus.textContent = 'Error instantiating.'; projectsStatus.className = 'status-line err';
         })
         .ui_instantiateTemplate(templateId);
     }
 
-    // ---------------- Init ----------------
+    // ---------------- Initialize ----------------
     loadNotes();
     loadTasks();
     loadProjects();
