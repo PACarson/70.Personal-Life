@@ -872,3 +872,148 @@
  *       未来换 Web/App/语音前端时可以直接复用，只需要新写呈现层替换
  *       06_TaskIntentParser。
  */
+
+// ============================================================
+// 零之七、v5.2 现状桥接（Architecture Freeze Bridge）
+//         （2026-08-22 新增——Constitution Reconciliation，不修改
+//         以上任何一行既有内容，纯 append）
+// ============================================================
+
+/**
+ * 本节的作用：不重写以上任何历史内容，只负责把「零」到「一」这份写于
+ * Productivity OS v4.7 时期（本文件头部 LAST_UPDATED: 2026-07-13）的
+ * 历史文本，跟 2026-07-24 之后已经确立的 Personal Life OS v5.0 →
+ * v5.1 → v5.2（Architecture Freeze）现状连起来。以上历史条款不因本节
+ * 而失效——有些仍然完全有效，有些范围被延伸，有些具体内容的权威已经
+ * 转移到更专门的文件，三种情况下面逐条标注，不混为一谈。
+ */
+
+/**
+ * (一) Historical Position（历史定位）
+ *
+ *     以上「零」至「零之六」的平台级 Blueprint / Architecture
+ *     Principles / Engine Contract Standard / Dependency Rules /
+ *     Event Definition Standard，以及「一」的 P1-P7，全部写于
+ *     Productivity OS v4.7 时期。
+ *
+ *     2026-07-24，经三轮独立外部评审，项目正式演进为 Personal Life
+ *     OS——不是新建项目，是同一个 Apps Script 项目、同一个
+ *     SPREADSHEET_ID、同一套 Events 表的演进（见 00_ADR.gs
+ *     ADR-2026-07-24-001）。这次演进从 v5.0 一路收敛到 v5.2
+ *     （"Architecture Freeze"——不改功能，锁定未来 5-10 年的原则），
+ *     产生 22 条 ADR（ADR-2026-07-24-001~022）。
+ *
+ *     以上历史 Constitution 因此不是"失效的旧文档"，是"权威范围已被
+ *     后续演进修改/延伸/部分转移"的历史文本，具体见 (三)(五)。
+ *
+ * (二) Current Project Identity（现行项目身份）
+ *
+ *     现行名称：Personal Life OS
+ *     现行 GAS Library Identifier：PersonalLifeOS（取代
+ *     ProductivityOS）
+ *     来源：00_ADR.gs ADR-2026-07-24-018
+ *
+ *     P2「部署形态」原文的 Identifier 描述已被这条 ADR 取代，见 (五)。
+ *
+ * (三) Current Authority（现行权威文件对照——以下条款的具体内容，
+ *      不是原则本身，权威已转移/延伸到更专门的文件）
+ *
+ *     P1 现行项目范围（已扩大到 Project/Task/Workflow/Timeline/
+ *        Note/Review/BusinessRule 七个实体）
+ *          → 00_Architecture.gs「一」
+ *     P3 现行数据边界（新增至少七张表）
+ *          → 00_Sheets_Structure.gs
+ *     P4 现行 Blueprint 落地映射（现约 29 个文件，不再只是 Task 域
+ *        9 个 Engine）
+ *          → 00_File_Map.gs + 00_Module_Responsibility.gs
+ *     零之四 现行具体文件分层清单
+ *          → 00_File_Map.gs「三、Architecture Layer Map」
+ *     零之五 现行具体事件目录（v5.0 起新增/改名部分）
+ *          → 00_Event_Flow.gs
+ *     现行具体业务规则数值      → 00_Business_Rules.gs
+ *     现行领域边界细化          → 00_Domain_Boundary.gs
+ *     现行实体关系              → 00_Entity_Relationship.gs
+ *     全部架构决策（含以上每一条的完整论证）→ 00_ADR.gs
+ *
+ *     以上不代表这些文件"取代"本文件——本文件仍是治理根节点
+ *     （governance root），上表只是把"具体内容现在在哪"指清楚，原则
+ *     本身仍以本文件 + ADR 为准。
+ *
+ *     以下条款是原则/格式规范本身，没有被取代或转移，继续以本文件为
+ *     准，不需要对照其它文件：Architecture Principles 1-10、CQRS
+ *     核心铁律（P6）、P5、P7、零之三 Engine Contract Standard、零 /
+ *     零之六 Blueprint 模板本身、零之四 Dependency Rules 的分层原则
+ *     本身（Presentation→Application→Domain→Infrastructure 方向不
+ *     变）、零之五 Event Definition 的栏位格式规范本身。证据：
+ *     00_Architecture.gs 原文明确声明"不重新发明"这些标准，权威"仍然
+ *     在 00_Project_Constitution.gs"；00_Module_Responsibility.gs
+ *     自称"按 Engine Contract Standard 十三字段逐一补全"；
+ *     00_File_Map.gs 直接引用"见 00_Project_Constitution.gs 零之四"。
+ *
+ * (四) Important Current Architectural Principles（现行重要原则，
+ *      只点名 + 引用 ADR，完整论证见 ADR 本身，这里不重复）
+ *
+ *     Canonical Identity（Domain+EntityType+EntityID+Version 四段式
+ *       身份）                              → ADR-2026-07-24-016
+ *     Canonical Entity Lifecycle（统一生命周期状态词汇 + Task 映射
+ *       函数）                               → ADR-2026-07-24-017
+ *     Domain is Producer, Execution is Consumer（本文件 P5"不变的
+ *       东西"同精神的正式扩展——不是推翻，是把"Execution 不该做什么"
+ *       延伸到"该怎么保持同步"）              → ADR-2026-07-24-012
+ *     Personal Life OS 是 Canonical Reference Implementation（其它
+ *       Domain OS 的 Task/Workflow/Timeline/Project/Reminder/Review
+ *       行为如果要偏离本项目已确立的模式，必须走 ADR）
+ *                                             → ADR-2026-07-24-014
+ *     现行项目身份 / Identifier               → ADR-2026-07-24-018
+ *     Architecture Freeze（v5.2 现状本身）
+ *
+ *     Sprint→Gate→Sprint 开发节奏 + Reference Domain Certification
+ *     机制，见 ADR-2026-07-24-019——细节不在本文件重复，ADR 本身是
+ *     这条规则的权威。
+ *
+ * (五) Constitution Reconciliation Matrix
+ *
+ *   Existing Provision                    | Status
+ *   ---------------------------------------|---------------------------
+ *   Architecture Principles 1-10          | STILL CURRENT
+ *   CQRS 核心铁律                          | STILL CURRENT
+ *   Engine Contract Standard（零之三）      | STILL CURRENT
+ *   Blueprint 模板（零/零之六）             | STILL CURRENT
+ *   Dependency Rules——分层原则本身          | STILL CURRENT
+ *   Event Definition——栏位格式规范本身      | STILL CURRENT
+ *   P5「不变的东西」                        | CURRENT + EXTENDED
+ *                                          | （ADR-2026-07-24-012）
+ *   P7 Dashboard 不额外落盘                 | CURRENT + EXTENDED
+ *                                          | （ADR-2026-07-06，见原文；
+ *                                          |   v5.1 精炼判断标准见
+ *                                          |   ADR-2026-07-24-007）
+ *   P1 定位（原仅 Task 单域）               | SUPERSEDED（见(三)）
+ *   P2 Library Identifier                  | SUPERSEDED
+ *                                          | （ADR-2026-07-24-018）
+ *   P3 数据边界（原 5 张表）                | MODIFIED（见(三)）
+ *   P4 Blueprint 落地映射（原 9 个 Engine）  | AUTHORITY TRANSFERRED
+ *                                          | （见(三)）
+ *   Dependency Rules——具体文件分层清单       | AUTHORITY TRANSFERRED
+ *                                          | （见(三)）
+ *   Event Definition——具体事件清单           | AUTHORITY TRANSFERRED
+ *                                          | （见(三)）
+ *
+ * (六) Governance 目录现状（更新「一、P4」原文"8 份文件"清单的现状
+ *      说明——不代表那份原文写错了，只是标注这份清单在这个时间点的
+ *      实况；本次桥接只更新这份说明，不修改下面列出的其它任一文件）
+ *
+ *     现行 v5.1/v5.2（已跟上 Personal Life OS V2 演进）：
+ *       00_ADR.gs、00_File_Map.gs、00_Architecture.gs、
+ *       00_Business_Rules.gs、00_Module_Responsibility.gs、
+ *       00_Sheets_Structure.gs、00_Domain_Boundary.gs、
+ *       00_Entity_Relationship.gs、00_Project_State.gs（持续更新，
+ *       非设计阶段冻结文档）
+ *
+ *     历史文本，尚未同步到 v5.1/v5.2（沿用 Productivity OS v4.7 或
+ *     更早；本次桥接范围不包含这些文件本身，如实标注现状，不在本轮
+ *     处理）：
+ *       00_Project_Constitution.gs（本文件——P1-P7/零-零之六本体仍是
+ *       v4.7 历史文本，本节起获得 v5.2 现状桥接）、
+ *       00_Known_Limitations.gs、00_Command_Reference.gs、
+ *       00_Roadmap.gs、00_Architecture_Review.gs
+ */
