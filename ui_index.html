@@ -194,19 +194,25 @@
     }
 
     /* ---------- Inline Edit / Forms ---------- */
-    .edit-form, .capture-form {
+    .edit-form, .capture-form, .create-form {
       display: none; margin-top: 10px; padding: 12px; background: var(--bg);
       border: 1px dashed var(--line); border-radius: 6px; gap: 8px; flex-direction: column;
     }
-    .edit-form.visible, .capture-form.visible { display: flex; }
+    .edit-form.visible, .capture-form.visible, .create-form.visible { display: flex; }
     .edit-form input, .edit-form select, .edit-form textarea,
-    .capture-form input {
+    .capture-form input,
+    .create-form input, .create-form select, .create-form textarea {
       background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
       color: var(--ink); font-family: var(--sans); font-size: 13px; padding: 6px 8px; outline: none;
     }
-    .edit-form textarea { resize: vertical; min-height: 50px; }
-    .edit-form input:focus, .edit-form select:focus, .capture-form input:focus { border-color: var(--accent-dim); }
+    .edit-form textarea, .create-form textarea { resize: vertical; min-height: 50px; }
+    .edit-form input:focus, .edit-form select:focus, .capture-form input:focus,
+    .create-form input:focus, .create-form select:focus, .create-form textarea:focus { border-color: var(--accent-dim); }
     .form-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+    .create-panel { margin-bottom: 20px; }
+    .create-panel-head { display: flex; justify-content: space-between; align-items: center; }
+    .create-panel-head strong { font-size: 13px; font-family: var(--mono); color: var(--ink-dim); font-weight: 500; }
+    .field-hint { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); margin-top: -4px; }
 
     /* ---------- AI Priority Box ---------- */
     .ai-priority-box {
@@ -284,6 +290,65 @@
         <h1>Tasks</h1>
         <p class="sub">open tasks · filter, edit, prioritize, complete</p>
 
+        <div class="create-panel" id="taskCreatePanel">
+          <div class="create-panel-head">
+            <span></span>
+            <button class="btn" id="taskCreateToggleBtn" type="button">+ Add Task</button>
+          </div>
+          <div class="create-form" id="taskCreateForm">
+            <input type="text" id="taskCreateTitle" placeholder="Task title" maxlength="200">
+
+            <div style="display:flex; gap:8px;">
+              <select id="taskCreatePriority" style="flex:1;">
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="HIGH">HIGH</option>
+                <option value="MEDIUM" selected>MEDIUM</option>
+                <option value="LOW">LOW</option>
+              </select>
+              <select id="taskCreateCategory" style="flex:1;">
+                <option value="GENERAL" selected>GENERAL</option>
+                <option value="MAINTENANCE">MAINTENANCE</option>
+                <option value="SHOPPING">SHOPPING</option>
+                <option value="ADMIN">ADMIN</option>
+                <option value="HEALTH">HEALTH</option>
+                <option value="PROJECT">PROJECT</option>
+              </select>
+            </div>
+
+            <div style="display:flex; gap:8px;">
+              <input type="date" id="taskCreateDueDate" style="flex:1;">
+              <input type="time" id="taskCreateDueTime" style="flex:1;">
+            </div>
+
+            <textarea id="taskCreateNotes" placeholder="Notes / description (optional)"></textarea>
+
+            <div style="display:flex; gap:8px;">
+              <select id="taskCreateProject" style="flex:1;">
+                <option value="">No Project</option>
+              </select>
+              <select id="taskCreateRecurring" style="flex:1;">
+                <option value="">Not Recurring</option>
+                <option value="Daily">Daily</option>
+                <option value="Weekly">Weekly</option>
+                <option value="Monthly">Monthly</option>
+                <option value="Yearly">Yearly</option>
+              </select>
+            </div>
+
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="taskCreateTags" placeholder="Tags (comma-separated)" style="flex:1;">
+              <input type="text" id="taskCreateWorkflow" placeholder="Workflow ID (optional)" style="flex:1;">
+            </div>
+            <div class="field-hint">Workflow ID is a manual field until the Workflows panel ships.</div>
+
+            <div class="form-row">
+              <button class="btn btn-ghost btn-tiny" id="taskCreateCancelBtn" type="button">Cancel</button>
+              <button class="btn btn-tiny" id="taskCreateSaveBtn" type="button">Create Task</button>
+            </div>
+          </div>
+          <div class="status-line" id="taskCreateStatus"></div>
+        </div>
+
         <div class="toolbar" id="tasksToolbar">
           <div>
             <label>Sort:</label>
@@ -329,6 +394,35 @@
       <section class="panel" id="panel-projects">
         <h1>Projects</h1>
         <p class="sub">active projects · manage scope, capture templates, complete</p>
+
+        <div class="create-panel" id="projectCreatePanel">
+          <div class="create-panel-head">
+            <span></span>
+            <button class="btn" id="projectCreateToggleBtn" type="button">+ Add Project</button>
+          </div>
+          <div class="create-form" id="projectCreateForm">
+            <input type="text" id="projectCreateTitle" placeholder="Project title" maxlength="200">
+            <textarea id="projectCreateDescription" placeholder="Description (optional)"></textarea>
+
+            <div style="display:flex; gap:8px;">
+              <select id="projectCreateParent" style="flex:1;">
+                <option value="">No Parent Project</option>
+              </select>
+              <select id="projectCreateExecutionMode" style="flex:1;">
+                <option value="">Execution Mode: unset</option>
+                <option value="SEQUENTIAL">SEQUENTIAL</option>
+                <option value="PARALLEL">PARALLEL</option>
+                <option value="BRANCH">BRANCH</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <button class="btn btn-ghost btn-tiny" id="projectCreateCancelBtn" type="button">Cancel</button>
+              <button class="btn btn-tiny" id="projectCreateSaveBtn" type="button">Create Project</button>
+            </div>
+          </div>
+          <div class="status-line" id="projectCreateStatus"></div>
+        </div>
 
         <div class="toolbar" id="projectsToolbar">
           <div>
@@ -592,10 +686,19 @@
 
         // Done
         card.querySelector('.done-btn').addEventListener('click', function (ev) {
-          ev.currentTarget.disabled = true;
-          google.script.run.withSuccessHandler(function(res){
-            if (res.ok) removeCard(card, taskListEl, tasksEmptyEl);
-          }).ui_completeTask(task.task_id);
+          var btn = ev.currentTarget;
+          btn.disabled = true;
+          google.script.run
+            .withSuccessHandler(function(res){
+              if (res.ok) { removeCard(card, taskListEl, tasksEmptyEl); return; }
+              btn.disabled = false;
+              tasksStatus.textContent = res.message; tasksStatus.className = 'status-line err';
+            })
+            .withFailureHandler(function(){
+              btn.disabled = false;
+              tasksStatus.textContent = 'Error completing task.'; tasksStatus.className = 'status-line err';
+            })
+            .ui_completeTask(task.task_id);
         });
 
         // Cancel with 2-step confirmation
@@ -607,9 +710,17 @@
             setTimeout(function(){ cancelBtn.dataset.confirming = 'false'; cancelBtn.textContent = 'Cancel'; }, 3000);
           } else {
             cancelBtn.disabled = true;
-            google.script.run.withSuccessHandler(function(res){
-              if (res.ok) removeCard(card, taskListEl, tasksEmptyEl);
-            }).ui_cancelTask(task.task_id);
+            google.script.run
+              .withSuccessHandler(function(res){
+                if (res.ok) { removeCard(card, taskListEl, tasksEmptyEl); return; }
+                cancelBtn.disabled = false;
+                tasksStatus.textContent = res.message; tasksStatus.className = 'status-line err';
+              })
+              .withFailureHandler(function(){
+                cancelBtn.disabled = false;
+                tasksStatus.textContent = 'Error cancelling task.'; tasksStatus.className = 'status-line err';
+              })
+              .ui_cancelTask(task.task_id);
           }
         });
 
@@ -814,10 +925,19 @@
 
         // Complete
         card.querySelector('.done-btn').addEventListener('click', function (ev) {
-          ev.currentTarget.disabled = true;
-          google.script.run.withSuccessHandler(function(res){
-            if (res.ok) removeCard(card, projectListEl, projectsEmptyEl);
-          }).ui_completeProject(project.project_id);
+          var btn = ev.currentTarget;
+          btn.disabled = true;
+          google.script.run
+            .withSuccessHandler(function(res){
+              if (res.ok) { removeCard(card, projectListEl, projectsEmptyEl); return; }
+              btn.disabled = false;
+              projectsStatus.textContent = res.message; projectsStatus.className = 'status-line err';
+            })
+            .withFailureHandler(function(){
+              btn.disabled = false;
+              projectsStatus.textContent = 'Error completing project.'; projectsStatus.className = 'status-line err';
+            })
+            .ui_completeProject(project.project_id);
         });
 
         // Cancel
@@ -829,9 +949,17 @@
             setTimeout(function(){ cancelBtn.dataset.confirming = 'false'; cancelBtn.textContent = 'Cancel'; }, 3000);
           } else {
             cancelBtn.disabled = true;
-            google.script.run.withSuccessHandler(function(res){
-              if (res.ok) removeCard(card, projectListEl, projectsEmptyEl);
-            }).ui_cancelProject(project.project_id);
+            google.script.run
+              .withSuccessHandler(function(res){
+                if (res.ok) { removeCard(card, projectListEl, projectsEmptyEl); return; }
+                cancelBtn.disabled = false;
+                projectsStatus.textContent = res.message; projectsStatus.className = 'status-line err';
+              })
+              .withFailureHandler(function(){
+                cancelBtn.disabled = false;
+                projectsStatus.textContent = 'Error cancelling project.'; projectsStatus.className = 'status-line err';
+              })
+              .ui_cancelProject(project.project_id);
           }
         });
 
@@ -867,6 +995,7 @@
           projectsStatus.textContent = '';
           rawProjectsCache = result.projects || [];
           renderProjects(rawProjectsCache);
+          populateProjectDropdowns();
         })
         .withFailureHandler(function () { projectsStatus.textContent = 'Error loading projects.'; projectsStatus.className = 'status-line err'; })
         .ui_getActiveProjects(filters);
@@ -954,6 +1083,135 @@
           projectsStatus.textContent = 'Error instantiating.'; projectsStatus.className = 'status-line err';
         })
         .ui_instantiateTemplate(templateId);
+    }
+
+    // ---------------- UI Create Capability (Add Task / Add Project) ----------------
+    // UI -> UIBridge (ui_createTask / ui_createProject) -> existing Domain Command/
+    // Engine -> EventBus -> Projection. Same google.script.run contract as every
+    // other action on this page; no parallel persistence path.
+
+    function populateProjectDropdowns() {
+      var taskProjectSel = document.getElementById('taskCreateProject');
+      var parentProjectSel = document.getElementById('projectCreateParent');
+      var taskCurrent = taskProjectSel.value;
+      var parentCurrent = parentProjectSel.value;
+
+      taskProjectSel.innerHTML = '<option value="">No Project</option>';
+      parentProjectSel.innerHTML = '<option value="">No Parent Project</option>';
+
+      rawProjectsCache.forEach(function (p) {
+        var label = escapeHtml(p.title || p.project_id);
+        taskProjectSel.innerHTML += '<option value="' + escapeHtml(p.project_id) + '">' + label + '</option>';
+        parentProjectSel.innerHTML += '<option value="' + escapeHtml(p.project_id) + '">' + label + '</option>';
+      });
+
+      taskProjectSel.value = taskCurrent;
+      parentProjectSel.value = parentCurrent;
+    }
+
+    var taskCreateToggleBtn = document.getElementById('taskCreateToggleBtn');
+    var taskCreateForm = document.getElementById('taskCreateForm');
+    var taskCreateStatus = document.getElementById('taskCreateStatus');
+
+    taskCreateToggleBtn.addEventListener('click', function () {
+      taskCreateForm.classList.toggle('visible');
+    });
+    document.getElementById('taskCreateCancelBtn').addEventListener('click', function () {
+      taskCreateForm.classList.remove('visible');
+      taskCreateStatus.textContent = ''; taskCreateStatus.className = 'status-line';
+    });
+    document.getElementById('taskCreateSaveBtn').addEventListener('click', submitCreateTask);
+
+    function submitCreateTask() {
+      var titleInput = document.getElementById('taskCreateTitle');
+      var title = titleInput.value.trim();
+      if (!title) { titleInput.focus(); return; }
+
+      var meta = {
+        priority:    document.getElementById('taskCreatePriority').value,
+        category:    document.getElementById('taskCreateCategory').value,
+        due_date:    document.getElementById('taskCreateDueDate').value,
+        due_time:    document.getElementById('taskCreateDueTime').value,
+        notes:       document.getElementById('taskCreateNotes').value.trim(),
+        project_id:  document.getElementById('taskCreateProject').value,
+        workflow_id: document.getElementById('taskCreateWorkflow').value.trim(),
+        tags:        document.getElementById('taskCreateTags').value.trim(),
+        recurring:   document.getElementById('taskCreateRecurring').value
+      };
+
+      var saveBtn = document.getElementById('taskCreateSaveBtn');
+      saveBtn.disabled = true;
+      taskCreateStatus.textContent = 'Saving\u2026'; taskCreateStatus.className = 'status-line';
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          saveBtn.disabled = false;
+          if (!result.ok) { taskCreateStatus.textContent = result.message; taskCreateStatus.className = 'status-line err'; return; }
+          titleInput.value = '';
+          document.getElementById('taskCreateNotes').value = '';
+          document.getElementById('taskCreateTags').value = '';
+          document.getElementById('taskCreateWorkflow').value = '';
+          document.getElementById('taskCreateDueDate').value = '';
+          document.getElementById('taskCreateDueTime').value = '';
+          document.getElementById('taskCreatePriority').value = 'MEDIUM';
+          document.getElementById('taskCreateCategory').value = 'GENERAL';
+          document.getElementById('taskCreateRecurring').value = '';
+          taskCreateStatus.textContent = '';
+          taskCreateForm.classList.remove('visible');
+          loadTasks();
+        })
+        .withFailureHandler(function () {
+          saveBtn.disabled = false;
+          taskCreateStatus.textContent = 'Error creating task.'; taskCreateStatus.className = 'status-line err';
+        })
+        .ui_createTask(title, meta);
+    }
+
+    var projectCreateToggleBtn = document.getElementById('projectCreateToggleBtn');
+    var projectCreateForm = document.getElementById('projectCreateForm');
+    var projectCreateStatus = document.getElementById('projectCreateStatus');
+
+    projectCreateToggleBtn.addEventListener('click', function () {
+      projectCreateForm.classList.toggle('visible');
+    });
+    document.getElementById('projectCreateCancelBtn').addEventListener('click', function () {
+      projectCreateForm.classList.remove('visible');
+      projectCreateStatus.textContent = ''; projectCreateStatus.className = 'status-line';
+    });
+    document.getElementById('projectCreateSaveBtn').addEventListener('click', submitCreateProject);
+
+    function submitCreateProject() {
+      var titleInput = document.getElementById('projectCreateTitle');
+      var title = titleInput.value.trim();
+      if (!title) { titleInput.focus(); return; }
+
+      var meta = {
+        description:       document.getElementById('projectCreateDescription').value.trim(),
+        parent_project_id: document.getElementById('projectCreateParent').value,
+        execution_mode:    document.getElementById('projectCreateExecutionMode').value
+      };
+
+      var saveBtn = document.getElementById('projectCreateSaveBtn');
+      saveBtn.disabled = true;
+      projectCreateStatus.textContent = 'Saving\u2026'; projectCreateStatus.className = 'status-line';
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          saveBtn.disabled = false;
+          if (!result.ok) { projectCreateStatus.textContent = result.message; projectCreateStatus.className = 'status-line err'; return; }
+          titleInput.value = '';
+          document.getElementById('projectCreateDescription').value = '';
+          document.getElementById('projectCreateParent').value = '';
+          document.getElementById('projectCreateExecutionMode').value = '';
+          projectCreateStatus.textContent = '';
+          projectCreateForm.classList.remove('visible');
+          loadProjects();
+        })
+        .withFailureHandler(function () {
+          saveBtn.disabled = false;
+          projectCreateStatus.textContent = 'Error creating project.'; projectCreateStatus.className = 'status-line err';
+        })
+        .ui_createProject(title, meta);
     }
 
     // ---------------- Initialize ----------------

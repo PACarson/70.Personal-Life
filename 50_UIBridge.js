@@ -55,7 +55,11 @@
  *                           ui_updateProject(projectId, changes),
  *                           ui_suggestPriority(taskId),
  *                           ui_completeTask(taskId), ui_cancelTask(taskId),
- *                           ui_completeProject(projectId), ui_cancelProject(projectId)
+ *                           ui_completeProject(projectId), ui_cancelProject(projectId)，
+ *                           ui_createTask(title, meta), ui_createProject(title, meta)
+ *                           （2026-08-24 新增 UI Create Capability——见文件末尾，
+ *                           两者内部只调用既有 TaskEngine.createTask /
+ *                           ProjectEngine.createProject，不新开持久化路径）
  *                           （除 ui_captureProjectAsTemplate 外都带一个
  *                           仅测试用的 _testOverrides 参数，永远是最后一个
  *                           参数，前端永远不传；capture 不需要，见该函数
@@ -670,6 +674,109 @@ function ui_cancelProject(projectId, _testOverrides) {
       return { ok: false, code: 'INVALID_STATE', message: '这个 Project 已经是 ' + result.current_status + '，没法取消' };
     }
     return { ok: true, already_cancelled: !!result.already_cancelled };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+// ============================================================
+// UI Create Capability（2026-08-24 新增）
+// Carson 明确要求：Add Task / Add Project 必须是一等 UI 操作，不能藏在
+// Edit 里面；写路径必须走 UI → UIBridge → 既有 Domain Command/Engine →
+// EventBus → Projection，复用既有 createTask/createProject 契约，不允许
+// 新开一条 UI 专属持久化路径。以下两个函数内部只调用既有
+// TaskEngine.createTask / ProjectEngine.createProject，不直接碰
+// Sheet/Events，跟本文件其它函数（ui_updateTask 等）是同一种角色、同一种
+// {ok:true,...}/{ok:false,code,message} 契约。
+// ============================================================
+
+/**
+ * UI Create（Task）。字段透传给既有 TaskEngine.createTask(title, meta,
+ * chatId)——不重新发明字段清单，meta 形状对齐 20_TaskEngine.createTaskDirect_
+ * 已经支持的既有字段，非法/越界值的校验完全由 TaskEngine 自己负责
+ * （CFG.TASK_CATEGORIES/TASK_PRIORITIES 的 fallback 逻辑），本函数不重复
+ * 这层校验。
+ *
+ * 【source / provenance metadata】不作为表单字段暴露给用户填——沿用
+ * ui_createNote 的既有先例：source_module/decision_owner 由本函数自动解析
+ * 并附加（decision_owner 走 Web Identity，见 _resolveDecisionOwner_），
+ * created_method 不传，落到 TaskEngine 默认值 'Manual'，跟 Telegram 手动
+ * 创建的语义完全一致。
+ *
+ * 【workflow_id】目前 UI 还没有 Workflow 列表可选（Workflows 面板还没做），
+ * 所以这里只透传调用方传来的原始字符串，不做存在性校验——跟 project_id 的
+ * 处理方式不对称是刻意的，是当前 Workflows UI 缺失这个事实的直接反映，不是
+ * 疏漏。
+ *
+ * @param {string} title
+ * @param {object} [meta]  透传字段：category/priority/due_date/due_time/
+ *                          recurring/notes/tags/project_id/workflow_id
+ *                          （均可省略，未提供的字段由 TaskEngine 走既有
+ *                          默认值）
+ * @param {object} [_testOverrides]  仅测试使用：{chatId, decisionOwner}
+ * @returns {{ok:true, task:object}|{ok:false, code:'EMPTY_TITLE'|string, message}}
+ */
+function ui_createTask(title, meta, _testOverrides) {
+  try {
+    if (!title || !String(title).trim()) {
+      return { ok: false, code: 'EMPTY_TITLE', message: '标题不能为空' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var decisionOwner = _resolveDecisionOwner_(_testOverrides);
+    meta = meta || {};
+
+    var task = TaskEngine.createTask(String(title).trim(), {
+      category:       meta.category,
+      priority:       meta.priority,
+      due_date:       meta.due_date,
+      due_time:       meta.due_time,
+      recurring:      meta.recurring,
+      notes:          meta.notes,
+      tags:           meta.tags,
+      project_id:     meta.project_id,
+      workflow_id:    meta.workflow_id,
+      source_module:  'UIBridge.ui_createTask',
+      decision_owner: decisionOwner
+    }, chatId);
+
+    return { ok: true, task: task };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI Create（Project）。字段透传给既有 ProjectEngine.createProject(title,
+ * meta, chatId)，meta 形状对齐 27_ProjectEngine.createProjectDirect_ 已经
+ * 支持的既有字段。source_task_id / instantiated_from_template_id 是既有
+ * Conversion / Instantiate 两条既有路径专用的 provenance 字段，本函数不
+ * 暴露、不透传——一个从 Add Project 表单手动创建的 Project 不应该带着
+ * "我是从某个 Task 转换来的"这类痕迹。
+ *
+ * @param {string} title
+ * @param {object} [meta]  透传字段：description/execution_mode/
+ *                          parent_project_id
+ * @param {object} [_testOverrides]  仅测试使用：{chatId, decisionOwner}
+ * @returns {{ok:true, project:object}|{ok:false, code:'EMPTY_TITLE'|string, message}}
+ */
+function ui_createProject(title, meta, _testOverrides) {
+  try {
+    if (!title || !String(title).trim()) {
+      return { ok: false, code: 'EMPTY_TITLE', message: '标题不能为空' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var decisionOwner = _resolveDecisionOwner_(_testOverrides);
+    meta = meta || {};
+
+    var project = ProjectEngine.createProject(String(title).trim(), {
+      description:        meta.description,
+      execution_mode:      meta.execution_mode,
+      parent_project_id:    meta.parent_project_id,
+      source_module:  'UIBridge.ui_createProject',
+      decision_owner: decisionOwner
+    }, chatId);
+
+    return { ok: true, project: project };
   } catch (e) {
     return _wrapError_(e);
   }

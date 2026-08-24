@@ -443,3 +443,141 @@ function runUIBridgeInteractionsGate() {
 
   return allPass;
 }
+
+// ============================================================
+// UI Create Capability Tests（2026-08-24 新增）
+// 覆盖 ui_createTask / ui_createProject。故意跟 runUIBridgeInteractionsGate()
+// 分开、单独一个入口 runUICreateInteractionsGate()——UI-I1~I5 的 14 项
+// 是 Carson 明确要求「先干净重跑一次」的既有回归基线，不应该被这次新加的
+// 测试影响这个数字的含义；Create 能力是独立于那次 mock 修复的新增面。
+// ============================================================
+
+function testUIInteractions_CreateTask_Success_() {
+  Logger.log('--- testUIInteractions_CreateTask_Success_ 开始 ---');
+  var pass = true;
+  var testChatId = 'ui_interact_test_' + new Date().getTime();
+  var task;
+
+  try {
+    var result = ui_createTask('通过 Add Task 创建', {
+      category: 'SHOPPING', priority: 'HIGH', due_date: '2026-09-01', due_time: '14:30',
+      notes: '备注文本', tags: 'urgent,家用', recurring: 'Weekly'
+    }, { chatId: testChatId });
+
+    if (!result.ok) { Logger.log('❌ 合法创建应该成功: ' + JSON.stringify(result)); pass = false; }
+    else {
+      task = result.task;
+      if (task.category !== 'SHOPPING') { Logger.log('❌ category 没有透传'); pass = false; }
+      if (task.priority !== 'HIGH') { Logger.log('❌ priority 没有透传'); pass = false; }
+      if (task.due_date !== '2026-09-01') { Logger.log('❌ due_date 没有透传'); pass = false; }
+      if (task.due_time !== '14:30') { Logger.log('❌ due_time 没有透传'); pass = false; }
+      if (task.due_datetime !== '2026-09-01T14:30:00') { Logger.log('❌ due_datetime 派生不对: ' + task.due_datetime); pass = false; }
+      if (task.recurring !== 'Weekly') { Logger.log('❌ recurring 没有透传'); pass = false; }
+      if (task.tags !== 'urgent,家用') { Logger.log('❌ tags 没有透传'); pass = false; }
+      if (task.source_module !== 'UIBridge.ui_createTask') { Logger.log('❌ source_module 没有被自动写入（provenance 没走通）'); pass = false; }
+    }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  } finally {
+    try { if (task) TaskEngine.cancelTask(task.task_id, testChatId); } catch (ignore) {}
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}
+
+function testUIInteractions_CreateTask_EmptyTitle_() {
+  Logger.log('--- testUIInteractions_CreateTask_EmptyTitle_ 开始 ---');
+  var pass = true;
+
+  try {
+    var result = ui_createTask('   ', { category: 'GENERAL' }, { chatId: 'ui_interact_test_empty' });
+    if (result.ok) { Logger.log('❌ 空标题不应该创建成功'); pass = false; }
+    else if (result.code !== 'EMPTY_TITLE') { Logger.log('❌ 期望 EMPTY_TITLE，实际: ' + result.code); pass = false; }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}
+
+function testUIInteractions_CreateProject_Success_() {
+  Logger.log('--- testUIInteractions_CreateProject_Success_ 开始 ---');
+  var pass = true;
+  var testChatId = 'ui_interact_test_' + new Date().getTime();
+  var project;
+
+  try {
+    var result = ui_createProject('通过 Add Project 创建', {
+      description: '项目描述文本', execution_mode: 'SEQUENTIAL'
+    }, { chatId: testChatId });
+
+    if (!result.ok) { Logger.log('❌ 合法创建应该成功: ' + JSON.stringify(result)); pass = false; }
+    else {
+      project = result.project;
+      if (project.description !== '项目描述文本') { Logger.log('❌ description 没有透传'); pass = false; }
+      if (project.execution_mode !== 'SEQUENTIAL') { Logger.log('❌ execution_mode 没有透传'); pass = false; }
+      if (project.source_module !== 'UIBridge.ui_createProject') { Logger.log('❌ source_module 没有被自动写入（provenance 没走通）'); pass = false; }
+    }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  } finally {
+    try { if (project) ProjectEngine.cancelProject(project.project_id, testChatId); } catch (ignore) {}
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}
+
+function testUIInteractions_CreateProject_EmptyTitle_() {
+  Logger.log('--- testUIInteractions_CreateProject_EmptyTitle_ 开始 ---');
+  var pass = true;
+
+  try {
+    var result = ui_createProject('', {}, { chatId: 'ui_interact_test_empty' });
+    if (result.ok) { Logger.log('❌ 空标题不应该创建成功'); pass = false; }
+    else if (result.code !== 'EMPTY_TITLE') { Logger.log('❌ 期望 EMPTY_TITLE，实际: ' + result.code); pass = false; }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}
+
+/**
+ * UI Create Capability 独立 Gate——有意跟 runUIBridgeInteractionsGate() 分开
+ * （见文件顶部本节说明）。
+ */
+function runUICreateInteractionsGate() {
+  Logger.log('========== UI Create Capability Gate 开始 ==========');
+  Logger.log('范围：50_UIBridge.gs 新增 ui_createTask / ui_createProject。');
+  Logger.log('不含 Add Task 表单里 Project/Workflow 下拉的浏览器渲染——见');
+  Logger.log('本次 Track 2 报告里的 Browser Verification 部分。');
+  Logger.log('');
+
+  var results = {
+    'Create Positive: Create Task (full field set)':    testUIInteractions_CreateTask_Success_(),
+    'Create Negative: Create Task Empty Title':          testUIInteractions_CreateTask_EmptyTitle_(),
+    'Create Positive: Create Project':                   testUIInteractions_CreateProject_Success_(),
+    'Create Negative: Create Project Empty Title':       testUIInteractions_CreateProject_EmptyTitle_()
+  };
+
+  Logger.log('');
+  Logger.log('========== UI Create Capability Gate 结果汇总 ==========');
+  var allPass = true;
+  for (var name in results) {
+    Logger.log((results[name] ? '✅ ' : '❌ ') + name);
+    if (!results[name]) allPass = false;
+  }
+  Logger.log('');
+  Logger.log(allPass
+    ? '✅✅✅ 全部通过——Add Task / Add Project 的服务端契约验证完成。下一步：' +
+      '真实浏览器手动验证两个表单本身（字段渲染、Project 下拉填充、提交后' +
+      '列表刷新）——这一步 Gate 测试覆盖不到，只能人工点。'
+    : '❌ 有测试未通过——请把上面完整 Logger 输出发回去');
+  Logger.log('========== UI Create Capability Gate 结束 ==========');
+
+  return allPass;
+}

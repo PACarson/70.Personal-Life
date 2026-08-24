@@ -250,7 +250,217 @@
  */
 
 // ============================================================
-// G. UI-I6 状态
+// G. Ownership of the Context-Scoped Ordering Entity（2026-08-24 新增，
+//    Carson 明确要求：在他做最终决定之前，先把这一节写清楚——"叫它
+//    ordering entity"本身不能让它变成 ownership-neutral，必须对
+//    Inbox/Today/Weekly/Project/Workflow/Goal/Review/Timeline 逐一
+//    明确回答"这份数据到底是谁的"）
+// ============================================================
+
+/**
+ * H.1 判断方法——复用既有测试，不新发明一套
+ *
+ * 「E」已经确认：三个候选模型本身都不违反"Execution 永远不拥有
+ * Business Data"，因为三者都是纯 Domain 内部数据。但那个结论只回答了
+ * "模型 3 这个模式本身合法"，没有回答"每一个具体 context 的那一份
+ * 排序数据，实际归谁"——这正是 Carson 要求补的这一节。
+ *
+ * 判断标准照抄 Dashboard Ownership Precedent
+ * （00_Domain_Boundary.gs「四」，ADR-2026-07-24-007）和 Review
+ * Ownership Test（00_Domain_Boundary.gs「五」）已经确立的同一套逻辑，
+ * 不重新发明：
+ *
+ *   对每个 context，问一个问题——"这个 context 下被排序的那些条目，
+ *   是不是只来自本 Domain（Personal Life OS）自己的表？"
+ *     → 只需要本 Domain 自己的数据就能回答 → Personal Life OS Domain
+ *       state。
+ *     → 需要跨至少一个其它 Domain/OS 的数据才能回答（条目本身来自
+ *       多个 Domain 的聚合）→ Life Execution OS state。
+ *
+ * "Ownership 由数据决定，不由名称决定"（Carson 原话）在这里的具体
+ * 含义：两个完全不同的东西可能共享同一个名字——00_Domain_Boundary.gs
+ * 「二」的 Ownership Matrix 里已经有先例："Dashboard"和"Review"都是
+ * 一个名字对应两种不同 ownership 的数据（Domain 版 vs Execution 版，
+ * 用同一个测试区分）。下面会看到"Today"/"Weekly"正是同一个陷阱的
+ * 第三个例子——必须先拆成"哪一个 Today"才能回答 ownership，不能看到
+ * 名字就下结论。
+ *
+ * H.2 逐 context 结论
+ *
+ * **Inbox** → Personal Life OS Domain state。
+ *   这是"本 Domain 自己尚未归类/全部 Tasks"的视图，条目 100% 来自
+ *   Personal Life OS 自己的 Tasks 表。context_key 例如 'INBOX' 或
+ *   'ALL_OPEN_TASKS'（沿用「D」已经举过的例子）。
+ *
+ * **Project** → Personal Life OS Domain state。
+ *   Project 本身和它下面的 Task 都是本 Domain 拥有的 Business Data
+ *   （00_Domain_Boundary.gs「二」矩阵）。context_key 例如
+ *   'PROJECT:<project_id>'（「D」原有例子）。
+ *
+ * **Workflow** → Personal Life OS Domain state，但带一条必须守住的
+ *   边界，不是"跟 Project 一样直接照抄"：
+ *   Workflow 已经有一个"步骤顺序"的既有权威字段——sequence_index
+ *   （「A」已经详细论证过它是 Workflow Template 的编排语义，不是
+ *   用户手动排序）。如果 Workflow context 下的拖拽排序，被误用成
+ *   "改这个 Task 在 Workflow 执行序列里的位置"，就是「A」已经警告过的
+ *   同一个冲突重新发生一次，只是这次是在"给排序找 ownership"这一步
+ *   而不是"复用哪个字段"这一步犯错。必须明确写下来：Workflow
+ *   context 的 context-scoped ordering entity 只表达"用户在这个
+ *   Workflow 视图里想怎么看"，永远不覆写、不参与 sequence_index
+ *   的任何计算——两者即使将来共享同一张 TaskViewOrder 表的存储机制，
+ *   语义上也是完全不相交的两件事。如果 Carson 未来真的想要"拖拽改变
+ *   Workflow 执行顺序"这个功能，那是一个需要单独提出、单独批准的
+ *   不同能力，不是 UI-I6 顺带覆盖的范围。
+ *
+ * **Review** → Personal Life OS Domain state——但这里指的是本项目
+ *   自己的 Review Engine（40_ReviewEngine.gs，Required Modules 之一），
+ *   不是 Domain Boundary 矩阵里"Execution Review"那一行。跟
+ *   Dashboard/Review 已经确立的判断标准完全一致：本项目的 Review
+ *   只读本 Domain 自己的 Task/Project/Workflow 数据就能生成
+ *   （00_Domain_Boundary.gs「五」），所以它内部"先看哪几项"的排序
+ *   需求，同样是 Domain state。如果 Carson 说的"Review"其实指的是
+ *   跨 Domain 的 Execution Review 界面，结论要翻转成 Life Execution
+ *   OS state——这正是本节要强调的"先分清哪一个，再判断 ownership"。
+ *
+ * **Timeline** → 不建议引入 context-scoped ordering entity，即使
+ *   技术上"能做"。00_Domain_Boundary.gs「二」矩阵已经把 Timeline
+ *   定义为"本项目的完整历史流水账"——它的自然顺序是时间戳先后，
+ *   一份历史记录被用户手动拖拽重排，等于允许用户改写历史发生的
+ *   顺序，这跟 Timeline 存在的目的（如实记录发生过什么）直接矛盾。
+ *   如果未来确实需要"Timeline 里我想把某几条置顶看"这种纯浏览偏好，
+ *   那是 View-local state（见 H.2 末尾对这一类的定义），不应该
+ *   通过给 Timeline 条目分配 order_index 的方式实现，避免跟"Timeline
+ *   = 真实历史顺序"这个语义混在一起。
+ *
+ * **Today / Weekly** → 视具体所指分裂成两个不同答案，这是本节最容易
+ *   被简化掉、但 Carson 明确要求讲清楚的一点：
+ *
+ *   (a) 本项目 24_ViewEngine.gs 已有的 today()/thisWeek()——
+ *       实测确认（24_ViewEngine.js 文件头 ADR-2026-07-06 注释 +
+ *       函数体本身）这两个函数是纯函数，对一个已经在内存里的 Task
+ *       数组按 due_date 做筛选，不读取任何持久化的顺序，本项目 UI
+ *       目前也还没有一个专门渲染它们的面板（nav 里只有
+ *       Notes/Tasks/Projects 三项，见 ui_index.html）。如果未来
+ *       给这个 Domain-local 的筛选视图加手动排序，条目 100% 来自
+ *       本 Domain 自己的 Tasks 表，跟"Inbox"是同一种情况——
+ *       ordering entity 归 Personal Life OS Domain state，
+ *       context_key 例如 'TODAY'/'THIS_WEEK'，不违反任何边界。
+ *
+ *   (b) 00_Domain_Boundary.gs「二」矩阵里的"Today View"/"Weekly
+ *       View"——明确标注为 Life Execution 拥有，是跨 Domain 聚合
+ *       视图（未来会同时拉 Personal Life OS + Property OS +
+ *       Investment OS 等多个 Domain 的条目）。这个视图如果要支持
+ *       手动排序，ordering entity 必须是 Life Execution OS state，
+ *       不能是本项目的表——原因不只是"Execution 不该拥有 Business
+ *       Data"，反过来同样成立："本 Domain 也不该拥有一份需要引用
+ *       其它 Domain 条目的排序数据"，因为那份排序数据的条目集合本身
+ *       就已经超出了本 Domain 的可见范围，只有 Execution 才有完整的
+ *       跨 Domain 视野去维护它。
+ *
+ *   跟 Reference Integrity（00_Domain_Boundary.gs「七」）的衔接：
+ *   Execution 侧如果要实现 (b) 的排序，做法是在 Execution 自己的
+ *   存储里放一张结构相同的 {context_key, item_ref, order_index} 表，
+ *   item_ref 用 Execution 已经在用的 Reference 信封（ReferenceID/
+ *   SourceOS/EntityType/EntityID/Snapshot/LastSyncTime）而不是直接
+ *   引用本 Domain 的 task_id——这样排序数据本身也遵守"Execution 只
+ *   持有 Reference，不持有 Domain 实体"的既有契约，本 Domain 完全
+ *   不需要知道这张表存在，也不需要为它开放任何写权限。这不是本项目
+ *   需要实现的部分（超出 Personal Life OS 的 Schema Authority），
+ *   本节只负责说清楚"如果做，应该做在哪、用什么形状"，呼应「E」已经
+ *   指出的"模式可以被复用，数据不可以被共享"这条原则——这里是把
+ *   同一条原则，从"未来 Domain OS"，扩展到"Life Execution OS 自己"
+ *   这一个方向。
+ *
+ * **Goal** → Life Execution OS state，理由跟 Today/Weekly 的 (b)
+ *   完全一致——00_Domain_Boundary.gs「二」矩阵已经把 Goal 标注为
+ *   Life Execution 拥有。Goal 下面引用的 Project/Task 可能横跨多个
+ *   未来 Domain OS，排序如果需要，同样通过 Execution 自己的
+ *   {context_key, item_ref, order_index} 表 + Reference 信封实现，
+ *   不进入本项目的 Schema Authority。
+ *
+ * "Shared infrastructure state"这个选项在以上 8 个 context 里没有
+ * 一个成立——这里明确排除，不是漏看：让 Personal Life OS 和 Life
+ * Execution OS 共同写同一张排序表，等于同时违反两边的 Schema
+ * Authority（00_Data_Ownership.gs「一」，"每一张表只有一个模块可以
+ * 写"这条铁律不因为存的是排序数据、不是 Business Data 本身而放松）。
+ * 会被复用的是模式（{context_key, item_id/item_ref, order_index}
+ * 这个形状），不是任何一张具体的表。
+ *
+ * H.3 提议实体的完整规格（限本项目 Schema Authority 内：Inbox/
+ *     Project/Workflow/Review 四个 context；Today(b)/Weekly(b)/Goal
+ *     的 Execution 侧实体形状已在 H.2 描述，具体规格属于 Life
+ *     Execution OS 自己的 ADR，不在本文件的权限范围内）
+ *
+ *   **Identity**：复合键 (context_key, task_id)，不需要单独的
+ *   identity/hash——这是纯位置元数据，不是需要去重的 Business
+ *   实体，天然键就是这个二元组本身，跟 Task/Project 的
+ *   Canonical Identity 系统（07_IdentityEngine.gs）是两回事，不共用
+ *   也不需要共用。
+ *
+ *   **Owner（写权限）**：新表的唯一写入模块沿用既有 Schema Authority
+ *   模式（00_Data_Ownership.gs「一」）——比照 Sprint 1 新表的既有
+ *   先例（并入 10_ProjectionEngine.gs 的既有写权限，而不是开一个新
+ *   模块），不给 50_UIBridge.gs 任何直接写权限（呼应「六」"UIBridge
+ *   不新增任何一张表的写入权"这条已经确立的规则）。
+ *
+ *   **Storage**：新表 TaskViewOrder（chat_id, context_key, task_id,
+ *   order_index, updated_time）。吸取 Track 1B 的教训（due_date 的
+ *   存量数据被 Sheets 静默转换成 Date 对象），15_Setup.js 注册这张表
+ *   时对 context_key/task_id 两列显式做 Plain-Text 格式化
+ *   （沿用 _setPlainTextFormatForNewColumns_ 既有工具函数），不留
+ *   同样的隐患。
+ *
+ *   **Lifecycle**：没有 DRAFT/READY 等生命周期状态——纯位置数据，
+ *   写入即生效，用 upsert 语义（同一个 (context_key, task_id) 的
+ *   新 order_index 直接覆盖旧值），不是追加式的版本历史。
+ *
+ *   **Event semantics**：一次拖拽操作产生一个 VIEW_ORDER_UPDATED
+ *   事件，payload 是 {context_key, ordered_task_ids: [...], chat_id}
+ *   ——整份新顺序一次性提交，不是每挪动一个 Task 就发一个事件（避免
+ *   一次拖拽拆成 N 个事件）。事件本身依然写入 Events 表，遵守
+ *   "真相来源是 EVENTS 表"这条全项目铁律（00_Data_Ownership.gs），
+ *   跟其它任何 Business Event 一样是追加式、永久保留。
+ *
+ *   **Projection behavior**：收到 VIEW_ORDER_UPDATED 后，对该
+ *   context_key 做整体覆盖式重写（清除该 context_key 的旧行，按
+ *   ordered_task_ids 的顺序重新写入 order_index），不是增量 patch——
+ *   这是 Read Model 层面的"当前状态"覆盖，跟 Tasks 表本身也是
+ *   Projection 出来的当前状态（完整历史仍在 Events 表）是同一套
+ *   已有模式，不是例外。
+ *
+ *   **Cross-device behavior**：因为存储在 Sheet（服务端），不是
+ *   浏览器 localStorage 或任何客户端专属存储，同一个 chat_id 在
+ *   不同设备/不同浏览器会话打开同一个 context，看到的是同一份
+ *   最后保存的顺序——这是选择 Model 3（服务端持久化）而不是纯前端
+ *   方案的直接好处之一，不需要额外设计就自然成立。
+ *
+ *   **Deletion behavior**：本项目里没有硬删除——Task/Project 的
+ *   "结束"永远是状态字段（COMPLETED/CANCELLED/ARCHIVED），不是
+ *   物理删除行（00_Data_Ownership.gs「五」，"只增不删,用状态字段
+ *   表达'结束'"）。所以 TaskViewOrder 也不需要一套主动的级联删除
+ *   机制去响应"Task 被删除"这种事件——这种事件本来就不存在。唯一
+ *   需要考虑的删除场景是 context 本身的整体废弃（例如一个 Project
+ *   被 ARCHIVED），此时对应 context_key 的 TaskViewOrder 行不需要
+ *   立刻清理，见下一条 Orphan behavior。
+ *
+ *   **Orphan behavior**：跟「B」已经指出的模型 2（数组）的核心风险
+ *   不同——模型 2 的风险是"数组里引用一个已经不在这个 Project 下的
+ *   task_id"需要主动维护一致性；模型 3 每一行独立存在，一个 task_id
+ *   不再出现在某个 context 的当前结果集里（比如任务已完成、被移到
+ *   别的 Project），对应的 TaskViewOrder 行只是变得"不会再被读到"，
+ *   不会破坏任何渲染逻辑，也不产生"数组里有一个无效引用"这类需要
+ *   显式校验的错误状态——这一点「D」「E」已有的论证在这里同样成立，
+ *   本节只是把它显式列进 Carson 要求的这份清单。这类"不会再被读到"
+ *   的行属于被动废弃，不需要实时清理；如果未来 Sheet 行数变成实际
+ *   问题，可以照抄 11_ProjectionRebuilder 的既有模式做一次性清扫，
+ *   这是运维层面的房务工作，不是本 ADR 需要现在解决的正确性问题。
+ *
+ * 本节到此为止仍然只是分析——不改变 UI-I6 的状态，也不引入
+ * TaskViewOrder 或任何对应代码，见「H」。
+ */
+
+// ============================================================
+// H. UI-I6 状态
 // ============================================================
 
 /**
