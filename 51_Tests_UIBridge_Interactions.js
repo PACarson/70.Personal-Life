@@ -581,3 +581,95 @@ function runUICreateInteractionsGate() {
 
   return allPass;
 }
+
+// ============================================================
+// UIBridge Transport Safety Tests（2026-08-24 新增，修复 Carson 报告的
+// Add Task 之后列表不刷新 + "Cannot read properties of null (reading
+// 'ok')" 真实浏览器崩溃。见 50_UIBridge.gs 的 _sanitizeTaskDatesForTransport_
+// 完整根因说明。纯函数测试，不需要真实 Sheet，可以单独跑，不需要
+// 额外的 Gate 入口。
+// ============================================================
+
+function testUIBridge_SanitizeDates_ConvertsDateToCanonicalStrings_() {
+  Logger.log('--- testUIBridge_SanitizeDates_ConvertsDateToCanonicalStrings_ 开始 ---');
+  var pass = true;
+  var tz = Session.getScriptTimeZone();
+
+  try {
+    // 构造跟真实环境诊断一致的场景：due_date/due_time/due_datetime
+    // 被 Sheets 误判成了 Date 对象（模拟 _readAllRows_ 的原始返回）。
+    var fakeDate = new Date(2026, 8, 1);       // 脚本时区下的 2026-09-01 00:00
+    var fakeTime = new Date(2026, 8, 1, 14, 30); // 脚本时区下的 14:30
+    var contaminated = { task_id: 'T1', due_date: fakeDate, due_time: fakeTime, due_datetime: fakeDate, title: '正常字符串字段' };
+
+    var fixed = _sanitizeTaskDatesForTransport_(contaminated);
+
+    var expectedDate = Utilities.formatDate(fakeDate, tz, 'yyyy-MM-dd');
+    var expectedTime = Utilities.formatDate(fakeTime, tz, 'HH:mm');
+
+    if (typeof fixed.due_date !== 'string' || fixed.due_date !== expectedDate) {
+      Logger.log('❌ due_date 没有被正确归一化: ' + fixed.due_date); pass = false;
+    }
+    if (typeof fixed.due_time !== 'string' || fixed.due_time !== expectedTime) {
+      Logger.log('❌ due_time 没有被正确归一化: ' + fixed.due_time); pass = false;
+    }
+    if (typeof fixed.due_datetime !== 'string') {
+      Logger.log('❌ due_datetime 没有被转成 string'); pass = false;
+    }
+    if (fixed.title !== '正常字符串字段') {
+      Logger.log('❌ 不应该被动到的字段被改动了'); pass = false;
+    }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}
+
+function testUIBridge_SanitizeDates_NoOpOnCleanStrings_() {
+  Logger.log('--- testUIBridge_SanitizeDates_NoOpOnCleanStrings_ 开始 ---');
+  var pass = true;
+
+  try {
+    var clean = { task_id: 'T2', due_date: '2026-09-01', due_time: '14:30', due_datetime: '2026-09-01T14:30:00' };
+    var fixed = _sanitizeTaskDatesForTransport_(clean);
+
+    if (fixed.due_date !== '2026-09-01') { Logger.log('❌ 干净的 due_date 不应该被改动'); pass = false; }
+    if (fixed.due_time !== '14:30') { Logger.log('❌ 干净的 due_time 不应该被改动'); pass = false; }
+    if (fixed.due_datetime !== '2026-09-01T14:30:00') { Logger.log('❌ 干净的 due_datetime 不应该被改动'); pass = false; }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}
+
+function testUIBridge_SanitizeDates_HandlesArrayAndNullish_() {
+  Logger.log('--- testUIBridge_SanitizeDates_HandlesArrayAndNullish_ 开始 ---');
+  var pass = true;
+
+  try {
+    var fakeDate = new Date(2026, 8, 1);
+    var arr = [
+      { task_id: 'A', due_date: fakeDate },
+      { task_id: 'B', due_date: '2026-09-02' }
+    ];
+    var fixedArr = _sanitizeTaskDatesForTransport_(arr);
+    if (!Array.isArray(fixedArr) || fixedArr.length !== 2) { Logger.log('❌ 数组结构没有保持'); pass = false; }
+    else {
+      if (typeof fixedArr[0].due_date !== 'string') { Logger.log('❌ 数组里第一项没有被归一化'); pass = false; }
+      if (fixedArr[1].due_date !== '2026-09-02') { Logger.log('❌ 数组里第二项（本来就干净）被意外改动'); pass = false; }
+    }
+
+    // 边界：null / undefined / 非对象输入不应该抛异常
+    if (_sanitizeTaskDatesForTransport_(null) !== null) { Logger.log('❌ null 输入应该原样返回 null'); pass = false; }
+    if (_sanitizeTaskDatesForTransport_(undefined) !== undefined) { Logger.log('❌ undefined 输入应该原样返回 undefined'); pass = false; }
+  } catch (e) {
+    Logger.log('❌ 抛出异常: ' + e.message); pass = false;
+  }
+
+  Logger.log(pass ? '✅ PASS' : '❌ FAIL');
+  return pass;
+}

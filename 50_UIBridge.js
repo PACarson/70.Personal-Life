@@ -123,6 +123,72 @@ function _wrapError_(e) {
 }
 
 /**
+ * 【2026-08-24 新增】修复 Carson 报告的真实 bug：Add Task 之后写入成功
+ * 但列表不刷新，浏览器 Console 报 "Cannot read properties of null
+ * (reading 'ok')"。
+ *
+ * 根因不是今天新引入的——是 00_Due_Date_Canonicalization_Audit.gs
+ * 已经审计过、状态仍是 AUDIT_PENDING_IMPLEMENTATION 的同一个存量问题
+ * （该文件「三」用真实环境诊断数据证实：due_date 创建时是 string，
+ * 经 Sheet 读回后变成了 JS Date 对象；「五、3.1」进一步指出
+ * _setPlainTextFormatForNewColumns_ 的 Plain-Text 保护范围止于调用
+ * 当时的 lastRow，不保证覆盖之后新增的行）——只是这是这个问题第一次
+ * 经由真实浏览器的 google.script.run 路径被触发：12_TaskQueryEngine.gs
+ * 的 _readAllRows_() 把 Range.getValues() 的原始值不做任何转换直接
+ * 赋值，一旦某个 due_date/due_time/due_datetime 单元格被 Sheets 自动
+ * 识别成日期/时间格式，读回来的就是原生 Date 对象，混进要发回浏览器的
+ * tasks/projects 数组，经 RPC 边界传输时可能让前端回调直接收到 null——
+ * 前端一读 result.ok 就是这次真实复现的崩溃。
+ *
+ * 这不是在实现 Track 1B——Track 1B（resolveIdentityDueValue() 的
+ * identity 归一化 + Sheet 存量数据迁移）范围更大、风险更高，仍然是
+ * AUDIT_PENDING_IMPLEMENTATION，仍然需要 Carson 单独批准；本函数完全
+ * 不碰 07_IdentityEngine.gs、不碰 12_TaskQueryEngine.gs/
+ * 14_ProjectQueryEngine.gs 本身，也不碰 Carson 真实 Sheet 里任何一个
+ * 单元格——范围严格限于 UIBridge 层，只是"发回浏览器之前，把已知会
+ * 被搞坏的这几个字段转回 canonical string"，是一个独立、更窄的浏览器
+ * 稳定性修复。采用该审计文件 Option B 已经设计好的同一种归一化写法：
+ * Utilities.formatDate + 脚本真实时区，不用 toISOString()——该审计
+ * 文件「三」的真实诊断数据已经证实 toISOString() 会引入时区偏移，把
+ * 本地日期错移一天（"2026-08-25" 读回变成
+ * "2026-08-24T16:00:00.000Z"）。
+ *
+ * @param {object|Array<object>} taskOrTasks  单个 task/project 对象，
+ *                                             或这样的对象数组
+ * @returns 同样的结构（原对象就地修正后返回，不是深拷贝）
+ */
+function _sanitizeTaskDatesForTransport_(taskOrTasks) {
+  var tz = Session.getScriptTimeZone();
+
+  function fixOne(t) {
+    if (!t || typeof t !== 'object') return t;
+    if (t.due_date instanceof Date) {
+      t.due_date = Utilities.formatDate(t.due_date, tz, 'yyyy-MM-dd');
+    }
+    if (t.due_time instanceof Date) {
+      t.due_time = Utilities.formatDate(t.due_time, tz, 'HH:mm');
+    }
+    if (t.due_datetime instanceof Date) {
+      t.due_datetime = Utilities.formatDate(t.due_datetime, tz, "yyyy-MM-dd'T'HH:mm:ss");
+    }
+    // 防御性兜底：其它字段理论上创建时就已经是 string（见
+    // 20_TaskEngine.js 里每一处 new Date() 都紧跟 .toISOString()），
+    // 但万一未来出现意外，也不让它原样漏到浏览器——转成同样的 datetime
+    // 格式，并记录下来，方便发现新的字段级问题，而不是静默掩盖。
+    for (var k in t) {
+      if (k === 'due_date' || k === 'due_time' || k === 'due_datetime') continue;
+      if (t[k] instanceof Date) {
+        Logger.log('[UIBridge] _sanitizeTaskDatesForTransport_ 发现未预期的 Date 字段: ' + k);
+        t[k] = Utilities.formatDate(t[k], tz, "yyyy-MM-dd'T'HH:mm:ss");
+      }
+    }
+    return t;
+  }
+
+  return Array.isArray(taskOrTasks) ? taskOrTasks.map(fixOne) : fixOne(taskOrTasks);
+}
+
+/**
  * Web App 入口。部署方式：Deploy → New deployment → Web app，
  * Execute as: Me，Who has access: Only myself（见 UI_Architecture_
  * Audit_Phase0.md「五」身份建议——单用户场景下不需要另外写登录逻辑，
@@ -246,7 +312,7 @@ function ui_getConvertibleTasks(filters, _testOverrides) {
     var tasks = TaskQueryEngine.getTasks(chatId, queryFilters).filter(function (t) {
       return NONTERMINAL.indexOf(String(t.status || '').toUpperCase()) !== -1;
     });
-    return { ok: true, tasks: tasks };
+    return { ok: true, tasks: _sanitizeTaskDatesForTransport_(tasks) };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -270,7 +336,7 @@ function ui_getActiveProjects(filters, _testOverrides) {
     var projects = ProjectQueryEngine.getProjects(chatId, queryFilters).filter(function (p) {
       return NONTERMINAL.indexOf(String(p.status || '').toUpperCase()) !== -1;
     });
-    return { ok: true, projects: projects };
+    return { ok: true, projects: _sanitizeTaskDatesForTransport_(projects) };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -473,7 +539,7 @@ function ui_updateTask(taskId, changes, _testOverrides) {
       // 的 code，不是笼统报错。
       return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
     }
-    return { ok: true, task: updated };
+    return { ok: true, task: _sanitizeTaskDatesForTransport_(updated) };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -505,7 +571,7 @@ function ui_updateProject(projectId, changes, _testOverrides) {
     if (!updated) {
       return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
     }
-    return { ok: true, project: updated };
+    return { ok: true, project: _sanitizeTaskDatesForTransport_(updated) };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -739,7 +805,7 @@ function ui_createTask(title, meta, _testOverrides) {
       decision_owner: decisionOwner
     }, chatId);
 
-    return { ok: true, task: task };
+    return { ok: true, task: _sanitizeTaskDatesForTransport_(task) };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -776,7 +842,7 @@ function ui_createProject(title, meta, _testOverrides) {
       decision_owner: decisionOwner
     }, chatId);
 
-    return { ok: true, project: project };
+    return { ok: true, project: _sanitizeTaskDatesForTransport_(project) };
   } catch (e) {
     return _wrapError_(e);
   }

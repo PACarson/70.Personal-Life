@@ -795,6 +795,7 @@
 
       google.script.run
         .withSuccessHandler(function (result) {
+          if (!result) { tasksStatus.textContent = 'Error loading tasks (empty response).'; tasksStatus.className = 'status-line err'; return; }
           if (!result.ok) { tasksStatus.textContent = result.message; tasksStatus.className = 'status-line err'; return; }
           tasksStatus.textContent = '';
           rawTasksCache = result.tasks || [];
@@ -991,6 +992,7 @@
 
       google.script.run
         .withSuccessHandler(function (result) {
+          if (!result) { projectsStatus.textContent = 'Error loading projects (empty response).'; projectsStatus.className = 'status-line err'; return; }
           if (!result.ok) { projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err'; return; }
           projectsStatus.textContent = '';
           rawProjectsCache = result.projects || [];
@@ -1146,6 +1148,7 @@
       google.script.run
         .withSuccessHandler(function (result) {
           saveBtn.disabled = false;
+          if (!result) { taskCreateStatus.textContent = 'Error creating task (empty response).'; taskCreateStatus.className = 'status-line err'; return; }
           if (!result.ok) { taskCreateStatus.textContent = result.message; taskCreateStatus.className = 'status-line err'; return; }
           titleInput.value = '';
           document.getElementById('taskCreateNotes').value = '';
@@ -1198,6 +1201,7 @@
       google.script.run
         .withSuccessHandler(function (result) {
           saveBtn.disabled = false;
+          if (!result) { projectCreateStatus.textContent = 'Error creating project (empty response).'; projectCreateStatus.className = 'status-line err'; return; }
           if (!result.ok) { projectCreateStatus.textContent = result.message; projectCreateStatus.className = 'status-line err'; return; }
           titleInput.value = '';
           document.getElementById('projectCreateDescription').value = '';
