@@ -160,15 +160,25 @@ function _wrapError_(e) {
 function _sanitizeTaskDatesForTransport_(taskOrTasks) {
   var tz = Session.getScriptTimeZone();
 
+  // 2026-08-25 补充：主判断仍然是 instanceof Date——本项目所有 Sheet 读取
+  // 都在同一个 Apps Script 执行上下文里完成，没有真正的跨 Realm 边界，
+  // 没有找到证据支持"instanceof Date 在这里会漏判"这个说法。这里额外加
+  // 一层 duck-typing（有没有 getTime 这个函数）纯粹是不额外增加风险的
+  // 兜底加固，不是在证实那个说法——即使 instanceof 判断在某个未预见的
+  // 场景里失手，这层也能接住，成本几乎为零。
+  function looksLikeDate_(v) {
+    return v instanceof Date || (v && typeof v === 'object' && typeof v.getTime === 'function' && typeof v.getMonth === 'function');
+  }
+
   function fixOne(t) {
     if (!t || typeof t !== 'object') return t;
-    if (t.due_date instanceof Date) {
+    if (looksLikeDate_(t.due_date)) {
       t.due_date = Utilities.formatDate(t.due_date, tz, 'yyyy-MM-dd');
     }
-    if (t.due_time instanceof Date) {
+    if (looksLikeDate_(t.due_time)) {
       t.due_time = Utilities.formatDate(t.due_time, tz, 'HH:mm');
     }
-    if (t.due_datetime instanceof Date) {
+    if (looksLikeDate_(t.due_datetime)) {
       t.due_datetime = Utilities.formatDate(t.due_datetime, tz, "yyyy-MM-dd'T'HH:mm:ss");
     }
     // 防御性兜底：其它字段理论上创建时就已经是 string（见
@@ -177,7 +187,7 @@ function _sanitizeTaskDatesForTransport_(taskOrTasks) {
     // 格式，并记录下来，方便发现新的字段级问题，而不是静默掩盖。
     for (var k in t) {
       if (k === 'due_date' || k === 'due_time' || k === 'due_datetime') continue;
-      if (t[k] instanceof Date) {
+      if (looksLikeDate_(t[k])) {
         Logger.log('[UIBridge] _sanitizeTaskDatesForTransport_ 发现未预期的 Date 字段: ' + k);
         t[k] = Utilities.formatDate(t[k], tz, "yyyy-MM-dd'T'HH:mm:ss");
       }
@@ -272,7 +282,7 @@ function ui_convertNoteToTask(noteId, _testOverrides) {
     if (result.not_found) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这条 Note（可能已经被删除或转换过）' };
     }
-    return { ok: true, task: result.task, already_converted: !!result.already_converted };
+    return { ok: true, task: _sanitizeTaskDatesForTransport_(result.task), already_converted: !!result.already_converted };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -363,7 +373,7 @@ function ui_convertTaskToProject(taskId, _testOverrides) {
     if (result.not_found) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除或转换过）' };
     }
-    return { ok: true, project: result.project, already_converted: !!result.already_converted };
+    return { ok: true, project: _sanitizeTaskDatesForTransport_(result.project), already_converted: !!result.already_converted };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -405,7 +415,7 @@ function ui_convertProjectToTask(projectId, _testOverrides) {
     if (result.blocked) {
       return { ok: false, code: 'BLOCKED', message: result.reason };
     }
-    return { ok: true, task: result.task, already_converted: !!result.already_converted };
+    return { ok: true, task: _sanitizeTaskDatesForTransport_(result.task), already_converted: !!result.already_converted };
   } catch (e) {
     return _wrapError_(e);
   }
@@ -480,7 +490,12 @@ function ui_instantiateTemplate(templateId, _testOverrides) {
     if (result.not_found) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Template（可能已经被删除）' };
     }
-    return { ok: true, project: result.project, workflow: result.workflow, tasks: result.tasks };
+    return {
+      ok: true,
+      project: _sanitizeTaskDatesForTransport_(result.project),
+      workflow: _sanitizeTaskDatesForTransport_(result.workflow),
+      tasks: _sanitizeTaskDatesForTransport_(result.tasks)
+    };
   } catch (e) {
     return _wrapError_(e);
   }

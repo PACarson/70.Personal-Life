@@ -533,6 +533,7 @@
     function loadNotes() {
       google.script.run
         .withSuccessHandler(function (result) {
+          if (!result) { notesStatus.textContent = 'Error loading notes (empty response).'; notesStatus.className = 'status-line err'; return; }
           if (!result.ok) { notesStatus.textContent = 'Failed: ' + result.message; notesStatus.className = 'status-line err'; return; }
           renderNotes(result.notes);
         })
@@ -550,6 +551,7 @@
       google.script.run
         .withSuccessHandler(function (result) {
           addBtn.disabled = false;
+          if (!result) { notesStatus.textContent = 'Error saving note (empty response).'; notesStatus.className = 'status-line err'; return; }
           if (!result.ok) { notesStatus.textContent = result.message; notesStatus.className = 'status-line err'; return; }
           inputEl.value = '';
           notesStatus.textContent = '';
@@ -564,9 +566,10 @@
       btnEl.textContent = 'Converting\u2026';
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) {
+          if (!result || !result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Convert to Task';
-            notesStatus.textContent = result.message; notesStatus.className = 'status-line err';
+            notesStatus.textContent = result ? result.message : 'Error converting note (empty response).';
+            notesStatus.className = 'status-line err';
             return;
           }
           removeCard(cardEl, noteListEl, notesEmptyEl);
@@ -606,7 +609,7 @@
         copy.sort(function(a, b) {
           if (!a.due_date) return 1;
           if (!b.due_date) return -1;
-          return a.due_date.localeCompare(b.due_date);
+          return String(a.due_date).localeCompare(String(b.due_date));
         });
       } else if (criteria === 'title') {
         copy.sort(function(a, b) { return (a.title || '').localeCompare(b.title || ''); });
@@ -690,9 +693,10 @@
           btn.disabled = true;
           google.script.run
             .withSuccessHandler(function(res){
-              if (res.ok) { removeCard(card, taskListEl, tasksEmptyEl); return; }
+              if (res && res.ok) { removeCard(card, taskListEl, tasksEmptyEl); return; }
               btn.disabled = false;
-              tasksStatus.textContent = res.message; tasksStatus.className = 'status-line err';
+              tasksStatus.textContent = res ? res.message : 'Error completing task (empty response).';
+              tasksStatus.className = 'status-line err';
             })
             .withFailureHandler(function(){
               btn.disabled = false;
@@ -712,9 +716,10 @@
             cancelBtn.disabled = true;
             google.script.run
               .withSuccessHandler(function(res){
-                if (res.ok) { removeCard(card, taskListEl, tasksEmptyEl); return; }
+                if (res && res.ok) { removeCard(card, taskListEl, tasksEmptyEl); return; }
                 cancelBtn.disabled = false;
-                tasksStatus.textContent = res.message; tasksStatus.className = 'status-line err';
+                tasksStatus.textContent = res ? res.message : 'Error cancelling task (empty response).';
+                tasksStatus.className = 'status-line err';
               })
               .withFailureHandler(function(){
                 cancelBtn.disabled = false;
@@ -737,18 +742,31 @@
             .withSuccessHandler(function(res){
               btn.disabled = false;
               btn.textContent = 'Ask AI Priority';
-              if (res.ok) {
+              if (res && res.ok) {
                 aiBox.querySelector('.sugg-val').textContent = res.priority;
                 aiBox.querySelector('.reason').textContent = res.reasoning || '(No rationale)';
                 aiBox.classList.add('visible');
-                aiBox.querySelector('.accept-ai-btn').onclick = function() {
-                  google.script.run.withSuccessHandler(loadTasks).ui_updateTask(task.task_id, { priority: res.priority, priority_ai_recommended: res.priority });
+                aiBox.querySelector('.accept-ai-btn').onclick = function(acceptEv) {
+                  var acceptBtn = acceptEv.currentTarget;
+                  acceptBtn.disabled = true;
+                  google.script.run
+                    .withSuccessHandler(function (acceptRes) {
+                      if (acceptRes && acceptRes.ok) { loadTasks(); return; }
+                      acceptBtn.disabled = false;
+                      tasksStatus.textContent = acceptRes ? acceptRes.message : 'Error applying suggestion (empty response).';
+                      tasksStatus.className = 'status-line err';
+                    })
+                    .withFailureHandler(function () {
+                      acceptBtn.disabled = false;
+                      tasksStatus.textContent = 'Error applying suggestion.'; tasksStatus.className = 'status-line err';
+                    })
+                    .ui_updateTask(task.task_id, { priority: res.priority, priority_ai_recommended: res.priority });
                 };
                 aiBox.querySelector('.dismiss-ai-btn').onclick = function() {
                   aiBox.classList.remove('visible');
                 };
               } else {
-                tasksStatus.textContent = 'AI 建议失败: ' + res.message;
+                tasksStatus.textContent = 'AI 建议失败: ' + (res ? res.message : '(empty response)');
                 tasksStatus.className = 'status-line err';
               }
             })
@@ -773,10 +791,20 @@
           var newCat = editForm.querySelector('.edit-category-select').value;
           var newDue = editForm.querySelector('.edit-duedate-input').value;
           if (!newTitle) return;
-          ev.currentTarget.disabled = true;
-          google.script.run.withSuccessHandler(function(res){
-            if (res.ok) loadTasks();
-          }).ui_updateTask(task.task_id, { title: newTitle, category: newCat, due_date: newDue });
+          var saveBtn = ev.currentTarget;
+          saveBtn.disabled = true;
+          google.script.run
+            .withSuccessHandler(function(res){
+              if (res && res.ok) { loadTasks(); return; }
+              saveBtn.disabled = false;
+              tasksStatus.textContent = res ? res.message : 'Error saving task (empty response).';
+              tasksStatus.className = 'status-line err';
+            })
+            .withFailureHandler(function(){
+              saveBtn.disabled = false;
+              tasksStatus.textContent = 'Error saving task.'; tasksStatus.className = 'status-line err';
+            })
+            .ui_updateTask(task.task_id, { title: newTitle, category: newCat, due_date: newDue });
         });
 
         // Convert to Project
@@ -814,9 +842,10 @@
       btnEl.textContent = 'Converting\u2026';
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) {
+          if (!result || !result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Convert to Project';
-            tasksStatus.textContent = result.message; tasksStatus.className = 'status-line err';
+            tasksStatus.textContent = result ? result.message : 'Error converting task (empty response).';
+            tasksStatus.className = 'status-line err';
             return;
           }
           removeCard(cardEl, taskListEl, tasksEmptyEl);
@@ -918,10 +947,20 @@
           var newTitle = editForm.querySelector('.edit-title-input').value.trim();
           var newDesc = editForm.querySelector('.edit-desc-input').value.trim();
           if (!newTitle) return;
-          ev.currentTarget.disabled = true;
-          google.script.run.withSuccessHandler(function(res){
-            if (res.ok) loadProjects();
-          }).ui_updateProject(project.project_id, { title: newTitle, description: newDesc });
+          var saveBtn = ev.currentTarget;
+          saveBtn.disabled = true;
+          google.script.run
+            .withSuccessHandler(function(res){
+              if (res && res.ok) { loadProjects(); return; }
+              saveBtn.disabled = false;
+              projectsStatus.textContent = res ? res.message : 'Error saving project (empty response).';
+              projectsStatus.className = 'status-line err';
+            })
+            .withFailureHandler(function(){
+              saveBtn.disabled = false;
+              projectsStatus.textContent = 'Error saving project.'; projectsStatus.className = 'status-line err';
+            })
+            .ui_updateProject(project.project_id, { title: newTitle, description: newDesc });
         });
 
         // Complete
@@ -930,9 +969,10 @@
           btn.disabled = true;
           google.script.run
             .withSuccessHandler(function(res){
-              if (res.ok) { removeCard(card, projectListEl, projectsEmptyEl); return; }
+              if (res && res.ok) { removeCard(card, projectListEl, projectsEmptyEl); return; }
               btn.disabled = false;
-              projectsStatus.textContent = res.message; projectsStatus.className = 'status-line err';
+              projectsStatus.textContent = res ? res.message : 'Error completing project (empty response).';
+              projectsStatus.className = 'status-line err';
             })
             .withFailureHandler(function(){
               btn.disabled = false;
@@ -952,9 +992,10 @@
             cancelBtn.disabled = true;
             google.script.run
               .withSuccessHandler(function(res){
-                if (res.ok) { removeCard(card, projectListEl, projectsEmptyEl); return; }
+                if (res && res.ok) { removeCard(card, projectListEl, projectsEmptyEl); return; }
                 cancelBtn.disabled = false;
-                projectsStatus.textContent = res.message; projectsStatus.className = 'status-line err';
+                projectsStatus.textContent = res ? res.message : 'Error cancelling project (empty response).';
+                projectsStatus.className = 'status-line err';
               })
               .withFailureHandler(function(){
                 cancelBtn.disabled = false;
@@ -1011,14 +1052,15 @@
       btnEl.textContent = 'Converting\u2026';
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) {
+          if (!result || !result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Convert to Task';
-            if (result.code === 'BLOCKED') {
+            if (result && result.code === 'BLOCKED') {
               var reasonEl = cardEl.querySelector('.item-blocked-reason');
               reasonEl.textContent = result.message;
               reasonEl.style.display = 'block';
             } else {
-              projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err';
+              projectsStatus.textContent = result ? result.message : 'Error converting project (empty response).';
+              projectsStatus.className = 'status-line err';
             }
             return;
           }
@@ -1043,8 +1085,9 @@
       google.script.run
         .withSuccessHandler(function (result) {
           btnEl.disabled = false; btnEl.textContent = 'Save Template';
-          if (!result.ok) {
-            projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err';
+          if (!result || !result.ok) {
+            projectsStatus.textContent = result ? result.message : 'Error capturing template (empty response).';
+            projectsStatus.className = 'status-line err';
             return;
           }
           cardEl.querySelector('.capture-form').classList.remove('visible');
@@ -1070,9 +1113,10 @@
 
       google.script.run
         .withSuccessHandler(function (result) {
-          if (!result.ok) {
+          if (!result || !result.ok) {
             btnEl.disabled = false; btnEl.textContent = 'Instantiate Now';
-            projectsStatus.textContent = result.message; projectsStatus.className = 'status-line err';
+            projectsStatus.textContent = result ? result.message : 'Error instantiating (empty response).';
+            projectsStatus.className = 'status-line err';
             return;
           }
           resultEl.innerHTML = '\u2713 Instantiated \u201c' + escapeHtml(result.project.title) + '\u201d (' +
