@@ -758,3 +758,35 @@
  *     Drag Ordering ADR（UI-I6）→ 独立推进中，见 00_Drag_Ordering_
  *     ADR.gs，UI-I6 本身保持 BLOCKED_PENDING_ARCHITECTURE_DECISION
  */
+
+// 十八、Governance Adoption —— UEF v1.12 §0.6 persistence/checkpoint
+//       规则正式 local adoption（2026-08-24，见 ADR-2026-07-24-024）
+
+/**
+ * 决定见 00_ADR.gs ADR-2026-07-24-024，论证不在本文件重复。
+ *
+ * 1. Governance Rule Adopted：✅
+ *    ADR-2026-07-24-024 已 Accepted（2026-08-24）。
+ *
+ * 2. Constitution Synchronization：✅
+ *    00_Project_Constitution.gs 零之七(四) 已引用本条 ADR。
+ *
+ * 3. Project State Adoption Record：本章节本身。
+ *
+ * 4. Implementation Checkpoint System Active：⏳ PENDING
+ *    "治理规则已採纳"不等于"日常开发已经实际执行该规则"。只有未来
+ *    实际观察到 Modify → Validate → Persist/Export → Independent
+ *    Verify → Checkpoint 这套开发行为后，才能把这一项改成 Active。
+ *
+ * 5. Scope / Boundary：
+ *    本记录不代表 Universal-Recovery-Manifest.md、
+ *    OS-Directory-for-Personal-AI-Core.md 或 Universal UEF 已被修改。
+ *    Universal 层同步是后续独立的治理步骤，不因这次 local adoption
+ *    自动发生。
+ *
+ *    本决定最初在另一轮工作中被暂定编号为「十六」；核对本仓库真实
+ *    状态后确认「十六」「十七」已经是 Track 1B / Track 1A-1B 收尾
+ *    那两段真实记录（2026-08-22／2026-08-23），因此本记录正式编号
+ *    为「十八」，内容本身未变。
+ */
+

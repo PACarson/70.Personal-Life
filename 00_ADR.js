@@ -1087,3 +1087,99 @@
  *   00_Project_State.gs「十六」。UI-I1~I5 不因为本 ADR 而阻塞，
  *   Drag Ordering ADR（UI-I6）也不因为本 ADR 而启动，各自独立推进。
  */
+
+// ============================================================
+// ADR-2026-07-24-024：正式采纳 UEF v1.12 §0.6 的持久化与
+//                      File→Engine→Sprint Checkpoint 治理纪律
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-07-24-024
+ * Status          : Accepted
+ * Decision Date   : 2026-08-24
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 无——本条是治理决定，不改动任何应用代码/Engine，
+ *                   见 Consequences「Boundary」
+ * Related ADR     : ADR-2026-07-24-019（Sprint→Gate→Sprint 是品质门槛，
+ *                   本条是持久化纪律，两者不同轴、互不取代，见 Context）；
+ *                   ADR-2026-07-24-021（本条直接回应的那次事故）
+ *
+ * Context
+ *   2026-08-14，Sprint 4（AI）开发中途，执行环境用量耗尽，容器文件系统
+ *   被重置——46_AIConnector.gs/22_PriorityEngine.gs（AI 增量部分）/
+ *   47_AIPlanningEngine.gs 三个文件靠会话记录救回，40_ReviewEngine.gs
+ *   的 Sprint 4 修改和 00_Project_State.gs 的 Sprint 4 章节确认永久
+ *   丢失（见 ADR-2026-07-24-021、Sprint4_Recovery_Audit.md）。当时的
+ *   回应是一次 Recovery + Architecture Audit——核实救回文件、重建丢失
+ *   部分——是补救，不是预防：本项目当时没有、现在（本 ADR 之前）也
+ *   仍然没有一条"文件完成后该立刻做什么"的规则，"checkpoint"这个词
+ *   在本项目全部治理文件里迄今零次出现。
+ *
+ *   Personal AI Core 生态层面的 UEF v1.12 §0.6 items 3-4 已经定义了
+ *   这个问题的通用解法（per-file 立即 persist/export + 独立核验 +
+ *   File→Engine→Sprint checkpoint 层级，高层不取代低层，容器/session
+ *   本身不是权威存储）——这条规则本身也是 UEF 自己两次真实事故的直接
+ *   产物。Personal Life OS 通过 Constitution 零之七已确认继承这层
+ *   治理关系；这次 OS-N audit 确认 §0.6 items 1/2/5 本项目已有实质
+ *   对应，唯独 items 3-4 完全空缺，且本项目自己就是这个空缺的真实
+ *   代价示范。UEF §0.6 本身仍然是这条规则的 Universal definition/
+ *   source，本 ADR 只负责 local adoption、scope、boundary，不重新
+ *   定义、不复制 UEF 原文。
+ *
+ * Decision
+ *   1. 正式采纳 UEF v1.12 §0.6 items 3-4：对实质完成或修改的文件，
+ *      Modify → Validate → 立即 Persist/Export → 独立核验持久化副本
+ *      可读 → 记录 checkpoint → 才继续；当前工作容器/session 本身
+ *      不是权威存储，"做完好几个文件最后一次性导出"在任何层级都不
+ *      允许。
+ *   2. 采纳 FILE → ENGINE → SPRINT 三级 checkpoint：更高层级不取代、
+ *      不省略更低层级——一个 Engine 涉及的每个文件先各自完成 FILE
+ *      checkpoint，全部完成才能记 ENGINE checkpoint；相关 Engine/
+ *      文件都完成才能记 SPRINT checkpoint。
+ *   3. checkpoint 状态记录在 00_Project_State.gs（UEF §0.2 定义的
+ *      位置）。**00_Project_State.gs 本身也在 FILE checkpoint 的
+ *      适用范围内**——任何 checkpoint 状态写入 Project State 后，
+ *      必须先对 Project State 自身完成 Modify → Validate →
+ *      Persist/Export → Independent Verify，该笔 checkpoint 才视为
+ *      有效；不允许出现"checkpoint 已经写进 Project State，但
+ *      Project State 自己还没有被持久化核验"这种假完成状态。本 ADR
+ *      不在本仓库新建 Universal-Recovery-Manifest.md 那一层——那是
+ *      Personal AI Core 生态层级的产物，属于 Universal Registry
+ *      同步阶段，不在本 ADR 授权范围内。
+ *   4. 明确本条不影响、不取代：ADR-019 的 Sprint Acceptance Gate
+ *      （品质验收，回答"代码对不对"；本条回答"文件有没有安全落盘"，
+ *      两者独立）；Project State 里既有的"Contract Verified"用语
+ *      （契约核实，跟本条"独立核验持久化副本可读"是不同检查，只是
+ *      巧合都用了"verified"，读者需留意上下文）。
+ *   5. 中断/恢复情形（容器重置、用量耗尽、session 中断、工具失败）：
+ *      STOP，不从记忆重建未经核验的工作，只从持久化文件 + 已核验的
+ *      checkpoint 记录恢复。
+ *
+ * Consequences
+ *   正面：已完成工作在中断后可恢复；容器重置不再自动摧毁最新完成的
+ *   文件；治理层面"规则已采纳"和实作层面"日常开发确实照着做"从此
+ *   分开陈述、分开核验，不混为一谈。
+ *
+ *   需要接受的代价：更频繁的 persist/export；每次独立核验持久化副本，
+ *   增加操作开销；工作必须拆成可逐一 checkpoint 的小单位；Project
+ *   State 自己每次被更新（含记录 checkpoint 这个动作本身）也要重新
+ *   走一次持久化+核验，不能假设"写进去了就算数"。
+ *
+ *   Boundary：不改架构、不改业务逻辑、不改 Sprint Gate 语义、不取代
+ *   Acceptance Gate、不取代 Contract Verification、不会让"文件写了"
+ *   自动等于"验证过"。这是持久化/恢复治理规则，不是别的。
+ *
+ * Notes
+ *   Implementation Checkpoint System Active 在本 ADR 生效后维持
+ *   ⏳ Pending。ADR Accepted、Constitution 已同步引用、Project State
+ *   的 Adoption Record——这三者都不等于 Implementation Checkpoint
+ *   System 已经实际运行；只有未来实际观察到日常开发确实遵守这条
+ *   纪律，才能把这一项改成 Active。完整事故细节见 ADR-2026-07-24-021
+ *   与 Sprint4_Recovery_Audit.md，本条不重复。
+ *
+ *   本决定最初在另一轮工作中被暂定编号为"ADR-023"；核对本仓库真实
+ *   状态后确认 023 已经是 due_date Canonicalization 那条真实决定
+ *   （2026-08-22，Accepted，见上），因此本决定正式编号为 024，
+ *   内容本身未变。
+ */

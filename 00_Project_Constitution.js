@@ -971,6 +971,11 @@
  *     机制，见 ADR-2026-07-24-019——细节不在本文件重复，ADR 本身是
  *     这条规则的权威。
  *
+ *     持久化/恢复治理——per-file persist/export + File→Engine→Sprint
+ *     checkpoint hierarchy，正式 local adoption UEF v1.12 §0.6 items
+ *     3-4，决定见 ADR-2026-07-24-024（2026-08-24）——权威细节留在该
+ *     ADR，本文件不重复定义，也不复制 UEF §0.6 原文。
+ *
  * (五) Constitution Reconciliation Matrix
  *
  *   Existing Provision                    | Status
