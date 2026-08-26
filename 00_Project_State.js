@@ -790,3 +790,286 @@
  *    为「十八」，内容本身未变。
  */
 
+
+// ============================================================
+// 十九、Track 2 —— UI Create Capability 落地（2026-08-24）
+// ============================================================
+
+/**
+ * 背景：Carson 在本窗口开局明确要求 Add Task / Add Project 必须是一等
+ * UI 操作，不能藏在 Edit 里面，写路径必须走既有 UI → UIBridge → 既有
+ * Domain Command/Engine → EventBus → Projection，复用既有 createTask/
+ * createProject 契约，不允许新开 UI 专属持久化路径。
+ *
+ * 实现内容：
+ *   1. 50_UIBridge.gs 新增 ui_createTask(title, meta, _testOverrides)、
+ *      ui_createProject(title, meta, _testOverrides)——内部分别只调用
+ *      既有 TaskEngine.createTask() / ProjectEngine.createProject()，
+ *      不直接碰 Sheet/Events，跟本文件其它 ui_* 函数同一种角色。
+ *   2. ui_index.html 新增 Add Task / Add Project 两个独立 create-panel
+ *      （"+ Add Task" / "+ Add Project" 按钮 + 折叠表单），位于各自面板
+ *      工具栏之上，不依附于 Edit。
+ *   3. 51_Tests_UIBridge_Interactions.gs 新增 4 条测试 + 独立入口
+ *      runUICreateInteractionsGate()——刻意跟既有 14 项的
+ *      runUIBridgeInteractionsGate() 分开，避免新增覆盖污染 Carson
+ *      要求"先干净重跑一次"的既有回归基线。
+ *
+ * 字段范围决定（Add Task）：title / priority / category / due_date /
+ *   due_time / notes / project_id（下拉，取自既有 rawProjectsCache）/
+ *   workflow_id（纯文本输入——本项目目前没有 Workflow 列表可选，
+ *   Workflows 面板还没做，这个不对称是事实的直接反映，不是疏漏）/
+ *   tags / recurring。source / provenance metadata（source_module /
+ *   decision_owner）由 ui_createTask 内部自动写入，不作为表单字段暴露
+ *   ——沿用 ui_createNote 的既有先例。
+ *
+ *   一处需要 Carson 确认的字段解释：Task 表本身有 notes 和 description
+ *   两个独立字段，语义未见文档区分；Carson 原话把它们写成一行
+ *   "notes / description"。本次实现把表单这一个字段只映射到 notes，
+ *   description 作为独立字段未被本次 Add Task 覆盖——这是一个解释选择，
+ *   不是确认过的决定，如果 Carson 的本意不同，需要另行调整。
+ *
+ * 字段范围决定（Add Project）：title / description / parent_project_id
+ *   （下拉）/ execution_mode（SEQUENTIAL/PARALLEL/BRANCH/未设置）。
+ *
+ * 验证状态（请勿混淆以下三层）：
+ *   - 代码语法：✅ VERIFIED（node --check 通过，本文件写入时已重新确认）
+ *   - 服务端契约（runUICreateInteractionsGate()）：✅ VERIFIED LIVE
+ *     ——2026-08-25 Carson 贴回真实 Logger 输出，4/4 全部通过
+ *   - 真实浏览器端到端流程（创建 Task/Project 后列表正确刷新）：
+ *     ⚠️ 尚未确认成功。见「二十一」「二十二」——第一次真实浏览器使用
+ *     Add Task 时曾经复现真实 bug（写入成功但列表不刷新，控制台报错），
+ *     经两轮修复后，Carson 尚未回报最新一轮修复是否已经解决。
+ *     在收到 Carson 明确的"重新测试成功"确认之前，不应该把 Add Task
+ *     当作端到端已验证。
+ */
+
+// ============================================================
+// 二十、UI-I1~I5 Interactions Gate —— 13/14 → 14/14 重跑确认（2026-08-25）
+// ============================================================
+
+/**
+ * 「十五」记录的 13/14 失败原因（AI mock 误用 'CRITICAL'，
+ * suggestPriorityWithAI_ 的真实校验不允许这个值）已经在代码层面修复
+ * （mock 改成 'HIGH'）。Carson 明确要求：在把 UI-I1~I5 移入最终验收之前，
+ * 必须先干净重跑一次这个 Gate，不接受"代码已经改了"就当作已经验证。
+ *
+ * 2026-08-25，Carson 贴回真实 Logger 输出：
+ *   runUIBridgeInteractionsGate() —— 14/14 全部通过（真实环境，非本次
+ *   对话内推测）。
+ *
+ * 状态：UI-I1~I5（Sort/Filter/Edit Task/Edit Project/Priority/Done/
+ * Cancel）服务端契约 ✅ VERIFIED LIVE。真实浏览器手动验证（Sort 的四个
+ * 排序选项、Filter、Edit 表单实际渲染等）本节不涉及，仍然只能人工点——
+ * 见 Carson 原话"Do not claim browser verification based solely on
+ * automated tests"，本项目未见 Carson 回报这一步的结果。
+ */
+
+// ============================================================
+// 二十一、Due-Date Canonicalization —— 生产环境真实复现 +
+//        UIBridge 传输层修复（2026-08-25）
+// ============================================================
+
+/**
+ * 【重要边界，先声明】：Track 1A / Track 1B 在「十七」已经正式 CLOSED，
+ * 本节完全不重新打开那两条线，也不实现 Track 1B 自己的方案（
+ * resolveIdentityDueValue() 归一化 + Sheet 存量数据迁移，那部分范围更大、
+ * 风险更高，仍然是 AUDIT_PENDING_IMPLEMENTATION，仍然需要 Carson 单独
+ * 批准，本节完全不碰 07_IdentityEngine.gs / 12_TaskQueryEngine.gs /
+ * 14_ProjectQueryEngine.gs 本身，也不碰任何真实 Sheet 数据）。本节记录
+ * 的是一个范围窄得多、独立的 UIBridge 传输层修复。
+ *
+ * 现象：2026-08-25，Carson 通过真实浏览器使用新上线的 Add Task 功能后，
+ * 任务写入成功（确认写入链路本身没问题），但 Tasks 列表未刷新，浏览器
+ * 控制台报 "Cannot read properties of null (reading 'ok')"。
+ *
+ * 根因（不是新问题，是 00_Due_Date_Canonicalization_Audit.gs 早就审计
+ * 过、状态一直是 AUDIT_PENDING_IMPLEMENTATION 的同一个存量问题，这是
+ * 它第一次经由真实浏览器路径被触发）：
+ *   1. 12_TaskQueryEngine.gs 的 _readAllRows_() 把 Range.getValues() 的
+ *      原始返回值不做任何类型转换直接赋值——如果 Sheets 把某个
+ *      due_date/due_time/due_datetime 单元格自动识别成了日期/时间格式，
+ *      读回来的就是原生 JS Date 对象。
+ *   2. _setPlainTextFormatForNewColumns_ 的 Plain-Text 保护范围止于
+ *      调用当时的 lastRow，不保证覆盖之后新增的行——新建的 Add Task
+ *      行正是最可能漏保护的那类行。
+ *   3. 经 web search 独立核实（非本仓库内部推断）：Google 官方文档
+ *      明确规定 google.script.run 禁止传输原生 Date 对象（包括嵌套在
+ *      对象/数组内部），一旦命中，不抛错，直接让前端 successHandler
+ *      收到 null——这是真实、文档化的平台行为，不是猜测。
+ *
+ * 修复：50_UIBridge.gs 新增 _sanitizeTaskDatesForTransport_()
+ * （紧邻既有 _wrapError_ 放置），把 due_date/due_time/due_datetime 上
+ * 任何 Date 实例（以及防御性兜底扫描到的其它未预期 Date 字段）转回
+ * canonical string（Utilities.formatDate + 脚本真实时区——不用
+ * toISOString()，该审计文件已经证实 toISOString() 会因时区换算把日期
+ * 错移一天）。应用范围（截至本次 checkpoint，见「二十二」的完整清单）：
+ * 12 处返回点，覆盖本文件所有会把 Task/Project 数据回传给浏览器的
+ * ui_* 函数。
+ *
+ * 验证状态：
+ *   - 代码语法：✅ VERIFIED（node --check 通过）
+ *   - 3 条针对 _sanitizeTaskDatesForTransport_ 本身的纯函数单元测试：
+ *     已写入 51_Tests_UIBridge_Interactions.gs，尚未见 Carson 贴回
+ *     真实运行结果——⚠️ 未经 Carson 独立核验
+ *   - 真实浏览器端到端：⚠️ 未确认解决，见「二十二」——第一次修复
+ *     部署后，Carson 仍然复现了空响应（只是不再是未捕获异常，
+ *     而是本次新加的 null-guard 正确显示的"empty response"提示）。
+ */
+
+// ============================================================
+// 二十二、UIBridge / UI 全面防御性加固 —— 第二轮（2026-08-25）
+// ============================================================
+
+/**
+ * 触发原因：第一轮修复（「二十一」）部署后，Carson real-browser 重新
+ * 测试 Add Task，仍然收到空响应提示，而不是列表正常刷新。Carson 贴回
+ * 第二份第三方诊断报告，声称 (a) google.script.run 对 Date 对象有
+ * "硬性封锁"，(b) 存在"跨执行域（Realm）的 instanceof Date 误判"
+ * 导致部分字段漏检。
+ *
+ * 核实结果（没有直接采信，逐条独立核查）：
+ *   (a) 通过 web search 核实为真——Google 官方文档与开发者社区讨论均
+ *       确认 Date 是 google.script.run 明确禁止的参数/返回值类型，
+ *       命中时静默返回 null、不报错。这条判断是对的。
+ *   (b) 未找到任何证据支持"跨 Realm instanceof 误判"这个机制——本项目
+ *       所有 Sheet 读取都在同一个 Apps Script 执行上下文里完成，没有
+ *       真正的跨 Realm 边界。没有采信这条、也没有基于它实现任何
+ *       "修复"。仍然额外加了一层 duck-typing（检测 getTime/getMonth
+ *       方法）作为不增加风险的兜底加固，代码注释里明确写清楚这不是在
+ *       证实那个说法。
+ *
+ * 报告里可核实的具体断言，逐条对照真实文件核实（没有直接照抄补丁）：
+ *   - 报告声称 3 个函数（ui_convertNoteToTask / ui_convertProjectToTask /
+ *     ui_instantiateTemplate）遗漏了 _sanitizeTaskDatesForTransport_
+ *     包裹——核实为真。
+ *   - 但报告的清单本身不完整——遗漏了 ui_convertTaskToProject（同样的
+ *     风险模式），本次一并补上。至此 50_UIBridge.gs 共 12 处返回点
+ *     包裹了该函数（从「二十一」的 6 处增加到 12 处）。
+ *
+ * 独立于两份报告、自行检查发现并修复的问题：
+ *   - ui_index.html 里 Task 和 Project 的 Edit 保存按钮（save-edit-btn）
+ *     完全没有 withFailureHandler，也没有失败时重置按钮/表单——
+ *     跟本窗口更早修复过的 Done/Cancel 按钮是同一类 bug，理应在第一次
+ *     处理 Done/Cancel 时就一并检查所有同类按钮，当时没有做到，这次
+ *     补上。
+ *   - sortTasks() 的 due_date 比较器直接调用 .localeCompare()，如果
+ *     due_date 不是字符串会直接抛异常中断排序——已改成
+ *     String(...).localeCompare(String(...))。
+ *   - "Accept AI Suggestion"这个动作完全没有 withFailureHandler，
+ *     且不管 ui_updateTask 是否真的成功都会重新加载列表——已补上完整
+ *     的成功/失败处理。
+ *   - ui_index.html 剩余的所有 google.script.run 回调（loadNotes /
+ *     addNote / convertNoteToTask / Task 的 Done·Cancel·Ask AI·
+ *     Convert to Project / Project 的 Complete·Cancel·Convert to Task·
+ *     Capture·Instantiate）均补上了 null 防护——第二份报告在这一部分
+ *     的清单是准确的。
+ *
+ * 验证状态（务必准确记录，不要跟「已讨论/已实现」混淆）：
+ *   - 代码语法：✅ VERIFIED（node --check 通过，本 checkpoint 撰写时
+ *     已重新核对：sandbox 工作副本与 /mnt/user-data/outputs/ 已导出的
+ *     四个文件字节级一致，diff 无输出）
+ *   - 真实浏览器端到端：❌ 尚未验证。Carson 尚未针对这一整轮修复重新
+ *     测试 Add Task。在收到 Carson 明确的重新测试结果之前，不应该
+ *     假设这轮加固已经解决真实空响应问题。
+ *   - 最可能但未经证实的解释：修复代码可能还没有以"New Version"
+ *     重新部署——这是下一次排查最便宜、最应该先排除的可能性，优先于
+ *     任何代码层面的新理论。
+ */
+
+// ============================================================
+// 二十三、Drag Ordering ADR —— Section G 新增（2026-08-24），
+//        仍为 PROPOSED，非 Accepted
+// ============================================================
+
+/**
+ * 00_Drag_Ordering_ADR.gs 新增 Section G "Ownership of the
+ * Context-Scoped Ordering Entity"，回应 Carson 明确要求："不要因为
+ * 叫它 ordering entity 就当作 ownership-neutral"，对 Inbox / Today /
+ * Weekly / Project / Workflow / Goal / Review / Timeline 逐一给出
+ * ownership 结论：
+ *   - Inbox / Project / Review（本项目自己的 Review Engine）→
+ *     Personal Life OS Domain state。
+ *   - Workflow → Domain state，但明确写清楚一条边界：这份排序数据
+ *     永远不能反过来影响 sequence_index（Workflow 步骤执行顺序的
+ *     既有权威字段）。
+ *   - Timeline → 建议完全不引入持久化的手动排序——它是时间戳驱动的
+ *     历史记录，允许用户手动重排等于允许改写历史发生顺序，跟它存在
+ *     的目的矛盾。
+ *   - Today / Weekly → 拆成两个不同答案：本项目自己
+ *     24_ViewEngine.gs 的 today()/thisWeek()（目前是纯函数筛选，
+ *     没有持久化排序，Domain-local，本项目 UI 也还没有对应面板）
+ *     vs. 00_Domain_Boundary.gs 矩阵里跨 Domain 聚合的"Today View"/
+ *     "Weekly View"（Life Execution OS 拥有，如果需要排序，应该走
+ *     Execution 自己的 Reference 信封机制，不进入本项目 Schema
+ *     Authority）。
+ *   - Goal → 同 Today/Weekly 的第二种情形，Life Execution OS state。
+ *
+ * 同时补上了提议实体（TaskViewOrder）完整规格：identity / owner /
+ * storage / lifecycle / event semantics / projection behavior /
+ * cross-device behavior / deletion behavior / orphan behavior
+ * （限本项目 Schema Authority 内的四个 context）。
+ *
+ * 文件内部章节改动：原本的收尾状态章节从 G 改编号为 H，让"Ownership"
+ * 这节插入在 F（Recommendation）之后、状态声明之前，保持字母顺序不
+ * 出现 G 在 H 之前的错误。
+ *
+ * 状态：本节全部内容是分析，不是实现——UI-I6 保持
+ * BLOCKED_PENDING_ARCHITECTURE_DECISION，代码库里没有任何排序相关
+ * 代码。Model 3 推荐仍在 Carson 审阅中，未批准。对应在 00_ADR.gs
+ * 新增 ADR-2026-08-26-026，Status 明确写 Proposed（不是 Accepted）
+ * ——这是本次 checkpoint 新增的记录动作本身，不代表这个决定现在
+ * 变成已批准；只是让这个待决项目在 ADR Log 里可查，而不是只活在
+ * 独立的 ADR 文件里。
+ */
+
+// ============================================================
+// 二十四、ADR-2026-07-24-024（Checkpoint 治理纪律）—— 本次对话的
+//        坦诚自评
+// ============================================================
+
+/**
+ * 背景：00_ADR.gs 的 ADR-2026-07-24-024（2026-08-24 Accepted）正式
+ * 采纳了"Modify → Validate → 立即 Persist/Export → 独立核验持久化
+ * 副本可读 → 记录 checkpoint"的纪律，并明确标注 Implementation
+ * Checkpoint System Active 仍是 ⏳ PENDING——"规则已採纳"不等于
+ * "日常开发确实照着做"。本节是对本窗口实际执行情况的坦诚自评，不是
+ * 单方面宣布已经 Active。
+ *
+ * 一个直接相关的真实数据点：本窗口开局不久，Carson 上传的
+ * 00_Session_Handoff_Checkpoint_2026-08-23.gs 在会话中途从
+ * /mnt/user-data/uploads 消失（先在一次目录列举里出现，下一次读取
+ * 就找不到，经文件系统搜索确认确实不在了）——这正是 ADR-024 Context
+ * 部分描述的那类"容器/session 本身不是权威存储"的真实案例，只是这次
+ * 丢的是交接文档本身，不是实现文件。当时的应对：没有从记忆里凭空
+ * 重建这份文件的具体内容去冒充"读过"，而是明确告知 Carson 文件已经
+ * 不可读，改为直接读取 Carson 同时上传的 70_Personal-Life-main.zip
+ * （真实代码）作为依据——这跟 ADR-024 第 5 条"只从持久化文件 +
+ * 已核验记录恢复"的精神一致，虽然当时还没有见到这条 ADR 的正式文本。
+ *
+ * 本窗口实际执行情况，逐条对照 ADR-024 的 Decision：
+ *   1. Modify → Validate：✅ 基本做到——每次代码改动后都执行了
+ *      node --check（HTML 文件额外做了 JS 提取 + 语法检查、标签配对
+ *      检查、重复 id 检查），没有见过语法错误被留到下一步。
+ *   2. 立即 Persist/Export，不允许"改完好几个文件最后一次性导出"：
+ *      ⚠️ 部分做到，不是完全做到——本窗口是按"一个完整功能/一整轮
+ *      修复"为单位做 present_files（例如"UI Create Capability 四个
+ *      文件一起交付"、"第二轮防御性加固"），而不是每改完一个文件的
+ *      每一处改动就单独导出一次。可以论证每个批次内部是一个真正连贯、
+ *      完整、已验证的工作单元，不是任意断点，但严格按字面"每个文件
+ *      修改后立即导出"这条并没有做到最细颗粒度。
+ *   3. 独立核验持久化副本可读：⚠️ 直到本次 checkpoint 撰写时才第一次
+ *      作为明确、独立的步骤执行——本次已经用 diff 核对 sandbox 工作
+ *      副本与 /mnt/user-data/outputs/ 已交付副本，确认 ui_index.html、
+ *      50_UIBridge.gs、51_Tests_UIBridge_Interactions.gs、
+ *      00_Drag_Ordering_ADR.gs 四个文件字节级一致，没有发现导出内容
+ *      跟实际交付内容不一致的情况——但这是本窗口第一次做这个具体检查，
+ *      不是持续在做的习惯性动作。
+ *   4. Project State 自己也要走同一套流程：本次新增的这几节内容，
+ *      正在按同样的 Modify → Validate → Persist/Export → Independent
+ *      Verify 顺序处理，见本 checkpoint 文件末尾的执行记录。
+ *
+ * 结论：Implementation Checkpoint System Active 维持 ⏳ PENDING——
+ * 本次是一次认真的、补课性质的核验和记录尝试，不等于这套纪律从此已经
+ * 成为日常习惯性动作。要把这一项改成 Active，需要未来几个窗口持续
+ * 观察到逐文件、逐改动的 checkpoint 习惯，而不是本次一次性的完整审计。
+ */

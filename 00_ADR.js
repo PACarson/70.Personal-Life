@@ -1183,3 +1183,126 @@
  *   （2026-08-22，Accepted，见上），因此本决定正式编号为 024，
  *   内容本身未变。
  */
+
+// ============================================================
+// ADR-2026-08-26-025：UIBridge 传输边界必须对 Date 实例做归一化
+//                      （_sanitizeTaskDatesForTransport_）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-08-26-025
+ * Status          : Accepted
+ * Decision Date   : 2026-08-25（本 ADR 条目本身于 2026-08-26 补记，
+ *                   内容不变——决定和实现都发生在 08-25，见下方 Context）
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 50_UIBridge.gs（新增 _sanitizeTaskDatesForTransport_，
+ *                   应用于全部 12 处会把 Task/Project 数据回传浏览器的
+ *                   ui_* 函数）
+ * Related ADR     : ADR-2026-07-24-023（due_date 是 Domain data，
+ *                   Track 1B 归一化范围——本条不属于、不实现那条决定，
+ *                   见下方 Boundary）
+ *
+ * Context
+ *   00_Due_Date_Canonicalization_Audit.gs（Track 1B，状态一直是
+ *   AUDIT_PENDING_IMPLEMENTATION）早就用真实环境诊断证实：
+ *   12_TaskQueryEngine.gs 读回的 due_date/due_time/due_datetime 可能是
+ *   原生 Date 对象而不是 canonical string。2026-08-25，这个存量问题
+ *   第一次经由真实浏览器路径被触发——Carson 使用新上线的 Add Task 后，
+ *   Tasks 列表未刷新，控制台报 "Cannot read properties of null
+ *   (reading 'ok')"。经 web search 独立核实：Google 官方文档明确规定
+ *   google.script.run 禁止传输原生 Date 对象（含嵌套在对象/数组内部），
+ *   命中时不报错，直接让前端 successHandler 收到 null。
+ *
+ * Decision
+ *   1. 任何会把 Task/Project 数据（无论是刚创建的、刚更新的、还是从
+ *      Sheet 批量读出的）回传给浏览器的 UIBridge 函数，返回前必须经过
+ *      _sanitizeTaskDatesForTransport_() 处理——把 due_date/due_time/
+ *      due_datetime 上任何 Date 实例转回 canonical string
+ *      （Utilities.formatDate + Session.getScriptTimeZone()，不用
+ *      toISOString()，后者会因时区换算引入"看起来对但差一天"的错误，
+ *      Track 1B 审计已经证实这一点）。
+ *   2. 检测同时使用 instanceof Date 和 duck-typing（getTime/getMonth
+ *      方法存在性）——前者是主判断，后者是不增加风险的兜底加固，不是
+ *      因为找到了"跨 Realm instanceof 失效"的证据（没有找到），纯粹是
+ *      成本几乎为零的额外保险。
+ *   3. 新增的 UIBridge 函数，只要返回值可能携带 Task/Project 字段，
+ *      默认都应该套这一层——这是本条 ADR 建立的标准写法，不是
+ *      case-by-case 决定。
+ *
+ * Consequences
+ *   正面：浏览器端不会再因为这一类 Date 污染收到静默 null；不需要
+ *   逐个排查未来新增的 ui_* 函数是否"恰好"没有踩到这个坑。
+ *
+ *   代价：每个符合条件的 UIBridge 函数返回前多一次函数调用；需要
+ *   持续维护"哪些函数需要套用"这份清单（见 50_UIBridge.gs 内联文档）。
+ *
+ *   Boundary：本条不是、也不实现 Track 1B（resolveIdentityDueValue()
+ *   的 identity 归一化 + Sheet 存量数据迁移）——那部分范围更大、风险
+ *   更高，涉及真实 Sheet 数据迁移，仍然是 AUDIT_PENDING_IMPLEMENTATION，
+ *   仍然需要 Carson 单独批准。本条完全不碰 07_IdentityEngine.gs /
+ *   12_TaskQueryEngine.gs / 14_ProjectQueryEngine.gs 本身，范围严格
+ *   限于 UIBridge 到浏览器这一段传输边界。
+ *
+ * Notes
+ *   完整根因分析、两轮修复的具体范围、以及"仍未经 Carson 真实浏览器
+ *   端到端确认"这个未闭环状态，见 00_Project_State.gs「二十一」
+ *   「二十二」，不在本条重复。
+ */
+
+// ============================================================
+// ADR-2026-08-26-026：Context-Scoped Ordering Entity（Drag Ordering
+//                      Model 3）—— PROPOSED，等待 Carson 批准
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-08-26-026
+ * Status          : Proposed（不是 Accepted——记录本身不构成批准）
+ * Decision Date   : (pending — 等待 Carson 明确批准后填写)
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 无代码改动——本条目前只是分析/记录，UI-I6 保持
+ *                   BLOCKED_PENDING_ARCHITECTURE_DECISION
+ * Related ADR     : (none——本条是本项目第一次正式讨论 View 层排序
+ *                   数据的 ownership)
+ *
+ * Context
+ *   UI-I6（任务卡片拖拽排序）因为一个真实冲突被冻结：一个 Task 同时
+ *   出现在多个 View（Inbox/Project/Workflow/...）时，"排序"到底该
+ *   存在哪——存在 Task 自己身上，还是存在某个 View-scoped 的独立实体
+ *   上，两者边界处理不当会违反"Execution 永远不拥有 Business Data"
+ *   或者把 Workflow 的 sequence_index 语义搅混。完整候选模型分析
+ *   （Model 1/2/3）、Model 3 的 Ownership 逐 context 结论，见
+ *   00_Drag_Ordering_ADR.gs 全文，尤其 Section G。
+ *
+ * Decision（本条记录的是"提议"，不是"已决定"）
+ *   提议采用 Model 3——Context-Scoped Ordering Entity（独立的
+ *   TaskViewOrder 实体，{context_key, task_id, order_index}），而非
+ *   Model 1（Task-owned scalar）或 Model 2（Project-owned array）。
+ *   完整 identity/owner/storage/lifecycle/event semantics/projection
+ *   behavior/cross-device behavior/deletion behavior/orphan behavior
+ *   规格见 00_Drag_Ordering_ADR.gs Section G。
+ *
+ * Consequences（如果被批准，预期的影响——目前是预测，不是既定事实）
+ *   正面：排序数据不需要在 Task/Project 之间来回搬迁；同一套模式可以
+ *   被本项目未来的 Domain-local context 复用，也可以被 Life Execution
+ *   OS 用同样的形状（不同的表）复用于 Today/Weekly/Goal 这类跨 Domain
+ *   context。
+ *   代价：新增一张表、一个新的写权限归属（10_ProjectionEngine.gs
+ *   扩展）、新增一类事件（VIEW_ORDER_UPDATED）。
+ *
+ * Boundary
+ *   本条批准与否，不影响、不阻塞 Track 2（UI-I1~I5 / UI Create
+ *   Capability）——四条线独立推进是 Carson 本窗口明确要求的治理约定。
+ *   在 Carson 明确批准这条 ADR 之前：UI-I6 保持
+ *   BLOCKED_PENDING_ARCHITECTURE_DECISION，不实现任何排序相关代码，
+ *   即使 Model 3 分析已经写完、即使这份分析本身看起来完整——"分析
+ *   完成"不等于"决定批准"，两者在本项目治理体系里必须分开陈述。
+ *
+ * Notes
+ *   本条目是本次 checkpoint 新增的记录动作，目的是让这个待决项目在
+ *   ADR Log 里可查、可追踪，而不是只活在独立的 00_Drag_Ordering_ADR.gs
+ *   文件里、在 Log 层面无迹可寻。记录本身不改变这个决定的批准状态。
+ *   Carson 批准或否决后，本条目需要相应更新 Status/Decision Date，
+ *   并在 00_Project_State.gs 相应章节同步。
+ */
