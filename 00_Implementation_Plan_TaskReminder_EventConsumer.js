@@ -30,6 +30,10 @@
  *   ✅ 不把 Task 业务数据复制进 Reminder OS 长期持有——新组件读到的
  *      Task 字段只用于当次登记判断，不额外新建"Reminder OS 自己的
  *      Task 副本"表。
+ *   ✅ 不改动 Task identity 契约（Carson 2026-08-27 批准意见明确要求）
+ *      ——本次实现从未涉及 Personal Life OS 的
+ *      generateTaskIdentity()/scopeKey，task_id 只被当作普通查找 key
+ *      使用，不重新推导、不重新定义任何身份语义。
  *   ✅ 不重启 V2/七引擎/全局 Reminder Rule 存储重设计/Task 提醒重设计/
  *      Project deadline schema/其它 Domain OS 集成——本计划的改动面
  *      严格限定在第二节列出的文件范围内。
@@ -115,9 +119,14 @@
  *
  * 需要小心处理、不能直接复用的：
  *
- *   EventBus.getEventsByType()（02_EventBus.js:122）——技术上"存在
+ *   EventBus.getEventsByType()（20_EventBus.js:252-256——真正在生产环境
+ *   生效的文件；02_EventBus.js 是 2026-07-06 按 Domain OS Blueprint
+ *   改名迁移后遗留在仓库里、事实上已经不再生效的旧文件，20_ReminderEngine.js
+ *   调用的 EventBus.publishBatch 只存在于 20_EventBus.js，这是在最终
+ *   实现前逐字核对源码时才发现、并更正的一处引用——之前的评审草稿一度
+ *   写成 02_EventBus.js，这里如实记录更正，不掩盖）——技术上"存在
  *   现成的按类型读事件"函数，但见第四节，这次不采用它，原因是它的
- *   实现（getAllEvents(), 02_EventBus.js:92-120）是对共享 Events 表
+ *   实现（getAllEvents(), 20_EventBus.js:222-250）是对共享 Events 表
  *   【从第 2 行到 lastRow 整表读取】，且这张表是跨 Personal AI Core/
  *   Personal Life OS/Reminder OS 三个项目共同追加、只增不删的表
  *   （00_Project_Constitution.js:102 明确"没有任何 update/delete
@@ -205,33 +214,40 @@
  * 已经建立的"ActiveTasks 拿候选、Tasks 定点查 1-2 个字段"模式，不
  * 额外发明新查法。
  *
- * ---- 4.4 登记规则——沿用 batchUpsertRowsByKey_，但明确是 upsert
- *          不是 append ----
+ * ---- 4.4 登记规则——【终定，Carson 2026-08-27 批准 Option 1】比较后
+ *          再替换，不是无条件替换 ----
  *
- * 对每个"entity_id 能在当前 ActiveTasks 里查到"的事件：
+ * 对每个"entity_id 能在当前 ActiveTasks 里查到、且 policy 有效"的事件：
  *
- *   构造一条（或按 offsets 数组构造多条，与 _ensureRulesFromPolicy_
- *   同样的"一个 offset 一行"模式）ReminderRules 行，task_id =
- *   entity_id，source = 'event_registered'（新增的 source 取值，
- *   跟现有 'auto_default'/'user_override' 区分开，方便未来在
- *   ReminderHistory 里追溯"这条规则是怎么来的"——这是 ReminderHistory
- *   现有 policy_source 字段的自然扩展，不是新开一个字段）。
+ *   先查这个 task_id 名下 source = 'event_registered' 的既有规则行
+ *   （在同一次 ReminderRules 读取里过滤，不需要额外查表），把它们的
+ *   offset_minutes 集合跟这次事件解析出的 offset_minutes 集合做比较：
  *
- *   用 SheetUtils.batchUpsertRowsByKey_(RULES_SHEET, 'rule_id', ...)
- *   —— 但这里有个关键设计问题：ReminderRules 现有的 rule_id 是每次
- *   生成一个新的随机 ID（_generateRuleId_()），upsert by rule_id
- *   对"替换同一个 task_id 的旧规则"没有帮助，因为新旧 rule_id 本来
- *   就不一样，upsert 只会是"插入一条新行"，不会覆盖旧行。
+ *     完全相同 —— 不删不插，既有规则原样保留（rule_id、
+ *     resolved_fire_ats、发送历史全部不动）。这一条是 Carson 批准意见
+ *     明确要求的幂等语义的核心："receiving the same request/policy
+ *     repeatedly must not create duplicate reminders"——如果不做这层
+ *     比较、每次都无条件删旧插新，即使 policy 真的没变，rule_id 也会
+ *     每次换新、resolved_fire_ats 每次归零，一旦这发生在某个 offset
+ *     已经真正发送过提醒之后，会让那条 offset 被误判成"从未处理过"而
+ *     重新发送——这才是真正的幂等违反，不能只满足于"最终状态不重复"
+ *     这个弱化版本。
  *
- *   所以真正的"upsert 语义"要在应用层做：先查这个 task_id 名下
- *   source = 'event_registered' 的既有规则行（可以在同一次
- *   ActiveRules 读取里过滤，不需要额外查表），如果存在，先加入
- *   ruleDeletes（沿用 checkOffsetReminders 现有的批量删除机制）删掉
- *   旧规则，再插入新规则——这样对外表现为"替换"，而不是"堆积"。
+ *     不同（包括这个 task_id 第一次通过这条事件路径出现）—— 执行
+ *     替换：先把旧规则的 rule_id 加入 ruleDeletes（用
+ *     SheetUtils.batchDeleteRowsByKey_ 删除），再构造新的 ReminderRules
+ *     行（一个 offset 一行，跟 _ensureRulesFromPolicy_ 同样的模式，
+ *     task_id = entity_id，chat_id 从 Task 权威行读——不用事件 payload
+ *     里的快照，source = 'event_registered'，resolved_fire_ats 从空
+ *     对象重新开始——这是"policy 真的变了"时的正确行为，新 policy 需要
+ *     自己全新的调度状态），用 SheetUtils.batchUpsertRowsByKey_(
+ *     RULES_SHEET, 'rule_id', ...) 落盘（这里的 rule_id 都是新生成的，
+ *     所以这一步实际效果是插入，"upsert"只是复用现成函数，不依赖它的
+ *     覆盖语义）。
  *
- *   这个"先删旧、再插新"的具体触发时机，取决于第七节那个需要 Carson
- *   确认的开放问题（是否允许同一个 task_id 被多次登记时更新 policy）
- *   ——本节描述的是【如果】允许更新时的机制，不是不由分说就这么做。
+ *   source 沿用现有 'auto_default'/'user_override' 之外新增
+ *   'event_registered' 取值——这是 ReminderHistory 现有 policy_source
+ *   字段的自然扩展，不是新开字段。
  *
  * ---- 4.5 加锁 ----
  *
@@ -270,58 +286,82 @@
 // ============================================================================
 
 /**
- * 两层幂等，对应两种不同的"重复"：
+ * 两层幂等，对应两种不同的"重复"，两层都已经在 23_ReminderRequestConsumer.js
+ * 里实现并跑 Node 沙盒测试逐条验证过（见第十一节）：
  *
  *   同一条 Events 行被重复处理（比如触发器重叠、水位更新失败但
  *   处理逻辑已经跑过）——由 4.2 的"先处理、后推进水位"顺序 +
  *   LockService 独占锁共同保证：只有水位成功推进之后，这一行才算
  *   "处理过"；如果处理成功但推进水位失败（比如中途报错），下一轮
- *   会重新处理这一行——这时候 4.4 的"先删旧规则再插新规则"设计本身
- *   是幂等的（重复执行"删掉 source=event_registered 的旧规则、插入
- *   新规则"这个操作，结果不会因为多跑一次而不同），所以重复处理同一
- *   条事件是安全的，不会造成规则重复堆积。
+ *   会重新处理这一行。
  *
- *   同一个 task_id 被两个不同事件（不同 event_id）先后请求——见
- *   4.4 的"先删旧、再插新"设计，效果是后一次登记替换前一次，不是
- *   累加。这条具体要不要生效，见第七节的开放问题。
+ *   同一个 task_id 被两个不同事件（不同 event_id）先后请求、且
+ *   policy 相同——【这是 Carson 批准意见里"receiving the same
+ *   request/policy repeatedly must not create duplicate reminders"
+ *   逐字对应的场景】。4.4 最终实现的做法：先比较这个 task_id 现有
+ *   登记的 offset 集合跟这次事件的 offset 集合，完全相同就直接跳过，
+ *   不删不插，既有规则的 rule_id、resolved_fire_ats（已发送历史）
+ *   原样保留。如果不做这层比较、无条件"先删旧插新"，即使 policy
+ *   没变也会让 rule_id 每次换新、resolved_fire_ats 每次归零——一旦
+ *   这发生在某个 offset 已经真正发送过提醒之后，会让那条 offset 被
+ *   误判成"从未处理过"而重新发送，这才是真正的幂等违反。测试套件
+ *   场景 D 专门覆盖了这个时序（先手工把 resolved_fire_ats 标记成
+ *   "已发送"，再重复同一个 policy，断言 rule_id 和 resolved_fire_ats
+ *   都没有被扰动）。
+ *
+ *   同一个 task_id 被两个不同事件、且 policy 确实不同——见 4.4，
+ *   后一次替换前一次（Carson 2026-08-27 批准 Option 1），旧规则的
+ *   resolved_fire_ats 不延续，这是"policy 真的变了"时的正确行为，
+ *   不是幂等违反。
  */
 
 // ============================================================================
-// 七、Duplicate event behavior —— 含一个需要 Carson 明确确认的开放问题
+// 七、Duplicate event behavior —— 【已由 Carson 2026-08-27 批准 Option 1，定案】
 // ============================================================================
 
 /**
- * 上面两层幂等设计里，第二层（同一个 task_id 被多次登记，是否允许
- * 后一次替换前一次的 policy）实际上是在动 Task 现有的"决定 #2"
- * （reminder_policy 创建后不可变，20_ReminderEngine.js:318-319）——
- * 这正是架构评审第七节 (c) 项要求"必须 Carson 明确点头，不能默认
- * 通过"的那个点。Carson 这次的批准意见没有单独回答这一条，本计划
- * 不能替 Carson 做这个决定，也不能假装它已经被批准。
+ * 这一节原本记录的是一个待 Carson 回答的开放问题（同一个 task_id 被
+ * 多次登记、policy 不同时，是替换还是忽略——这实际上是在动 Task 现有的
+ * "决定 #2"：reminder_policy 创建后不可变，20_ReminderEngine.js:318-319，
+ * 正是架构评审第七节 (c) 项要求"必须 Carson 明确点头，不能默认通过"
+ * 的那个点）。Carson 已于 2026-08-27 明确批准 Option 1（replace），
+ * 并逐字给出了以下约束，全部已经体现在第四、六节的最终设计和
+ * 23_ReminderRequestConsumer.js 的实现里：
  *
- * 两个选项，各自的后果：
+ *   "the latest valid policy becomes authoritative" —— 第四节 4.4，
+ *   policy 确实不同时替换生效。
  *
- *   选项 1（replace）：同一个 task_id 被再次登记时，用新 policy
- *   替换旧规则。好处：requestWorkflowStepReminder 真正具备"创建后
- *   修改提醒策略"的能力，这也更符合这个函数名字暗示的用途（Workflow
- *   步骤的提醒需求可能在 Workflow 实例真正推进到那一步时才确定，
- *   不一定跟 Task 创建同时发生）。代价：事实上扩展了决定 #2，需要
- *   在 ADR-009 里明确写清楚这条扩展，且需要一条新的回归测试确保
- *   "只通过事件渠道改、Task 自己的 reminder_policy 字段仍然不可变"
- *   这条边界不会被混淆。
+ *   "The previous registration/policy must no longer remain
+ *   effective" —— 替换执行的是真删除（batchDeleteRowsByKey_），不是
+ *   留着旧规则不管，旧规则从 ReminderRules 里彻底移除。
  *
- *   选项 2（ignore-if-exists）：同一个 task_id 已经有
- *   source=event_registered 的规则时，后续事件直接跳过、不生效，
- *   决定 #2 完全不动。好处：改动面更小、更保守。代价：
- *   requestWorkflowStepReminder 事实上只能"设置一次"，如果这不符合
- *   它的实际使用场景，这个函数的价值会打折扣——而且鉴于它目前连
- *   生产调用方都没有（第一节），"它实际会被怎么用"目前完全没有真实
- *   证据，选哪个都带有一定的猜测成分。
+ *   "This must be idempotent: receiving the same request/policy
+ *   repeatedly must not create duplicate reminders" —— 第六节的
+ *   "先比较、相同则跳过"机制专门为这条服务，测试场景 D 直接验证了
+ *   这条要求最容易被忽略的那个反例（已发送过的 offset 不会被
+ *   误重置）。
  *
- * 本计划默认按选项 1（replace）写第四节的设计，因为这更符合
- * "WorkflowStepReminder"这个名字暗示的语义，但明确把这个默认标注为
- * 待确认，不是已经拍板——第八节的测试要求也会按"两个选项都各自需要
- * 什么测试"分别列出，Carson 确认后我只需要保留对应那一侧，不需要
- * 重新规划。
+ *   "The Domain Task remains the source of truth; Reminder OS only
+ *   maintains the scheduling state derived from it" —— chat_id 从
+ *   Task 权威行读，不用事件 payload 快照；ReminderRules/
+ *   Occurrences/History 三张表继续是 Reminder OS 自己的调度状态，
+ *   不复制 Task 的业务字段。
+ *
+ *   "Do not modify the Task identity contract for this decision" ——
+ *   本文件、本次实现从未涉及 Personal Life OS 的
+ *   generateTaskIdentity()/scopeKey，task_id 只被当成普通查找 key
+ *   使用，见第零节的范围确认。
+ *
+ * 历史记录（不删除，留痕）：曾经考虑过的选项 2（ignore-if-exists，
+ * 完全不动决定 #2，后续事件直接忽略）没有被采纳——本节保留这条记录，
+ * 供以后如果要重新评估这个决定时，知道当初还比较过什么、为什么没选。
+ *
+ * 决定 #2 的扩展范围：只有"通过 REMINDER_REQUESTED 事件渠道"这条新路径
+ * 能够变更已登记的 policy；task.reminder_policy 字段本身在 Task
+ * 创建之后依然不可变，_ensureRulesFromPolicy_ 的既有"只在首次生成"
+ * 逻辑完全不动——两条路径分别用 source 字段区分
+ * （'auto_default'/'user_override' vs 'event_registered'），不会
+ * 互相覆盖或混淆。
  */
 
 // ============================================================================
@@ -413,38 +453,56 @@
 // ============================================================================
 
 /**
- * 新建 60_ReminderRequestConsumer_Tests.js（沿用 50 系列测试文件
- * 命名，但既然是新组件，用下一个可用的前缀区间——如果 Carson 的
- * 习惯是所有测试都统一用 50_ 前缀，这个数字可以改，不影响下面的
- * 用例设计），至少覆盖：
+ * 60_ReminderRequestConsumer_Tests.js 已交付，跟 50_ReminderEngine_Tests.js
+ * 同款风格（手工 Logger.log PASS/FAIL，同一套 mocks.js），覆盖场景
+ * A-I，共 28 条断言：
  *
- *   □ 水位机制：首次运行（无既有水位）、增量运行（只处理新增行）、
- *     无新事件时的空跑（不产生任何副作用）。
- *   □ 事件过滤：entity_type='PROJECT' 的事件被正确跳过、不处理、
- *     水位仍然正确推进过它。
- *   □ 正常登记：entity_id 能在 ActiveTasks 查到时，生成正确的
- *     ReminderRules 行（task_id/chat_id/offset/source 全部正确）。
- *   □ 幂等重放：人为重复处理同一批已处理过的事件（模拟水位推进
- *     失败后的重跑），确认不产生重复/错误的规则行。
- *   □ 重复登记（同一 task_id 两次，policy 不同）：按第七节 Carson
- *     确认的选项（1 或 2）分别断言"替换"或"忽略"的正确行为——两个
- *     选项的测试用例都先写出来，Carson 选定后只保留对应那一组，
- *     删掉另一组，不是两组都要长期维护。
- *   □ Stale Task：entity_id 查无此 Task，且事件时间戳在阈值内 →
- *     不推进水位、不生成规则；超过阈值 → 推进水位、记日志、不生成
- *     规则。
- *   □ 端到端回归：登记后跑一次 checkOffsetReminders，确认新规则
- *     被正确纳入正常的到期时间判断、发送、取消、重排期流程——这条
- *     直接验证"第八节"里"完成之后全部交给现有引擎"这个设计假设
- *     真的成立，不是纸面推论。
+ *   A 首次运行 + 单 offset 正常登记（含 chat_id 确认来自 Task 权威行，
+ *     不是事件 payload）
+ *   B 多 offset——一个 offset 一行，offset 换算正确
+ *   C entity_type=PROJECT 被跳过、不生成规则、水位仍正确推进
+ *   D 【幂等核心】同一 task_id + 相同 policy 重复登记：不删不插，
+ *     rule_id 和已经手工标记过的 resolved_fire_ats（模拟"已发送过"）
+ *     都原样保留
+ *   E 同一 task_id + 不同 policy：真替换（rule_id 变化，offset 更新，
+ *     行数不堆积）
+ *   F Stale：entity_id 查无 Task 且事件已超过 2 小时阈值——判定 stale，
+ *     推进水位，不生成规则
+ *   G entity_id 暂时查无 Task 但仍在阈值内——本轮不推进水位，下一轮
+ *     Task 出现后正常登记
+ *   H 空 offsets——判定无效，跳过，不生成规则
+ *   I 增量水位——无新事件时不重新扫描已处理过的行
  *
- * 同时要求（沿用这个项目"改一个文件、独立验证一次"的纪律）：
- *   □ 50_ReminderEngine_Tests.js 全部保持通过（确认新组件没有对
- *     ReminderRules 表产生任何非预期的旁路影响）。
- *   □ Sprint 3 Acceptance Gate（Personal-Life-main 侧）保持通过——
- *     本计划不改动 Personal-Life-main 任何文件，这一项预期是
- *     "自动保持通过"，但仍然建议 Carson 实现后重新跑一次确认，不
- *     假设"没改代码=一定还是绿的"。
+ * 【已在本地 Node 沙盒实际运行，不是只写了断言】用 mocks.js 提供的
+ * 内存版 GAS shim + vm.runInThisContext（原样加载 21_SheetUtils.js 的
+ * 真实源码，不是重新手写一份简化版逻辑）——运行结果：28 passed, 0
+ * failed。这是 Node 沙盒里的验证，不是 Carson 真实 GAS/Sheets 环境里
+ * 的验证，下面仍然需要 Carson 在真实环境里跑一遍确认。
+ *
+ * 【顺带发现，不在本次修复范围】run_reminder_tests.js（这个仓库既有的
+ * 本地测试 runner）引用的 21_SheetUtils.txt/40_Output.txt/
+ * 20_ReminderEngine.txt 在这次上传的 zip 里都不存在，且如果直接用
+ * require() 加载这些原样 GAS 风格代码（顶层 var X = (function(){...})()，
+ * 没有显式挂 global），也不会正确生效——需要 vm.runInThisContext 才行
+ * （这一点是写本文件的 runner 时亲自踩过、修正过的）。这两点都不影响
+ * 本次交付的正确性（本次的 runner 是单独写的，只依赖 mocks.js +
+ * 21_SheetUtils.js 的 .js 原文件本身），如实记录，供 Carson 之后自己
+ * 要跑既有的 50_ReminderEngine_Tests.js 时避免走同样的弯路。
+ *
+ * 仍然需要 Carson 做的（沿用这个项目"改一个文件、独立验证一次"的
+ * 纪律，Node 沙盒不能替代）：
+ *   □ 在真实 GAS 项目里跑一次 50_ReminderEngine_Tests.js（如果要跑，
+ *     先解决上一条提到的 runner 本身的问题），确认新文件没有对
+ *     ReminderRules 表产生任何非预期的旁路影响。
+ *   □ Sprint 3 Acceptance Gate（Personal-Life-main 侧）——本次没有
+ *     改动 Personal-Life-main 任何文件，预期"自动保持通过"，仍建议
+ *     重新跑一次确认，不假设"没改代码=一定还是绿的"。
+ *   □ 真实环境端到端验证：运行 createTriggers() 挂好新触发器，用
+ *     Sprint-3-Gate 同款方式（直接调用
+ *     ReminderConnector.requestWorkflowStepReminder）手动触发一次
+ *     真实事件，确认 consumeReminderRequests 和 checkOffsetReminders
+ *     在真实 Sheets 环境下也能正确衔接——这是 Node mock 不能完全
+ *     替代的部分。
  */
 
 // ============================================================================
@@ -467,22 +525,19 @@
  */
 
 // ============================================================================
-// 十三、实现前需要 Carson 明确回答的唯一问题
+// 十三、【已解决】实现前需要 Carson 明确回答的唯一问题
 // ============================================================================
 
 /**
- * 第七节展开过，这里单独摘出，避免被埋没：
+ * 原问题：同一个 task_id 被 requestWorkflowStepReminder 多次登记、且
+ * reminder_policy 不同时，后一次应该【替换】前一次，还是【忽略】、
+ * 维持 Task 第一次登记时的策略不变？
  *
- *   同一个 task_id 被 requestWorkflowStepReminder 多次登记、且
- *   reminder_policy 不同时，后一次应该【替换】前一次（选项 1，本
- *   计划的默认设计），还是【忽略】、维持 Task 第一次登记时的策略
- *   不变（选项 2，完全不动决定 #2）？
- *
- * 这是本计划里唯一一处在等 Carson 的回答，而不是在等"批准整个计划"
- * ——其余部分（第二到六、八到十二节）不依赖这个答案，可以先定下来；
- * 只有第四节 4.4 的具体触发条件、第七节的最终行为、第十一节测试用例
- * 里"重复登记"那一组，需要这个答案才能定稿到可以真正开始写代码的
- * 程度。
+ * Carson 2026-08-27 批准：Option 1（replace），并附加了幂等、Domain
+ * Task 权威性、不改动 Task identity 契约三条明确约束——完整决定和
+ * 约束记录见第七节，已经体现在第四、六节的最终设计和
+ * 23_ReminderRequestConsumer.js 的实现、60_ReminderRequestConsumer_Tests.js
+ * 的测试场景 D/E 里。本计划自此不再有任何待 Carson 回答的开放问题。
  */
 
 // ============================================================================
@@ -490,15 +545,22 @@
 // ============================================================================
 
 /**
- * 本文档状态：Plan — Pending Review。不是 ADR，不是 Stable，不代表
- * 任何已经发生的代码改动。
+ * 本文档状态更新（2026-08-27）：Plan — Implemented, Pending Carson's
+ * Production Verification。第十三节的开放问题已解决，代码已经写出来
+ * 并交付：
  *
- * 待 Carson：
- *   (a) 回答第十三节的开放问题；
- *   (b) 确认或调整第二节的文件/编号选择、第四节的触发器调度细节、
- *       第九节的 stale 阈值等实现细节；
- * 之后本计划才转入实现阶段，实现完成后按第十一节验收，验收通过后
- * 才在 ADR-009 里把 STATUS 从 Proposed 改成 Accepted——不在代码写完
- * 之前、也不在自动化测试和 Carson 的生产环境验证完成之前，标注
- * 任何东西为 Stable。
+ *   新增 23_ReminderRequestConsumer.js（Reminder-main）
+ *   新增 60_ReminderRequestConsumer_Tests.js（Reminder-main）
+ *   修改 11_Setup.js（Reminder-main）——createTriggers() 新增
+ *   consumeReminderRequests 触发器的清理与创建，其余内容不变
+ *
+ * 验证现状：Node 沙盒里 28/28 断言通过（第十一节），这证明了逻辑
+ * 正确性，但不等于生产验证——第十一节末尾列出的三项仍然需要 Carson
+ * 在真实 GAS/Sheets 环境里做。
+ *
+ * ADR-009 的状态：仍然是 Proposed，不因为 Node 沙盒测试通过就自动
+ * 升级成 Accepted——按这个项目一贯的纪律，Stable/Accepted 需要
+ * Carson 在真实环境里验证过之后才标注，不能只凭 Node mock 的结果
+ * 提前定案。等 Carson 完成第十一节末尾那三项真实环境验证、明确确认
+ * 之后，再把 ADR-009 从 Proposed 改成 Accepted。
  */
