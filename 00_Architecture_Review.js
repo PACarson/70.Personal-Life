@@ -20,6 +20,18 @@
  * Governance）标签；「九」Review Summary 同步措辞。均为纯文档措辞
  * 调整，不改变四项决策本身的内容或任何已完成的设计判断。
  *
+ * 2026-08-29 — 新增「八、Review #4」：Project Deadline Contract 的
+ * Pre-Implementation Design Review（Feature/Change Review，跟
+ * Review #1/#2 的周期性 Domain Profile 合规扫描性质不同，结构沿用
+ * Review #3 的 7-Deliverable 模板）。本次只是 Review——不改
+ * production 代码、不新增 Project/Workflow 任何字段、不动 Reminder OS、
+ * 不跑 migration，「八、Pending Design Decisions」列出的问题写完就停，
+ * 等 Architecture Owner 批准。刻意把标题定为"Deadline Contract"而不是
+ * "Project Reminder"——Reminder OS 只是这份 contract 未来的一个
+ * consumer，不是这次要回答的核心问题；核心问题是"Project 的 deadline
+ * 是什么"，这个答案将来同样要服务 Calendar OS/Execution OS/其它
+ * Domain OS，不能只从 Reminder 的需要反推 schema。
+ *
  * 2026-07-13 — 新增「七、Review #3」：Due Time Support
  * 的 Pre-Implementation Design Review（Feature/Change Review，跟
  * Review #1/#2 的周期性 Domain Profile 合规扫描性质不同）。对应需求方
@@ -1253,4 +1265,495 @@
  *                拍板（见 2.2/06_TaskIntentParser 的 _formatDueDisplay_
  *                注释），Migration/Governance 两项仍待 Architecture
  *                Owner 决定，不阻塞已完成部分。
+ */
+
+// ============================================================
+// 八、Review #4（2026-08-29）— Project Deadline Contract:
+//     Pre-Implementation Design Review
+// ============================================================
+
+/**
+ * Review Type:   Feature/Change Review（跟 Review #1/#2 的周期性 Domain
+ *                Profile 合规扫描性质不同，结构沿用 Review #3 的
+ *                7-Deliverable 模板，见「六」）
+ * Trigger:       Reminder OS 侧 ADR-2026-08-27-009（TASK/Workflow-Step
+ *                REMINDER_REQUESTED 消费层）落地后，entity_type:
+ *                'PROJECT' 路径被 explicitly deferred——评审时已经确认
+ *                真正的 blocker 不是"Reminder OS 缺一个 consumer"，是
+ *                Project 本身没有任何 due_datetime 类字段
+ *                （00_Sheets_Structure.gs 全字段核对过，见 Reminder OS
+ *                侧 00_Architecture_Review_ProjectWorkflow_Reminder_
+ *                Integration.js 第一节 G）。
+ * Scope note:    本次刻意不叫"Project Reminder Review"——Reminder 只是
+ *                这份 deadline contract 未来的一个 consumer（Model A，
+ *                见「七」），核心问题是"Project 的 deadline 是什么"，
+ *                这个答案同样要服务未来的 Calendar OS/Execution OS/
+ *                Property OS 等，不能只从 Reminder OS 的需要反推
+ *                schema——否则会出现"为了满足 Reminder 就给 Project
+ *                加 due_datetime"这种本末倒置，以后每个新 Domain OS
+ *                都各自推动一次 Project schema，互相打架。
+ * Prior review:  Review #3（2026-07-13，Due Time Support）——本次
+ *                Deliverable 2 直接复用 Review #3 已经落地、已经生产
+ *                验证过的 Task due_datetime 三层模型，不重新发明。
+ * 本次约束（Architecture Owner 明确要求）：不改 production 代码、不
+ * 新增 Project/Workflow 任何字段、不动 Reminder OS 任何文件、不跑
+ * migration。「八、Pending Design Decisions」写完即停，等批准。
+ */
+
+// ------------------------------------------------------------
+// 一、现有架构审查（Deliverable 1：Architecture Review）
+// ------------------------------------------------------------
+
+/**
+ * 1.1 Project/Workflow/Task 三层关系（00_Entity_Relationship.gs「一、三」）：
+ *
+ *   Project 1 ── 0..N Task（project_id 可空，Task 不强制属于 Project）
+ *   Project 1 ── 0..N Workflow（workflow.project_id 可空）
+ *   Workflow 1 ── 0..N Task（Task.workflow_id + sequence_index）
+ *   Project 1 ── 0..N Project（parent_project_id，Sub-Project 层级）
+ *
+ *   Project 的一句话定义："一个有明确边界、可以被 Archive 的生活事务
+ *   （搬家/家庭整理/喂流浪猫计划）"——最后这个例子（喂流浪猫计划）
+ *   本身就是一个"可能没有自然截止日期"的 Project，对「八」Pending
+ *   Decision 1（是否强制）直接构成证据，不是本次凭空假设的场景。
+ *
+ *   Workflow 的一句话定义："一组 Task 之间的编排规则（谁先谁后/能否
+ *   并行/要不要按周期重来一遍）"——注意定义本身就是"规则"，不是"一件
+ *   有边界的事务"，跟 Project 的定义性质不同，这条差异直接影响「五」
+ *   对 Q3（Workflow 要不要自己的 deadline）的判断。
+ *
+ * 1.2 Task↔Project 双向转换（00_Entity_Relationship.gs「三」，
+ *     ADR-2026-07-24-015）：Task 可以升级成 Project，Project 也可以在
+ *     满足前置条件（没有 Sub-Project、没有非终态 Task）时降级成 Task。
+ *     这条关系直接关联「五」的一个具体风险点：Task 已经有
+ *     due_datetime，如果 Project 也有自己的 due_datetime，这两个方向
+ *     的转换要不要携带这个字段、怎么携带，需要在 Deliverable 2 明确
+ *     规则，不能留空。
+ *
+ * 1.3 现有 Task due_datetime 三层模型（Review #3，已生产验证，见本文件
+ *     「七」+ Reminder OS 侧 20_ReminderEngine.js
+ *     _resolveEffectiveDueDatetime_）：due_datetime（完整 ISO，分钟级）
+ *     → due_date + due_time 组合 → 纯 due_date（午夜兜底）。这是本次
+ *     Deliverable 2 的直接可复用先例，Reminder OS 那一侧已经完整支持
+ *     这个契约，如果 Project 采用同一形状，Reminder OS 消费端不需要
+ *     任何新代码（只需要 Reminder OS 侧另开的 entity_type: 'PROJECT'
+ *     消费分支，那是「七」的范围，不是本次）。
+ *
+ * 1.4 WorkflowTemplate 的 capture/instantiate 机制不依赖任何 Project
+ *     deadline（00_Business_Rules.gs「二」，重要澄清，避免被误认为
+ *     "现有系统已经隐含需要 Project deadline"）：capture 时
+ *     due_date 转换成相对 Project 自己 created_time 的 offset 天数；
+ *     instantiate 时以"实例化操作发生的时间"为新基准点重新计算
+ *     具体 due_date——两端锚点都是"时间戳"（创建/实例化时刻），不是
+ *     "Project 的到期时间"。也就是说，这套已经在生产环境跑的相对
+ *     偏移机制，从设计上就完全不需要 Project deadline，本次评审
+ *     的结论不会跟它冲突，也不应该被它误导成"deadline 已经是隐含
+ *     必需品"。
+ *
+ * 1.5 Project 状态机（27_ProjectEngine.gs，ADR-2026-07-24-017）：
+ *     非终态 DRAFT/READY/IN_PROGRESS/WAITING/BLOCKED，终态另有
+ *     COMPLETED/CANCELLED/CONVERTED_TO_TASK/ARCHIVED 一类（本次审查
+ *     未逐一列全终态清单，「五」Overdue 判断只依赖"是否非终态"这个
+ *     二元判断，不需要区分具体是哪个终态）。这套状态机跟"只增不删，
+ *     用状态字段表达结束"（00_Data_Ownership.gs「五」）的既有原则
+ *     一致——Project overdue 判断必须尊重这套已有状态机，不能另起
+ *     一套独立的"是否过期"逻辑。
+ *
+ * 1.6 Workflow 的 recurrence_rule 机制（28_WorkflowEngine.gs）：
+ *     workflow_type 含 SEQUENTIAL/PARALLEL/BRANCH/RECURRING 四种；
+ *     RECURRING 类型的 Workflow 完成后，"按 recurrence_rule 判断下一次
+ *     是否已到期，due_date 按 recurrence_rule 重新计算"——这套机制已经
+ *     在 Task 层面独立处理"下一次什么时候到"，不依赖、也不产出任何
+ *     Workflow 级别的单一 deadline。这是「五」判断"不要自动给
+ *     Workflow 加 deadline"的关键证据：一个 RECURRING Workflow 概念上
+ *     没有"唯一一个截止时间"，它的"到期"是持续滚动的，跟 Project 的
+ *     "有边界的一件事"性质不同。
+ *
+ * 1.7 Schema Authority / Metadata Standard（00_Data_Ownership.gs）：
+ *     LIFE_PROJECTS/LIFE_WORKFLOWS 写入权唯一持有者是
+ *     10_ProjectionEngine.gs（扩展），铁律"只增不删"。十一字段
+ *     Metadata Standard（creator/decision_owner/approval_status 等）
+ *     适用于 Project/Task/Workflow/Note 四类实体，若 Project 新增
+ *     deadline 字段，字段本身的写入权仍然落在 10_ProjectionEngine.gs，
+ *     不产生新的写入权分裂——这条在 Deliverable 3 会再次确认。
+ *
+ * 1.8 既有可直接复用的两条跨 OS 边界判断先例：
+ *     （a）Dashboard Ownership（00_ADR.gs 对应条目，Domain Dashboard
+ *     vs Execution Dashboard）——判断方法是"只读本 Domain 自己的表就够
+ *     → Domain 自己拥有；需要跨读其它 Domain 才够 → Execution OS 的
+ *     范围，本项目不实现"。这条判断方法本次直接套用在"谁拥有 Project
+ *     deadline"这个问题上，见「七」。
+ *     （b）ADR-2026-07-24-012（Domain is Producer, Execution is
+ *     Consumer）——Domain 只管发布 Business Event，不关心消费方怎么用；
+ *     消费方只允许保存 Reference，不允许复制/反向修改 Domain 数据。
+ *     这条本次同样直接套用，见「七」。
+ *
+ * 1.9 【重要限制，如实声明】本次 Review 没有查询 Carson 真实
+ *     Spreadsheet 里现有 Project 的实际行数、是否已经有用户在
+ *     description/title 里手写过截止日期一类的非结构化线索——本次
+ *     只能核对 schema（代码层面确认 LIFE_PROJECTS 没有任何 due_date
+ *     类字段），不能核对存量数据。这一点直接决定 Deliverable 4
+ *     （Migration Plan）目前只能给方法论，给不出真实数字，见该节。
+ */
+
+// ------------------------------------------------------------
+// 二、Proposed Schema Changes（Deliverable 2）—— 本节是提议内容，
+//     未经批准，不写入 00_Sheets_Structure.gs 本体
+// ------------------------------------------------------------
+
+/**
+ * 2.1 是否需要 deadline（Q1）——不是因为 Reminder OS 想要，Project 就
+ *     必须有：
+ *
+ *     从业务语义看，Project 应该是可选（optional/nullable），不是
+ *     强制。证据：1.1 提到的"喂流浪猫计划"这类 Project 本身就可能没有
+ *     自然截止日期；Task 层面 reminder_policy/due_date 本身也是可空
+ *     设计（20_ReminderEngine.js 的既有惯例），Project 采用同样"可以
+ *     不设"的模式，跟既有产品哲学一致，不是新发明一套更严格的规则。
+ *     强制要求每个 Project 都填 deadline，会把"喂流浪猫计划"这类本来
+ *     没有明确终点的生活事务硬套一个不存在的日期，属于为了满足某个
+ *     消费方（Reminder）反过来扭曲 Domain 语义，正是 Architecture
+ *     Owner 在本次 Review 要求里明确要避免的陷阱。
+ *
+ *     Project deadline 与 Task due date 的关系：两者独立——一个
+ *     Project 下的 Task 各自可以有自己的 due_datetime，不需要、也不
+ *     应该因为 Project 本身没有 deadline 就不能设 Task due_datetime
+ *     （现状已经是这样，Task.due_datetime 从来不依赖 project_id 是否
+ *     指向一个有 deadline 的 Project）；反过来，Project 设了 deadline
+ *     也不会自动给它名下的 Task 都填上同一个 due_datetime（会不会
+ *     "建议"是 UX 层面的事，这次不预先定稿，见「八」）。
+ *
+ * 2.2 due_date vs due_datetime（Q2）——三个候选模型：
+ *
+ *     Model A（纯 due_date，日期级）：只有一个字段，跟 Task V1 时代
+ *     的粒度一致。优点：最简单。缺点：跟 Task 现在已经是 datetime-aware
+ *     （Review #3 已经把 Task 升级到分钟级）背道而驰，Reminder OS 的
+ *     _resolveEffectiveDueDatetime_ 已经是三层解析设计，Project 单独
+ *     退回纯日期级，会让"同一个 Reminder OS 引擎，对 Task 能精确到
+ *     分钟、对 Project 只能到天"这种不一致长期存在，没有技术理由
+ *     支持这个不一致。
+ *
+ *     Model B（due_date + due_time 两个独立字段，都可空）：比 Model A
+ *     精细，但需要两个字段各自处理"有 date 没 time"的情况，等于
+ *     重新发明一遍 Task 已经踩过坑、已经修过的同一类问题
+ *     （00_Sheets_Structure.gs/20_ReminderEngine.js 现有的
+ *     due_date+due_time 组合解析逻辑）。
+ *
+ *     Model C（推荐）：due_datetime（canonical，完整 ISO）+
+ *     due_date/due_time 作为 fallback 输入方式——逐字复用 Task
+ *     现有的三层模型和字段命名（due_datetime/due_date/due_time），
+ *     不发明新形状。理由：（a）Reminder OS 的
+ *     _resolveEffectiveDueDatetime_ 已经认识这个精确的字段组合，
+ *     如果 Project 采用同一形状，「七」的 Reminder 集成部分不需要
+ *     Reminder OS 侧写任何新的解析逻辑，只需要新的注册/消费入口；
+ *     （b）跟 Review #3 已经验证过的迁移路径、显示逻辑一致，
+ *     06_TaskIntentParser 一类的展示层代码有直接可抄的先例；
+ *     （c）三个字段都可空，直接满足 2.1"deadline 整体可选"的要求
+ *     （due_datetime 为空即"没有 deadline"，不需要额外的
+ *     has_deadline 布尔字段）。
+ *
+ *     本节是 Deliverable 2 的建议内容，具体选哪个模型是「八」
+ *     Pending Design Decision 的一项，不在这里替 Architecture Owner
+ *     拍板。
+ *
+ * 2.3 Workflow 是否需要自己的 deadline（Q3）——不建议自动给：
+ *
+ *     1.6 已经给出证据：RECURRING 类型的 Workflow 本身没有"唯一
+ *     截止时间"这个概念，SEQUENTIAL/PARALLEL/BRANCH 三种非 recurring
+ *     类型，理论上可以有一个"整个 Workflow 实例什么时候该完成"的
+ *     deadline，但目前找不到任何现有机制（既没有 UI 入口，也没有
+ *     Engine 逻辑）依赖或需要它——加上 Workflow 命名空间本来就已经
+ *     承载了 project_id（可选归属）+ instantiated_from_template_id
+ *     （版本绑定）两条关系，贸然再加一个 due_datetime，在没有具体
+ *     使用场景验证之前，属于「不做的关系，避免过度设计」
+ *     （00_Entity_Relationship.gs「四」）这条既有原则要提防的对象。
+ *     建议：这次不给 Workflow 加 deadline 字段，若未来出现具体、
+ *     独立于 Project 的 Workflow-level 截止时间需求（跟 Project
+ *     deadline 不同的场景），单独另开一次评审，不在本次顺带决定。
+ */
+
+// ------------------------------------------------------------
+// 三、API Impact（Deliverable 3）
+// ------------------------------------------------------------
+
+/**
+ * 若 Deliverable 2 的 Model C 获批，预计需要改动（本节全部是"如果
+ * 批准会怎样"的提议内容，本次不动一行代码）：
+ *
+ *   27_ProjectEngine.gs — createProject/updateProject 新增对
+ *     due_datetime/due_date/due_time 三个可选字段的接收与校验
+ *     （校验逻辑直接抄 Task 侧既有实现，不重新设计一遍）。
+ *   00_Sheets_Structure.gs — LIFE_PROJECTS 新增三列，且需要明确
+ *     "这三个字段算不算十一字段 Metadata Standard 之外的"业务字段""——
+ *     按现有分类，跟 Task 的 due_datetime 一样，属于业务字段，不是
+ *     Metadata，不需要改动 00_Data_Ownership.gs「三」的字段清单本身。
+ *   10_ProjectionEngine.gs — 扩展部分需要认识这三个新列（沿用既有
+ *     "只增不删"的 Projection 写入模式，不需要新的写入权分裂，1.7
+ *     已确认）。
+ *   14_ProjectQueryEngine.gs — getActiveProjects()/getProjects() 如果
+ *     要支持按 due_datetime 排序/筛选，需要相应扩展（是否现在就做，
+ *     还是等真的有消费方需要再做，属于「八」的范围）。
+ *   UI（50_UIBridge.gs / ui_index.html）— Add/Edit Project 表单是否
+ *     暴露这个字段，是独立的 UX 决定，本次不预先定稿（同「八」）。
+ *   Task↔Project 转换（12/27 两个 Engine，ADR-2026-07-24-015）——
+ *     需要明确转换时 due_datetime 怎么处理：Task→Project 时，源
+ *     Task 的 due_datetime 是否带过去成为新 Project 的 due_datetime？
+ *     Project→Task 反向转换呢？这条字段映射规则目前是空白，若 Model C
+ *     获批，必须在正式实现前补齐，不能实现阶段临时决定（比照
+ *     00_Business_Rules.gs「一」现有转换字段映射表的详尽程度）。
+ */
+
+// ------------------------------------------------------------
+// 四、Migration Plan（Deliverable 4）
+// ------------------------------------------------------------
+
+/**
+ * 4.1 【如实声明，见 1.9】本次没有真实 Spreadsheet 数据访问权限，以下
+ *     是需要 Architecture Owner（或下一次拿到数据访问权限的会话）
+ *     回答的具体问题清单，不是本次给出的答案：
+ *
+ *       - 现在 LIFE_PROJECTS 表实际有多少行（Draft/Design Phase 状态
+ *         下可能是 0 或很少，若已经在生产使用则需要真实计数）？
+ *       - 现有 Project 的 title/description 里有没有大量手写日期
+ *         的模式（比如"9月10日前完成"），如果有，是否值得写一个
+ *         一次性脚本尝试识别、建议映射到新字段（供用户确认，不自动
+ *         写入——遵守既有"AI Suggests, Human Confirms"原则）？
+ *       - 现有 Project 有没有其它可以安全复用的时间类字段（本次
+ *         schema 核对没有找到，只有 Metadata 的 created_time/
+ *         updated_time，两者语义都不是 deadline，不能直接挪用）？
+ *
+ * 4.2 无论上面的答案是什么，迁移方案本身推荐走"新增可空列，不做
+ *     强制回填"的模式（同 Review #3 Task due_time 迁移的既有先例，
+ *     00_Architecture_Review.gs「七、四」migrateSchemaDueTime()）：
+ *     现有 Project 的三个新字段全部留空，不是 error 状态，Project
+ *     overdue 判断（见「五」）天然把"没有 deadline"处理成"不参与
+ *     overdue 判断"，不需要一次性回填就能安全上线。
+ *
+ * 4.3 是否影响 identity：不影响——07_IdentityEngine 的
+ *     IDENTITY_AFFECTING_FIELDS（Task/Workflow 各自的身份判定字段
+ *     清单，28_WorkflowEngine.gs:51 可查到 Workflow 那份）里没有任何
+ *     due_date/due_time 类字段参与身份判定，新增 Project 的
+ *     due_datetime 三列没有理由打破这个既有原则，建议同样不参与
+ *     Project 的 identity 判定（若 Project 也有类似的
+ *     IDENTITY_AFFECTING_FIELDS 清单，本次审查未找到独立的 Project
+ *     Identity Engine，需要在 Deliverable 3 正式设计阶段确认这一点
+ *     以什么方式落地）。
+ */
+
+// ------------------------------------------------------------
+// 五、Risk Analysis（Deliverable 5）
+// ------------------------------------------------------------
+
+/**
+ * 5.1 Project Overdue 的定义（Q4）——推荐：
+ *
+ *     Project overdue = 存在 due_datetime（非空） AND due_datetime
+ *     早于当前时间 AND status 属于非终态集合（DRAFT/READY/
+ *     IN_PROGRESS/WAITING/BLOCKED，1.5）。
+ *
+ *     明确排除的错误模型：不能因为"Project 下有 Task 逾期"就推导
+ *     "Project 也逾期"——这是两个不同语义的判断（Architecture Owner
+ *     在需求里已经明确指出这一点）。理由：Project 本身没有 deadline
+ *     时，它名下 Task 逾期只说明"某个具体动作没按时做"，不代表
+ *     "这件事本身错过了它的边界"——后者需要 Project 自己有 deadline
+ *     才谈得上"逾期"，两者是独立的统计口径，不应该互相偷换。这一点
+ *     对「三」提到的 Task↔Project 转换尤其重要：如果混淆两种
+ *     overdue，Project→Task 降级转换时可能出现"这个 Project 明明
+ *     没有自己的 deadline，却因为名下有逾期 Task 被标记过'逾期'，
+ *     降级成 Task 后这个状态却又消失了"这种自相矛盾的用户体感。
+ *
+ * 5.2 Workflow 级联风险——2.3 已经建议不给 Workflow 单独加 deadline，
+ *     这里补一条具体风险：如果未来有人提议"Workflow 自动继承所属
+ *     Project 的 deadline"，需要格外小心 RECURRING 类型（1.6）——
+ *     一个循环执行的 Workflow 沿用它所属 Project 的单一 deadline，
+ *     语义上说不通（Project 的 deadline 是"这件事什么时候该完成"，
+ *     RECURRING Workflow 从设计上就没有"完成"这个终点）。如果这次
+ *     或未来批准 Model C，建议在正式 ADR 里明确写清楚"Workflow 不
+ *     自动继承 Project.due_datetime"这条边界，不要留给实现阶段
+ *     各自理解。
+ *
+ * 5.3 【Architecture Owner 特别提醒的陷阱，本次评审认同并采纳】
+ *     不要因为这次评审最初的触发点是 Reminder OS 的集成缺口，就把
+ *     schema 设计反向拟合 Reminder OS 的需要——2.1/2.2 的推荐理由
+ *     全部锚定在 Project 自己的业务语义（跟 Task 现有模型保持一致、
+ *     覆盖"喂流浪猫计划"这类无自然截止日的场景）和平台级一致性
+ *     （未来 Calendar/Execution/Property 等 OS 都可能是同一个
+ *     due_datetime 的读者），Reminder OS 只在「七」最后一节才出现，
+ *     且明确是"消费方之一"，不是决定 schema 形状的理由本身。
+ */
+
+// ------------------------------------------------------------
+// 六、Updated File Map（Deliverable 6，proposed —— 本节是提议内容，
+//     尚未写入 00_File_Map.gs 本体，待设计批准、实现完成后再正式同步）
+// ------------------------------------------------------------
+
+/**
+ * 若 Model C 获批并实现，预计需要更新变更说明的文件：
+ *   00_Sheets_Structure.gs（LIFE_PROJECTS 新增三列）、27_ProjectEngine.gs
+ *   （新增字段读写）、10_ProjectionEngine.gs（认识新列）、
+ *   14_ProjectQueryEngine.gs（如果同时做排序/筛选扩展）、
+ *   00_Data_Ownership.gs（Schema Authority 矩阵本身不变，但字段清单
+ *   相关的旁注需要提一句新增字段的存在）。「三、Architecture Layer
+ *   Map」预计无变更（不新增文件，不改变任何文件的层间调用方向，同
+ *   Review #3「六」的先例判断）。
+ */
+
+// ------------------------------------------------------------
+// 七、Updated Data Flow（Deliverable 7，proposed）
+// ------------------------------------------------------------
+
+/**
+ * 7.1 Ownership（Q5）——沿用已经确立的规则，不反过来：
+ *
+ *     Personal Life OS
+ *       └─ owns Project.due_datetime（业务数据，跟 Project 本身的
+ *          所有权归属一致，1.7 已确认写入权不分裂）
+ *              │
+ *              ▼ Reminder OS 只读，不写
+ *     Reminder OS
+ *       └─ owns reminder scheduling/execution（ReminderRules/
+ *          Occurrences/History，Reminder OS 自己的调度状态，跟 TASK
+ *          路径 ADR-009 已经确立的边界完全一致）
+ *
+ *     不允许反过来：Reminder OS 不能成为 Project.due_datetime 的
+ *     权威来源，也不能替 Personal Life OS 决定"这个 Project 有没有
+ *     deadline"——跟 ADR-2026-07-24-012（Domain is Producer,
+ *     Execution is Consumer）、Reminder OS 侧 Schema Authority 矩阵
+ *     "Reminder Rule | Domain（本项目）"这一行（00_Domain_Boundary.gs）
+ *     是同一个原则的第三次复用，不是新发明。
+ *
+ * 7.2 Execution OS 的影响（Q6）——套用 1.8(a) 的判断方法：
+ *
+ *     Personal Life OS
+ *       Project.due_datetime（Domain 数据，只读本 Domain 自己的表
+ *       就能拼出来）
+ *             │
+ *             │ 发布 Business Event（PROJECT_UPDATED 一类，具体
+ *             │ 走既有 EventBus 机制，不新开一套）
+ *             ▼
+ *     Life Execution OS
+ *       Reference（entity_type/entity_id/可选 snapshot/
+ *       last_sync_time，同 ADR-2026-07-24-012 已经定义的 Execution
+ *       侧 Reference 形状，不新发明一套）
+ *             │
+ *             ▼
+ *     Today / Weekly View（跨多个 Domain OS 聚合，"今天有哪些
+ *     Project/Task 到期"这类视图，符合 1.8(a) 的 Execution
+ *     Dashboard 判断标准：需要跨读至少一个其它 Domain 才够，不是
+ *     Personal Life OS 自己能拼出来的）
+ *
+ *     Execution OS 只能读/Reference，不能把 deadline 写回 Project——
+ *     跟「五、5.3」的陷阱提醒是同一条边界在不同层面的重申。
+ *
+ * 7.3 Reminder Integration（Q8，最后才讨论，如 Architecture Owner
+ *     要求）——沿用 TASK 路径已经验证过的 Model A（ADR-2026-08-27-009）：
+ *
+ *     Personal Life OS
+ *       Project.due_datetime 被设置/变化
+ *             │
+ *             ▼
+ *     （未来，不在本次范围）ProjectEngine 发布 REMINDER_REQUESTED，
+ *     entity_type: 'PROJECT'，payload 只带 entity_id + reminder_policy，
+ *     不带 due_datetime 本身——跟 TASK 路径完全一致的"事件只作登记
+ *     信号，不作数据快照"原则（ADR-009 决策 2）。
+ *             │
+ *             ▼
+ *     Reminder OS 新增 entity_type: 'PROJECT' 消费分支（结构上可以
+ *     复用 23_ReminderRequestConsumer.gs 的水位/幂等机制，但需要
+ *     Reminder OS 侧读 Personal Life OS 的 LIFE_PROJECTS 表而不是
+ *     Tasks 表——这条本身不需要新的跨项目授权，1.8 已经确认 Reminder
+ *     OS/Personal Life OS 共享同一个 SPREADSHEET_ID）
+ *             │
+ *             ▼
+ *     ReminderRules（复用既有表，entity_type 需要从"写死 task_id"
+ *     泛化，或另开一张结构相同的独立表——这条选择留给 Reminder OS
+ *     那一侧真正设计 Project 消费分支时再定，本次不预先决定）
+ *
+ *     Offset 建议：不在本次预先设计具体 offset 选项（比如"提前几天"
+ *     的候选列表）——这是 UX 层面的决定，等 Model C 的字段本身先
+ *     批准落地，再单独讨论 Reminder 这一层怎么呈现，避免本次评审
+ *     范围进一步膨胀。
+ */
+
+// ------------------------------------------------------------
+// 八、Pending Design Decisions（不是 Finding，也不是 Improvement
+// Opportunity——这些是"证据本身无法替你选出答案，需要一个决策角色
+// 做判断"的设计分岔点，沿用 Review #3 已经确立的既有惯例：条目绑定
+// 角色而非人名）
+// ------------------------------------------------------------
+
+/**
+ * Decision Authority: Architecture Owner（本项目现由 Carson 担任）。
+ *
+ * 1. [Decision Type: Semantic] Project deadline 是否为可选字段——本次
+ *    推荐"可选"（2.1），需要 Architecture Owner 确认或改判。
+ * 2. [Decision Type: Semantic] due_date/due_datetime 采用 Model A/B/C
+ *    哪一个——本次推荐 Model C（2.2），需要确认。
+ * 3. [Decision Type: Semantic] Workflow 是否需要独立于 Project 的
+ *    deadline 字段——本次推荐"不加，除非未来出现具体场景"（2.3），
+ *    需要确认。
+ * 4. [Decision Type: Semantic] Task↔Project 双向转换时 due_datetime
+ *    的字段映射规则（「三」最后一条）——本次没有给出具体映射建议，
+ *    需要 Architecture Owner 判断这条转换语义应该是什么，再交给
+ *    Deliverable 3 的正式实现设计。
+ * 5. [Decision Type: Migration] 需要真实 Spreadsheet 数据访问，回答
+ *    「四、4.1」列出的三个具体问题，才能把 Migration Plan 从方法论
+ *    变成有真实数字支撑的执行计划。
+ * 6. [Decision Type: UX] Add/Edit Project 的 UI 表单是否暴露这个
+ *    字段、以什么形式（跟「三」提到的一样，本次不预先定稿）。
+ * 7. [Decision Type: Governance] 若 1-4 获批，正式 ADR 的编号/落点——
+ *    建议命名类似 ADR-2026-0X-XX-0XX「Project Deadline Contract」，
+ *    具体编号沿用 Personal-Life-main 自己 00_ADR.gs 的既有序列规则，
+ *    不是 Reminder OS 那一侧的 00_ADR_00X 序列（两个项目的 ADR 序列
+ *    独立编号，见 Reminder OS 侧 ADR-009 治理小节的既有澄清）。
+ *
+ * 七项里，1-4 是本次评审的核心、彼此有依赖关系（2 依赖 1 的答案，
+ * 4 依赖 2 的答案）；5 独立、不阻塞 1-4 的讨论，但阻塞正式 Migration
+ * Plan 定稿；6-7 都不阻塞 1-4，可以在正式实现阶段再定。
+ */
+
+// ------------------------------------------------------------
+// 九、Review Summary（供 06_Review_History.md 收录用——本次未同步
+// 写入该文件，理由见下方 Notes）
+// ------------------------------------------------------------
+
+/**
+ * Reviewer:      Claude（single-project review，evidence-first——
+ *                every claim checked against actual code/governance
+ *                files, no assumption-based findings；1.9 明确声明
+ *                的数据访问限制除外）
+ * Gate feeding:  Feature/Change Review（跟 Review #1/#2 的周期性
+ *                Domain Profile 合规扫描性质不同，同 Review #3）
+ * Findings:      本次不是 UEF Checklist 合规扫描，不产出 HIGH/MEDIUM/
+ *                LOW 分级 Finding；核心产出是「八」的 7 项 Pending
+ *                Design Decision。
+ * Dispositions:  0（本次全部 7 项待 Architecture Owner 批准，未批准
+ *                任何一项，也没有单方面替 Architecture Owner 拍板
+ *                任何一项）。
+ * Notable:
+ *   - 现有 WorkflowTemplate capture/instantiate 机制（1.4）完全不
+ *     依赖 Project deadline，这条证据本身值得记录：说明"Project 没有
+ *     deadline"这件事至今没有真的挡住任何一个已经上线的功能，本次
+ *     新增这个字段是为了服务未来（Reminder/Calendar/Execution 等）
+ *     消费方，不是修一个当前已经存在的功能缺陷。
+ *   - Review #3 已经把 Task 的 due_datetime 三层模型验证到生产环境，
+ *     本次 Model C 完全复用同一个形状而不是重新设计，是这次 Review
+ *     推荐意见里置信度最高的一条（其余几条更依赖 Architecture Owner
+ *     的产品判断，不是纯技术推导）。
+ * Status:        REVIEW ONLY——PENDING ARCHITECTURE OWNER APPROVAL。
+ *                未实现任何一行代码，未新增任何字段，未跑任何
+ *                migration，Reminder OS 一侧未做任何改动。
+ *
+ * Notes（为什么本次没有同步写入 06_Review_History.md）：核对该文件
+ * 既有收录记录，发现 Review #3（同样是"批准前"状态起步的 Feature
+ * Review）在完成设计并获批实现之后，也没有被补录进 06_Review_
+ * History.md——推断该文件收录的是"已经走完批准流程、有真实
+ * Disposition"的 Review，不收录仍处于 Pending Design Decision 阶段
+ * 的记录。本次 Review #4 现在的状态（全部待批准）跟这个推断一致，
+ * 所以没有写入，等 Architecture Owner 批准、Deliverable 4 的
+ * migration 数据补齐、正式 ADR 落地之后再补——这条本身也可以算「八」
+ * 之外一个更小的、不阻塞主线的观察，供 Architecture Owner 判断
+ * 06_Review_History.md 的收录标准是否需要写清楚（本次不擅自去查证
+ * Review #3 当初没有补录是不是也是同一个原因，只是同一份文件里两次
+ * 独立出现同一个模式，如实记录）。
  */
