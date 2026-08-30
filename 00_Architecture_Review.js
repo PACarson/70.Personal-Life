@@ -1775,8 +1775,20 @@
  *   ✅ 不假设 Review #4 的 Model C 已经是 production contract——下面
  *      每一条都标注"若 Model C 获批"这个前提，不是既成事实
  *
+ * 【明确记录一条状态，避免只停留在聊天记录里】Architecture Owner 在
+ * 要求这次 Schema Impact Audit 时，原文说"整体方向我原则上同意"，
+ * 逐条同意了 Review #4「八」列出的 8 条推荐方向（deadline 可选、
+ * Model C、Workflow 不加 deadline、Project overdue 不得由 Task
+ * overdue 推导、既有 ownership 模式、Execution OS 只能 Reference、
+ * Reminder OS 沿用 Model A、不能让 Reminder 反过来决定 schema）——
+ * 这是"原则性同意"，不是"批准进入 Implementation"，两者本次严格
+ * 区分：前者已经发生（这条记录本身就是持久化它），后者仍然待
+ * Stage Tracking 走到 Decision Ready 才算数。
+ *
  * Stage Tracking：
  *   Review #4 Proposed Decision   ✅ 已完成（2026-08-29 之前）
+ *   Architecture Owner 原则性同意  ✅ 已发生（见上，2026-08-29）——
+ *                                    不等于批准 Implementation
  *   Schema Impact Audited          ✅ 本文档
  *   Decision Ready                 ⏸️ 待 Architecture Owner 批准「十一」
  *                                    列出的 Open Decisions
