@@ -62,9 +62,23 @@ var ViewEngine = (function () {
     return (d && !isNaN(d.getTime())) ? d : null;
   }
 
+  /**
+   * 【Slice 2,2026-09-02 收紧】原来只排除 DONE/CANCELLED 两种状态，跟
+   * 20_TaskEngine.gs 别处使用的终态集合（markTaskConverted_ 的
+   * terminalStatuses 含 NOT_SELECTED；CONVERTED 单独处理但同样是终态）
+   * 不一致。重新核对 10_ProjectionEngine.gs 后确认：目前这【不是】一个
+   * 会实际触发的 bug——projectTaskConvertedToProject_/
+   * projectTaskNotSelected_ 已经会把这两种状态的 Task 从 ActiveTasks
+   * 物理删除，而这个文件的七个高频视图（today/tomorrow/thisWeek/
+   * thisMonth/upcoming/overdue/recurring）全部读 ActiveTasks（V4.8 修复），
+   * 所以在现有调用路径下不会实际出现 CONVERTED/NOT_SELECTED 任务泄漏进
+   * 这些视图的情况。收紧这里纯粹是防御性的：Slice 2 新增的
+   * getTaskDashboard() 直接构建在这个函数之上，让它的判定跟真实终态集合
+   * 保持一致，不依赖"上游 Sheet 恰好已经把它们删掉了"这个隐藏前提。
+   */
   function _isNonTerminal_(task) {
     var s = String(task.status || '').toUpperCase();
-    return s !== 'DONE' && s !== 'CANCELLED';
+    return s !== 'DONE' && s !== 'CANCELLED' && s !== 'CONVERTED' && s !== 'NOT_SELECTED';
   }
 
   /** Today：due_date 落在今天（不看时间，只看日期部分），且未终结 */

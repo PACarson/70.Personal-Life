@@ -371,6 +371,81 @@ var TaskQueryEngine = (function () {
     return AnalyticsEngine.computeStatistics(tasks); // 26_AnalyticsEngine.gs
   }
 
+  // ============ Task Dashboard（Slice 2,2026-09-02 新增）============
+  // UI 专用的结构化 Dashboard 入口，跟 25_DashboardEngine.build 是两条
+  // 完全独立的路径——后者产出 Telegram 用的纯文本，两者互不修改、互不
+  // 依赖对方（25_DashboardEngine.gs 本身在这次 Slice 2 里零改动）。复用
+  // 同一批 24_ViewEngine.gs 纯函数过滤器，没有新写任何一条 Task 过滤
+  // 逻辑；ActiveTasks 只读一次（_readActiveTasks_），在内存里对同一份
+  // 数组跑多个过滤器，避免重复读 Sheet。
+  //
+  // 时间类 bucket（overdue/today/this_week/upcoming）互斥——同一个任务
+  // 只出现在其中一个，按 overdue > today > this_week（本周剩余，已排除
+  // today）> upcoming（本周之后）的优先级去重。recurring/high_priority
+  // 是另一个维度（任务类型/优先级，不是"还有多久到期"），刻意不跟时间类
+  // bucket 互斥去重——一个任务完全可能同时出现在 today 和 recurring 里，
+  // 这不是重复计数，是两个不同问题各自的答案。
+  //
+  // Project 不参与——Project 目前没有 due_date/due_time/due_datetime
+  // schema（27_ProjectEngine.gs 未定义、00_Sheets_Structure.gs 的
+  // LIFE_PROJECTS 同样没有这几列），这是 Project Deadline Contract 尚未
+  // 批准的直接后果。这里不假设、不新增字段——project_due_view 显式标记
+  // BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT，而不是静默省略 Project。
+  //
+  // source_domain 分组：Slice 1 之前创建的既有记录是旧默认值
+  // 'Personal Life'（无 OS 后缀），之后创建的新记录是 'PersonalLifeOS'。
+  // _normalizeOsDomainForGrouping_ 只在【读取/展示时】把两者当同一组，
+  // 不改写 Sheet 里任何一行的存储值——不是 data migration。
+  function _normalizeOsDomainForGrouping_(raw) {
+    if (raw === 'Personal Life') return 'PersonalLifeOS';
+    return raw || 'PersonalLifeOS';
+  }
+
+  function getTaskDashboard(chatId) {
+    var active = _readActiveTasks_(chatId);
+
+    var overdueTasks      = ViewEngine.overdue(active);
+    var todayTasks        = ViewEngine.today(active);
+    var weekTasks         = ViewEngine.thisWeek(active);
+    var upcomingTasks     = ViewEngine.upcoming(active);
+    var recurringTasks    = ViewEngine.recurring(active);
+    var highPriorityTasks = ViewEngine.highPriority(active);
+
+    var seen = {};
+    function dedupeAgainstSeen_(list) {
+      return list.filter(function (t) {
+        if (seen[t.task_id]) return false;
+        seen[t.task_id] = true;
+        return true;
+      });
+    }
+    var dedupedOverdue = dedupeAgainstSeen_(overdueTasks);
+    var dedupedToday   = dedupeAgainstSeen_(todayTasks);
+    var thisWeekRest    = dedupeAgainstSeen_(weekTasks);     // 本周剩余，已排除 today
+    var upcomingRest     = dedupeAgainstSeen_(upcomingTasks); // 本周之后
+
+    var byOsDomain = {};
+    dedupedOverdue.concat(dedupedToday, thisWeekRest, upcomingRest).forEach(function (t) {
+      var os = _normalizeOsDomainForGrouping_(t.source_domain);
+      byOsDomain[os] = byOsDomain[os] || [];
+      byOsDomain[os].push(t);
+    });
+
+    return {
+      overdue:          dedupedOverdue,
+      today:            dedupedToday,
+      this_week:        thisWeekRest,
+      upcoming:         upcomingRest,
+      recurring:        recurringTasks,
+      high_priority:    highPriorityTasks,
+      by_os_domain:     byOsDomain,
+      project_due_view: {
+        status:  'BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT',
+        message: 'Project 尚无 due_date/due_time schema，Project Deadline Contract 批准前不参与任何 Due 视图。'
+      }
+    };
+  }
+
   return {
     getTask:             getTask,
     getTasks:            getTasks,
@@ -391,7 +466,8 @@ var TaskQueryEngine = (function () {
     getPriorityTasks:    getPriorityTasks,
     searchTasks:         searchTasks,
     getDashboard:        getDashboard,
-    getStatistics:       getStatistics
+    getStatistics:       getStatistics,
+    getTaskDashboard:    getTaskDashboard
   };
 })();
 
