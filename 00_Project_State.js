@@ -1231,3 +1231,53 @@
  * 下一步：等 Carson 把 Slice 1 + Slice 2 的实机结果一起贴回来——通过后
  * 才进入 Slice 3（Note Edit）。
  */
+
+// ============================================================
+// 二十七、Slice 1 + 2 实机测试报告 + 一处 Hotfix（2026-09-02）
+// ============================================================
+
+/**
+ * Carson 回家后实机跑了 Slice 1 + Slice 2：自动化测试 4/4、14/14 全绿；
+ * Add Task 写入成功无报错，OS 下拉可选，提交后焦点回弹；OS 归一化合并
+ * 正常（未拆成两组）；Dashboard 的 Done/Cancel 正常——以上全部 LIVE
+ * VERIFIED PASS，Slice 1 从「SLICE_1_LIVE_VALIDATION_PENDING」正式转为
+ * 通过。
+ *
+ * 唯一发现的问题：今天到期的任务出现在 Overdue，没有出现在 Today。
+ *
+ * 根因（05_SheetUtils.gs，不是 Slice 1/2 新写的代码，是既有共用函数）：
+ * isOverdue_() 对纯日期字符串（无 due_time）解析后是当天 00:00:00，原来
+ * 直接拿这个时间点跟 Date.now() 比——导致"今天到期"的任务从当天凌晨过后
+ * 的每一刻起就被判定成 overdue。这个函数被 24_ViewEngine.overdue() 和
+ * 26_AnalyticsEngine.computeStatistics 两处共用，之前审计没有发现，是
+ * 这次 Slice 2 的去重逻辑（overdue 优先级高于 today，一个任务只保留在
+ * 一个 bucket 里）第一次让这个既有问题变得肉眼可见——旧的 Telegram
+ * buildTodayDashboard 因为 Today/Overdue 两个分区之间本来就没有互相去重，
+ * 这个任务会同时出现在两个分区里，没有像 Slice 2 这样表现成"从 Today
+ * 消失"，所以更容易被忽略。
+ *
+ * 修复：isOverdue_() 改成纯日期字符串比到"当天结束"（23:59:59.999）而
+ * 不是当天开始，今天到期的任务要到明天才算 overdue，跟日历直觉一致。
+ * 带时间部分的字符串维持原来的精确时刻比较，不受影响。只改了
+ * 05_SheetUtils.gs 一个文件；24_ViewEngine.gs/26_AnalyticsEngine.gs 的
+ * 调用点不需要跟着改，因为问题出在被调用的共用函数本身，不是调用方式。
+ *
+ * 需要如实指出的一点：这处修复会让 Telegram 的 /today 指令（
+ * 25_DashboardEngine.buildTodayDashboard 的 Overdue 分区）跟
+ * AnalyticsEngine 算出来的 overdue 统计数字也发生变化——不再把今天到期
+ * 的任务算进逾期。这不是为了 Web UI 而改动 25_DashboardEngine.gs 本身
+ * （那个文件零改动），是修复一个两边共用、此前一直存在的真实计算错误，
+ * 双方都会因此变得更准确。
+ *
+ * 验证状态：
+ *   - STATIC VERIFIED（Node 模拟，用真实当前日期跑了 isOverdue_ 本身）：
+ *     今天到期 → false（修复前是 true）；昨天到期 → true；明天到期 →
+ *     false；空值 → false；里程类（'40000km'）→ false。修复前后对
+ *     "非今天"的既有场景结果完全一致，只改变了"恰好是今天"这一种情况。
+ *   - LIVE TEST PENDING：这是函数级模拟，不是在真实 GAS+Sheets+浏览器
+ *     环境里用一条真实 Task 行跑出来的——请 Carson 用同一条今天到期的
+ *     Task 再验证一次 Dashboard 的 Today/Overdue 分区，以及方便的话
+ *     顺手看一眼 Telegram /today 的 Overdue 分区是不是也不再把它算进去。
+ *
+ * 下一步：等这一处 hotfix 的实机确认，通过后进入 Slice 3（Note Edit）。
+ */

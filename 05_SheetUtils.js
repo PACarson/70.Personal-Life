@@ -319,6 +319,26 @@ function batchUpsertRowsByKey_(sheetName, keyHeader, rowDataObjArray) {
 /**
  * 判断 due_date 是否已经过期。只处理日期类，里程类('40000km'这种)先跳过
  * （依赖 RiderConnector 的当前里程数据，暂时无法判断）。
+ *
+ * 【2026-09-02 修复，Carson 实机测试报告】纯日期字符串（'2026-09-02'这种，
+ * 没有 due_time）经 parseDueDate_ 解析后是当天 00:00:00（本地时区午夜）——
+ * 原来直接拿这个时间点跟 Date.now() 比，导致"今天到期"的任务从当天
+ * 凌晨过后的每一刻起就被判定成 overdue，实机验证到的症状是：今天到期的
+ * 任务出现在 Overdue，没有出现在 Today（ViewEngine.today/overdue 两个
+ * 视图的过滤条件本身没有问题，是这个共用的过期判断把"今天"提前判成
+ * "已过期"）。修复：纯日期字符串比到"当天结束"（23:59:59.999），今天
+ * 到期的任务要等到明天才算 overdue，跟日历意义上的"今天到期"直觉一致。
+ * 带时间部分的字符串（如果未来某处传入完整 datetime）维持原来的精确
+ * 时刻比较，不受影响。这是 05_SheetUtils.gs 的共用函数，改动会同时影响
+ * 24_ViewEngine.overdue()（Task Dashboard 的 Overdue 分区）和
+ * 26_AnalyticsEngine.computeStatistics 的 overdueCount 统计——两处目前都
+ * 是同一个共用逻辑的独立调用点，不是各自重复实现，所以在这里改一次就
+ * 同时修好两处，不需要也不应该在各自调用点分别打补丁。这不改动
+ * 25_DashboardEngine.gs 一个字符——它本身没有直接调用 isOverdue_，只是
+ * 通过 ViewEngine.overdue() 间接受益于这个共用逻辑变得更准确，Telegram
+ * 端 /today 的 Overdue 分区计数会因此变化（不再把今天到期的任务算进
+ * 逾期），这是修复一个两边共用的真实 bug，不是为了 Web UI 而改
+ * Telegram 的输出契约/格式本身。
  * @param {string} dueDateRaw  原始 due_date 字符串
  */
 function isOverdue_(dueDateRaw) {
@@ -331,6 +351,12 @@ function isOverdue_(dueDateRaw) {
 
   var due = parseDueDate_(raw);
   if (!due || isNaN(due.getTime())) return false;
+
+  var isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+  if (isDateOnly) {
+    var endOfDueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate(), 23, 59, 59, 999);
+    return endOfDueDay.getTime() < Date.now();
+  }
   return due.getTime() < Date.now();
 }
 
