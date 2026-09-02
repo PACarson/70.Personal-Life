@@ -81,6 +81,23 @@ var ProductivityConfig = Object.freeze({
   IDENTITY_AFFECTING_FIELDS: ['title', 'due_date', 'due_time', 'recurring', 'priority', 'category']
 });
 
+/**
+ * 【Slice 1 新增,2026-09-01】OS / Domain 的唯一注册点——跨 Task/Project
+ * 共用同一份，UI 下拉框、治理文档也从这里读，不允许在别处另抄一份。
+ * 复用既有 source_domain 字段（00_Data_Ownership.gs「三」），语义从
+ * "创建时不可变的 provenance" 正式改为"这条记录的业务 OS/Domain 归属"
+ * ——见 00_ADR.gs ADR-2026-09-01-027。新增 OS 时只改这一行；'Other' 是
+ * 兜底值，不代表任何具体 OS。Workflow/Note 本次不接入这个字段（Carson
+ * 2026-09-01 决定：不因为本轮 UI 需求顺手给它们加）。
+ *
+ * 故意不放在 ProductivityConfig/LifeProjectConfig 里面：这两个 CFG 对象
+ * 各自在自己的文件里 Object.freeze() 求值,如果其中一个在字面量里引用
+ * 另一个文件的 CFG,就会依赖 GAS 的跨文件加载顺序——这里改成一个独立的
+ * 顶层全局量,只在函数体内（真正调用发生时,整个项目早已经加载完毕）读取，
+ * 不受加载顺序影响。
+ */
+var OS_REGISTRY = Object.freeze(['PersonalLifeOS', 'PropertyOS', 'RiderOS', 'InvestmentOS', 'Other']);
+
 var TaskEngine = (function () {
 
   var CFG = ProductivityConfig;
@@ -105,7 +122,7 @@ var TaskEngine = (function () {
     return {
       creator:          creator,
       suggested_by:     meta.suggested_by || (isAiCreated ? '' : 'User'),
-      source_domain:    meta.source_domain || 'Personal Life',
+      source_domain:    OS_REGISTRY.indexOf(meta.source_domain) !== -1 ? meta.source_domain : OS_REGISTRY[0],
       source_module:    meta.source_module || '',
       source_event_id:  meta.source_event_id || '',
       source_task_id:   meta.source_task_id || '',
@@ -218,7 +235,10 @@ var TaskEngine = (function () {
     // Sprint 1 新增：
     'project_id', 'workflow_id', 'sequence_index', 'parent_task_id',
     'depends_on_task_ids', 'branch_group', 'branch_resolution_policy',
-    'priority_ai_recommended'
+    'priority_ai_recommended',
+    // 【Slice 1 新增,2026-09-01】OS/Domain 归属——不是 identity-affecting
+    // 字段（重新归类不应该产生新的 identity），枚举见顶层全局量 OS_REGISTRY。
+    'source_domain'
   ];
 
   function updateTask(taskId, changes, chatId) {
@@ -237,6 +257,7 @@ var TaskEngine = (function () {
         if (f === 'priority'  && CFG.TASK_PRIORITIES.indexOf(v) === -1) return;
         if (f === 'recurring' && CFG.TASK_RECURRING.indexOf(v) === -1) return;
         if (f === 'branch_resolution_policy' && CFG.BRANCH_RESOLUTION_POLICIES.indexOf(v) === -1) return;
+        if (f === 'source_domain' && OS_REGISTRY.indexOf(v) === -1) return;
         payload[f] = v;
       }
     });

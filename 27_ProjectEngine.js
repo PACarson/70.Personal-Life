@@ -66,7 +66,7 @@ var ProjectEngine = (function () {
     return {
       creator:          creator,
       suggested_by:     meta.suggested_by || (isAiCreated ? '' : 'User'),
-      source_domain:    meta.source_domain || 'Personal Life',
+      source_domain:    OS_REGISTRY.indexOf(meta.source_domain) !== -1 ? meta.source_domain : OS_REGISTRY[0],
       source_module:    meta.source_module || '',
       source_event_id:  meta.source_event_id || '',
       created_method:   CFG.CREATED_METHODS.indexOf(meta.created_method) !== -1 ? meta.created_method : 'Manual',
@@ -141,7 +141,13 @@ var ProjectEngine = (function () {
   // ============ Update ============
 
   var UPDATABLE_FIELDS = [
-    'title', 'description', 'depends_on_project_ids', 'execution_mode'
+    'title', 'description', 'depends_on_project_ids', 'execution_mode',
+    // 【Slice 1 新增,2026-09-01】Project 原本就有 source_domain（跟
+    // Task/Workflow/Note 共用同一份 Metadata Standard 字段，见
+    // 00_Data_Ownership.gs「三」），只是之前没有开放编辑——这次复用既有
+    // 字段，不新增第二个 OS/Domain 字段。枚举见 20_TaskEngine.gs 顶层的
+    // OS_REGISTRY（跨 Task/Project 共用同一份，不在这里另抄一份）。
+    'source_domain'
   ];
 
   /**
@@ -163,6 +169,7 @@ var ProjectEngine = (function () {
       if (changes.hasOwnProperty(f)) {
         var v = changes[f];
         if (f === 'execution_mode' && CFG.EXECUTION_MODES.indexOf(v) === -1) return;
+        if (f === 'source_domain' && OS_REGISTRY.indexOf(v) === -1) return;
         payload[f] = v;
       }
     });

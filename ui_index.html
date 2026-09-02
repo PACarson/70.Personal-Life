@@ -243,6 +243,30 @@
     .status-line.err { color: var(--danger); }
     .status-line.ok { color: var(--accent); }
 
+    /* ---------- Dashboard (Slice 2, 2026-09-02) ---------- */
+    .dash-section { margin-top: 18px; }
+    .dash-section h3 {
+      font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--ink-dim);
+      text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px;
+    }
+    .dash-section h4 {
+      font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--ink-faint);
+      margin: 10px 0 6px;
+    }
+    .dash-row {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+      padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;
+      gap: 12px; margin-bottom: 8px;
+    }
+    .dash-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .dash-row-main strong { font-size: 14px; font-weight: 500; word-break: break-word; }
+    .dash-row-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); display: flex; gap: 6px; align-items: center; }
+    .dash-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .dash-blocked-note {
+      font-family: var(--mono); font-size: 11px; color: var(--warn); margin-top: 20px;
+      padding: 8px 12px; background: rgba(201, 165, 91, 0.05); border: 1px dashed var(--warn); border-radius: 4px;
+    }
+
     @media (max-width: 640px) {
       .shell { flex-direction: column; }
       .nav { width: 100%; flex-direction: row; overflow-x: auto; padding: 12px; border-right: none; border-bottom: 1px solid var(--line); }
@@ -256,6 +280,11 @@
   <div class="shell">
     <nav class="nav">
       <div class="nav-brand"><strong>Personal</strong> Life OS</div>
+      <!-- Slice 2, 2026-09-02: Task-only for now — Project is explicitly
+           BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT, see panel-dashboard.
+           Notes stays the default active panel; this round didn't ask to
+           change the landing page, so that wasn't changed. -->
+      <div class="nav-item enabled" data-panel="dashboard">Dashboard</div>
       <div class="nav-item enabled active" data-panel="notes">Notes</div>
       <div class="nav-item enabled" data-panel="tasks">Tasks <span class="nav-count" id="taskCount"></span></div>
       <div class="nav-item enabled" data-panel="projects">Projects <span class="nav-count" id="projectCount"></span></div>
@@ -265,6 +294,14 @@
     </nav>
 
     <main class="workspace">
+
+      <!-- Dashboard Panel (Slice 2, 2026-09-02) -->
+      <section class="panel" id="panel-dashboard">
+        <h1>Dashboard</h1>
+        <p class="sub">Task-only for now &middot; grouped by OS/Domain &middot; Project due-view pending Project Deadline Contract</p>
+        <div id="dashboardStatus" class="status-line"></div>
+        <div id="dashboardContent"></div>
+      </section>
 
       <!-- Notes Panel -->
       <section class="panel visible" id="panel-notes">
@@ -315,12 +352,22 @@
               </select>
             </div>
 
+            <!-- Slice 1, 2026-09-01: OS/Domain selector. Reuses the existing
+                 source_domain metadata field (see 20_TaskEngine.js OS_REGISTRY,
+                 the single source of truth for this list) — not a new field. -->
+            <select id="taskCreateOsDomain" style="width:100%;"></select>
+
             <div style="display:flex; gap:8px;">
               <input type="date" id="taskCreateDueDate" style="flex:1;">
               <input type="time" id="taskCreateDueTime" style="flex:1;">
             </div>
 
-            <textarea id="taskCreateNotes" placeholder="Notes / description (optional)"></textarea>
+            <textarea id="taskCreateNotes" placeholder="Notes (optional)"></textarea>
+            <!-- Slice 1, 2026-09-01: Description was already a distinct Engine
+                 field (separate from Notes) but had no Create-form input and
+                 wasn't forwarded by ui_createTask — both fixed this Slice. -->
+            <textarea id="taskCreateDescription" placeholder="Description (optional)"></textarea>
+            <input type="text" id="taskCreateContext" placeholder="Context (optional, e.g. @home, @errand)" style="width:100%;">
 
             <div style="display:flex; gap:8px;">
               <select id="taskCreateProject" style="flex:1;">
@@ -403,6 +450,11 @@
           <div class="create-form" id="projectCreateForm">
             <input type="text" id="projectCreateTitle" placeholder="Project title" maxlength="200">
             <textarea id="projectCreateDescription" placeholder="Description (optional)"></textarea>
+
+            <!-- Slice 1, 2026-09-01: OS/Domain selector, same shared registry
+                 as Task's. Project already had this metadata field; this is
+                 the first time it's exposed for editing. -->
+            <select id="projectCreateOsDomain" style="width:100%;"></select>
 
             <div style="display:flex; gap:8px;">
               <select id="projectCreateParent" style="flex:1;">
@@ -491,6 +543,136 @@
         document.getElementById('panel-' + navEl.dataset.panel).classList.add('visible');
       });
     });
+
+    // ============================================================
+    // Dashboard Module (Slice 2, 2026-09-02)
+    // Read-only presentation over ui_getTaskDashboard — no new CRUD here;
+    // Done/Cancel reuse the exact same ui_completeTask/ui_cancelTask calls
+    // the Tasks panel uses, and a successful action just reloads this
+    // panel's own data rather than touching Tasks-panel DOM.
+    // ============================================================
+    var dashboardStatus = document.getElementById('dashboardStatus');
+    var dashboardContent = document.getElementById('dashboardContent');
+
+    function osTagHtml_(os) {
+      return '<span class="badge">' + escapeHtml(os || 'PersonalLifeOS') + '</span>';
+    }
+
+    function dashboardTaskRowHtml_(t) {
+      var due = t.due_date ? (' &middot; due ' + escapeHtml(t.due_date) + (t.due_time ? ' ' + escapeHtml(t.due_time) : '')) : '';
+      return '<div class="dash-row" data-task-id="' + escapeHtml(t.task_id) + '">' +
+        '<div class="dash-row-main">' +
+          '<strong>' + escapeHtml(t.title) + '</strong>' +
+          '<span class="dash-row-meta">' + osTagHtml_(t.source_domain) + ' ' + escapeHtml(t.priority || '') + due + '</span>' +
+        '</div>' +
+        '<div class="dash-row-actions">' +
+          '<button class="btn btn-success btn-tiny dash-done-btn">Done</button>' +
+          '<button class="btn btn-danger btn-tiny dash-cancel-btn">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function dashboardSectionHtml_(title, tasks) {
+      if (!tasks || tasks.length === 0) return '';
+      return '<div class="dash-section"><h3>' + escapeHtml(title) + ' (' + tasks.length + ')</h3>' +
+        tasks.map(dashboardTaskRowHtml_).join('') + '</div>';
+    }
+
+    function wireDashboardRowActions_() {
+      dashboardContent.querySelectorAll('.dash-done-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (ev) {
+          var row = ev.currentTarget.closest('.dash-row');
+          var taskId = row.dataset.taskId;
+          ev.currentTarget.disabled = true;
+          google.script.run
+            .withSuccessHandler(function (res) {
+              if (res && res.ok) { loadTaskDashboard(); return; }
+              ev.currentTarget.disabled = false;
+              dashboardStatus.textContent = res ? res.message : 'Error completing task (empty response).';
+              dashboardStatus.className = 'status-line err';
+            })
+            .withFailureHandler(function () {
+              ev.currentTarget.disabled = false;
+              dashboardStatus.textContent = 'Error completing task.'; dashboardStatus.className = 'status-line err';
+            })
+            .ui_completeTask(taskId);
+        });
+      });
+      dashboardContent.querySelectorAll('.dash-cancel-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (ev) {
+          var confirmBtn = ev.currentTarget;
+          if (confirmBtn.dataset.confirming !== 'true') {
+            confirmBtn.dataset.confirming = 'true';
+            confirmBtn.textContent = 'Sure?';
+            setTimeout(function () { confirmBtn.dataset.confirming = 'false'; confirmBtn.textContent = 'Cancel'; }, 3000);
+            return;
+          }
+          var row = confirmBtn.closest('.dash-row');
+          var taskId = row.dataset.taskId;
+          confirmBtn.disabled = true;
+          google.script.run
+            .withSuccessHandler(function (res) {
+              if (res && res.ok) { loadTaskDashboard(); return; }
+              confirmBtn.disabled = false;
+              dashboardStatus.textContent = res ? res.message : 'Error cancelling task (empty response).';
+              dashboardStatus.className = 'status-line err';
+            })
+            .withFailureHandler(function () {
+              confirmBtn.disabled = false;
+              dashboardStatus.textContent = 'Error cancelling task.'; dashboardStatus.className = 'status-line err';
+            })
+            .ui_cancelTask(taskId);
+        });
+      });
+    }
+
+    function renderDashboard(dashboard) {
+      var html = '';
+      html += dashboardSectionHtml_('Overdue', dashboard.overdue);
+      html += dashboardSectionHtml_('Today', dashboard.today);
+      html += dashboardSectionHtml_('This Week', dashboard.this_week);
+      html += dashboardSectionHtml_('Upcoming', dashboard.upcoming);
+      html += dashboardSectionHtml_('Recurring', dashboard.recurring);
+      html += dashboardSectionHtml_('High Priority', dashboard.high_priority);
+
+      var osKeys = Object.keys(dashboard.by_os_domain || {});
+      if (osKeys.length > 0) {
+        html += '<div class="dash-section"><h3>By OS / Domain</h3>';
+        osKeys.forEach(function (os) {
+          html += '<h4>' + escapeHtml(os) + ' (' + dashboard.by_os_domain[os].length + ')</h4>' +
+            dashboard.by_os_domain[os].map(dashboardTaskRowHtml_).join('');
+        });
+        html += '</div>';
+      }
+
+      // Slice 2, 2026-09-02: Project explicitly not silently omitted — see
+      // ADR/Gap Review discussion of Project Deadline Contract.
+      html += '<div class="dash-section dash-blocked-note">' +
+        '<em>Projects: ' + escapeHtml(dashboard.project_due_view.message) +
+        ' (' + dashboard.project_due_view.status + ')</em></div>';
+
+      if (!html) html = '<div class="empty-state">Nothing due — nice.</div>';
+      dashboardContent.innerHTML = html;
+      wireDashboardRowActions_();
+    }
+
+    function loadTaskDashboard() {
+      dashboardStatus.textContent = 'Loading\u2026'; dashboardStatus.className = 'status-line';
+      google.script.run
+        .withSuccessHandler(function (res) {
+          dashboardStatus.textContent = '';
+          if (!res || !res.ok) {
+            dashboardStatus.textContent = res ? res.message : 'Error loading dashboard (empty response).';
+            dashboardStatus.className = 'status-line err';
+            return;
+          }
+          renderDashboard(res.dashboard);
+        })
+        .withFailureHandler(function () {
+          dashboardStatus.textContent = 'Error loading dashboard.'; dashboardStatus.className = 'status-line err';
+        })
+        .ui_getTaskDashboard();
+    }
 
     // ============================================================
     // Notes Module
@@ -655,9 +837,20 @@
           '</div>' +
 
           // Inline Edit Form
+          // Slice 1, 2026-09-01: expanded to match the Create form's field set
+          // (the 2026-08-31 audit found this form had only 3 of ~12 possible
+          // fields, even though TaskEngine.UPDATABLE_FIELDS already supported
+          // the rest). project_id options are built the same way
+          // populateProjectDropdowns() builds them, from the same rawProjectsCache.
           '<div class="edit-form">' +
             '<input type="text" class="edit-title-input" value="' + escapeHtml(task.title) + '" placeholder="Title">' +
             '<div style="display:flex; gap:8px;">' +
+              '<select class="edit-priority-select" style="flex:1;">' +
+                '<option value="CRITICAL"' + (task.priority==='CRITICAL'?' selected':'') + '>CRITICAL</option>' +
+                '<option value="HIGH"' + (task.priority==='HIGH'?' selected':'') + '>HIGH</option>' +
+                '<option value="MEDIUM"' + (task.priority==='MEDIUM'?' selected':'') + '>MEDIUM</option>' +
+                '<option value="LOW"' + (task.priority==='LOW'?' selected':'') + '>LOW</option>' +
+              '</select>' +
               '<select class="edit-category-select" style="flex:1;">' +
                 '<option value="GENERAL"' + (task.category==='GENERAL'?' selected':'') + '>GENERAL</option>' +
                 '<option value="MAINTENANCE"' + (task.category==='MAINTENANCE'?' selected':'') + '>MAINTENANCE</option>' +
@@ -666,8 +859,29 @@
                 '<option value="HEALTH"' + (task.category==='HEALTH'?' selected':'') + '>HEALTH</option>' +
                 '<option value="PROJECT"' + (task.category==='PROJECT'?' selected':'') + '>PROJECT</option>' +
               '</select>' +
-              '<input type="date" class="edit-duedate-input" value="' + escapeHtml(task.due_date || '') + '" style="flex:1;">' +
             '</div>' +
+            '<select class="edit-osdomain-select" style="width:100%;">' + osOptionsHtml_(task.source_domain) + '</select>' +
+            '<div style="display:flex; gap:8px;">' +
+              '<input type="date" class="edit-duedate-input" value="' + escapeHtml(task.due_date || '') + '" style="flex:1;">' +
+              '<input type="time" class="edit-duetime-input" value="' + escapeHtml(task.due_time || '') + '" style="flex:1;">' +
+            '</div>' +
+            '<select class="edit-recurring-select" style="width:100%;">' +
+              '<option value=""' + (!task.recurring?' selected':'') + '>Not Recurring</option>' +
+              '<option value="Daily"' + (task.recurring==='Daily'?' selected':'') + '>Daily</option>' +
+              '<option value="Weekly"' + (task.recurring==='Weekly'?' selected':'') + '>Weekly</option>' +
+              '<option value="Monthly"' + (task.recurring==='Monthly'?' selected':'') + '>Monthly</option>' +
+              '<option value="Yearly"' + (task.recurring==='Yearly'?' selected':'') + '>Yearly</option>' +
+            '</select>' +
+            '<textarea class="edit-notes-input" placeholder="Notes">' + escapeHtml(task.notes || '') + '</textarea>' +
+            '<textarea class="edit-description-input" placeholder="Description">' + escapeHtml(task.description || '') + '</textarea>' +
+            '<input type="text" class="edit-context-input" value="' + escapeHtml(task.context || '') + '" placeholder="Context">' +
+            '<input type="text" class="edit-tags-input" value="' + escapeHtml(task.tags || '') + '" placeholder="Tags (comma-separated)">' +
+            '<select class="edit-project-select" style="width:100%;">' +
+              '<option value="">No Project</option>' +
+              rawProjectsCache.map(function (p) {
+                return '<option value="' + escapeHtml(p.project_id) + '"' + (task.project_id === p.project_id ? ' selected' : '') + '>' + escapeHtml(p.title || p.project_id) + '</option>';
+              }).join('') +
+            '</select>' +
             '<div class="form-row">' +
               '<button class="btn btn-ghost btn-tiny cancel-edit-btn">Cancel</button>' +
               '<button class="btn btn-tiny save-edit-btn">Save</button>' +
@@ -786,10 +1000,32 @@
         card.querySelector('.cancel-edit-btn').addEventListener('click', function () {
           editForm.classList.remove('visible');
         });
+        // Slice 1, 2026-09-01: same keyboard pattern as the Create form —
+        // trigger the existing save-edit-btn click rather than duplicating
+        // its save logic here.
+        editForm.querySelector('.edit-title-input').addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); editForm.querySelector('.save-edit-btn').click(); }
+        });
+        ['.edit-notes-input', '.edit-description-input'].forEach(function (sel) {
+          editForm.querySelector(sel).addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) editForm.querySelector('.save-edit-btn').click();
+          });
+        });
         card.querySelector('.save-edit-btn').addEventListener('click', function (ev) {
           var newTitle = editForm.querySelector('.edit-title-input').value.trim();
           var newCat = editForm.querySelector('.edit-category-select').value;
           var newDue = editForm.querySelector('.edit-duedate-input').value;
+          // Slice 1, 2026-09-01: the rest of Task's editable fields, added to
+          // close the Create/Edit gap the 2026-08-31 audit found.
+          var newPriority = editForm.querySelector('.edit-priority-select').value;
+          var newOsDomain = editForm.querySelector('.edit-osdomain-select').value;
+          var newDueTime = editForm.querySelector('.edit-duetime-input').value;
+          var newRecurring = editForm.querySelector('.edit-recurring-select').value;
+          var newNotes = editForm.querySelector('.edit-notes-input').value;
+          var newDescription = editForm.querySelector('.edit-description-input').value;
+          var newContext = editForm.querySelector('.edit-context-input').value.trim();
+          var newTags = editForm.querySelector('.edit-tags-input').value.trim();
+          var newProjectId = editForm.querySelector('.edit-project-select').value;
           if (!newTitle) return;
           var saveBtn = ev.currentTarget;
           saveBtn.disabled = true;
@@ -804,7 +1040,12 @@
               saveBtn.disabled = false;
               tasksStatus.textContent = 'Error saving task.'; tasksStatus.className = 'status-line err';
             })
-            .ui_updateTask(task.task_id, { title: newTitle, category: newCat, due_date: newDue });
+            .ui_updateTask(task.task_id, {
+              title: newTitle, category: newCat, due_date: newDue,
+              priority: newPriority, source_domain: newOsDomain, due_time: newDueTime,
+              recurring: newRecurring, notes: newNotes, description: newDescription,
+              context: newContext, tags: newTags, project_id: newProjectId
+            });
         });
 
         // Convert to Project
@@ -909,9 +1150,23 @@
           '</div>' +
 
           // Edit Form
+          // Slice 1, 2026-09-01: added OS/Domain (explicitly approved for
+          // Project this round) and execution_mode (same kind of Create-only/
+          // Engine-supported-but-Edit-missing gap as Task's fields, flagged in
+          // the Gap Review 3.3 — extending the same parity principle here).
+          // parent_project_id is deliberately NOT added: it isn't in
+          // ProjectEngine.UPDATABLE_FIELDS at all, so exposing it would need
+          // an Engine change nobody has approved this round.
           '<div class="edit-form">' +
             '<input type="text" class="edit-title-input" value="' + escapeHtml(project.title) + '" placeholder="Project Title">' +
             '<textarea class="edit-desc-input" placeholder="Project Description">' + escapeHtml(project.description || '') + '</textarea>' +
+            '<select class="edit-osdomain-select" style="width:100%;">' + osOptionsHtml_(project.source_domain) + '</select>' +
+            '<select class="edit-execmode-select" style="width:100%;">' +
+              '<option value=""' + (!project.execution_mode?' selected':'') + '>Execution Mode: unset</option>' +
+              '<option value="SEQUENTIAL"' + (project.execution_mode==='SEQUENTIAL'?' selected':'') + '>SEQUENTIAL</option>' +
+              '<option value="PARALLEL"' + (project.execution_mode==='PARALLEL'?' selected':'') + '>PARALLEL</option>' +
+              '<option value="BRANCH"' + (project.execution_mode==='BRANCH'?' selected':'') + '>BRANCH</option>' +
+            '</select>' +
             '<div class="form-row">' +
               '<button class="btn btn-ghost btn-tiny cancel-edit-btn">Cancel</button>' +
               '<button class="btn btn-tiny save-edit-btn">Save</button>' +
@@ -943,9 +1198,19 @@
         var editForm = card.querySelector('.edit-form');
         card.querySelector('.edit-btn').addEventListener('click', function () { editForm.classList.add('visible'); });
         card.querySelector('.cancel-edit-btn').addEventListener('click', function () { editForm.classList.remove('visible'); });
+        // Slice 1, 2026-09-01: same keyboard pattern as Task's Edit form.
+        editForm.querySelector('.edit-title-input').addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); editForm.querySelector('.save-edit-btn').click(); }
+        });
+        editForm.querySelector('.edit-desc-input').addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) editForm.querySelector('.save-edit-btn').click();
+        });
         card.querySelector('.save-edit-btn').addEventListener('click', function (ev) {
           var newTitle = editForm.querySelector('.edit-title-input').value.trim();
           var newDesc = editForm.querySelector('.edit-desc-input').value.trim();
+          // Slice 1, 2026-09-01:
+          var newOsDomain = editForm.querySelector('.edit-osdomain-select').value;
+          var newExecMode = editForm.querySelector('.edit-execmode-select').value;
           if (!newTitle) return;
           var saveBtn = ev.currentTarget;
           saveBtn.disabled = true;
@@ -960,7 +1225,7 @@
               saveBtn.disabled = false;
               projectsStatus.textContent = 'Error saving project.'; projectsStatus.className = 'status-line err';
             })
-            .ui_updateProject(project.project_id, { title: newTitle, description: newDesc });
+            .ui_updateProject(project.project_id, { title: newTitle, description: newDesc, source_domain: newOsDomain, execution_mode: newExecMode });
         });
 
         // Complete
@@ -1136,6 +1401,27 @@
     // Engine -> EventBus -> Projection. Same google.script.run contract as every
     // other action on this page; no parallel persistence path.
 
+    // Slice 1, 2026-09-01: mirrors 20_TaskEngine.js's OS_REGISTRY (single source
+    // of truth on the backend). Same pattern already used here for
+    // category/priority/recurring — those are also hardcoded mirrors of the
+    // backend CFG, not fetched dynamically. Adding a new OS still means editing
+    // two places (this array + the backend OS_REGISTRY); a follow-up Slice could
+    // fetch this from the backend once at page load instead, if that's wanted.
+    var OS_REGISTRY = ['PersonalLifeOS', 'PropertyOS', 'RiderOS', 'InvestmentOS', 'Other'];
+
+    function osOptionsHtml_(current) {
+      return OS_REGISTRY.map(function (os) {
+        return '<option value="' + os + '"' + (current === os ? ' selected' : '') + '>' + os + '</option>';
+      }).join('');
+    }
+
+    function populateOsDropdowns() {
+      var taskSel = document.getElementById('taskCreateOsDomain');
+      var projectSel = document.getElementById('projectCreateOsDomain');
+      if (taskSel) { taskSel.innerHTML = osOptionsHtml_('PersonalLifeOS'); }
+      if (projectSel) { projectSel.innerHTML = osOptionsHtml_('PersonalLifeOS'); }
+    }
+
     function populateProjectDropdowns() {
       var taskProjectSel = document.getElementById('taskCreateProject');
       var parentProjectSel = document.getElementById('projectCreateParent');
@@ -1168,21 +1454,38 @@
     });
     document.getElementById('taskCreateSaveBtn').addEventListener('click', submitCreateTask);
 
+    // Slice 1, 2026-09-01: keyboard behavior, matching the pattern already
+    // proven on the Notes composer (see inputEl's keydown handler above) —
+    // plain Enter in a single-line field saves; in a textarea, plain Enter
+    // keeps its native newline behavior and only Ctrl/Cmd+Enter saves.
+    document.getElementById('taskCreateTitle').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); submitCreateTask(); }
+    });
+    ['taskCreateNotes', 'taskCreateDescription'].forEach(function (id) {
+      document.getElementById(id).addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) submitCreateTask();
+      });
+    });
+
     function submitCreateTask() {
       var titleInput = document.getElementById('taskCreateTitle');
       var title = titleInput.value.trim();
       if (!title) { titleInput.focus(); return; }
 
       var meta = {
-        priority:    document.getElementById('taskCreatePriority').value,
-        category:    document.getElementById('taskCreateCategory').value,
-        due_date:    document.getElementById('taskCreateDueDate').value,
-        due_time:    document.getElementById('taskCreateDueTime').value,
-        notes:       document.getElementById('taskCreateNotes').value.trim(),
-        project_id:  document.getElementById('taskCreateProject').value,
-        workflow_id: document.getElementById('taskCreateWorkflow').value.trim(),
-        tags:        document.getElementById('taskCreateTags').value.trim(),
-        recurring:   document.getElementById('taskCreateRecurring').value
+        priority:      document.getElementById('taskCreatePriority').value,
+        category:      document.getElementById('taskCreateCategory').value,
+        due_date:      document.getElementById('taskCreateDueDate').value,
+        due_time:      document.getElementById('taskCreateDueTime').value,
+        notes:         document.getElementById('taskCreateNotes').value.trim(),
+        project_id:    document.getElementById('taskCreateProject').value,
+        workflow_id:   document.getElementById('taskCreateWorkflow').value.trim(),
+        tags:          document.getElementById('taskCreateTags').value.trim(),
+        recurring:     document.getElementById('taskCreateRecurring').value,
+        // Slice 1, 2026-09-01:
+        description:   document.getElementById('taskCreateDescription').value.trim(),
+        context:       document.getElementById('taskCreateContext').value.trim(),
+        source_domain: document.getElementById('taskCreateOsDomain').value
       };
 
       var saveBtn = document.getElementById('taskCreateSaveBtn');
@@ -1203,9 +1506,17 @@
           document.getElementById('taskCreatePriority').value = 'MEDIUM';
           document.getElementById('taskCreateCategory').value = 'GENERAL';
           document.getElementById('taskCreateRecurring').value = '';
+          document.getElementById('taskCreateDescription').value = '';
+          document.getElementById('taskCreateContext').value = '';
+          document.getElementById('taskCreateOsDomain').value = 'PersonalLifeOS';
           taskCreateStatus.textContent = '';
           taskCreateForm.classList.remove('visible');
           loadTasks();
+          // Slice 1, 2026-09-01: refocus so a quick "type -> save -> type
+          // next" flow doesn't need a mouse click in between. This is the
+          // real server response, not an optimistic guess — that fuller
+          // perceived-latency fix is Slice 5, gated on real timing numbers.
+          titleInput.focus();
         })
         .withFailureHandler(function () {
           saveBtn.disabled = false;
@@ -1227,6 +1538,14 @@
     });
     document.getElementById('projectCreateSaveBtn').addEventListener('click', submitCreateProject);
 
+    // Slice 1, 2026-09-01: same keyboard pattern as the Task Create form.
+    document.getElementById('projectCreateTitle').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); submitCreateProject(); }
+    });
+    document.getElementById('projectCreateDescription').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) submitCreateProject();
+    });
+
     function submitCreateProject() {
       var titleInput = document.getElementById('projectCreateTitle');
       var title = titleInput.value.trim();
@@ -1235,7 +1554,9 @@
       var meta = {
         description:       document.getElementById('projectCreateDescription').value.trim(),
         parent_project_id: document.getElementById('projectCreateParent').value,
-        execution_mode:    document.getElementById('projectCreateExecutionMode').value
+        execution_mode:    document.getElementById('projectCreateExecutionMode').value,
+        // Slice 1, 2026-09-01:
+        source_domain:     document.getElementById('projectCreateOsDomain').value
       };
 
       var saveBtn = document.getElementById('projectCreateSaveBtn');
@@ -1251,9 +1572,12 @@
           document.getElementById('projectCreateDescription').value = '';
           document.getElementById('projectCreateParent').value = '';
           document.getElementById('projectCreateExecutionMode').value = '';
+          document.getElementById('projectCreateOsDomain').value = 'PersonalLifeOS';
           projectCreateStatus.textContent = '';
           projectCreateForm.classList.remove('visible');
           loadProjects();
+          // Slice 1, 2026-09-01: same refocus pattern as submitCreateTask.
+          titleInput.focus();
         })
         .withFailureHandler(function () {
           saveBtn.disabled = false;
@@ -1263,6 +1587,8 @@
     }
 
     // ---------------- Initialize ----------------
+    populateOsDropdowns();
+    loadTaskDashboard();
     loadNotes();
     loadTasks();
     loadProjects();

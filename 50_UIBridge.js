@@ -294,6 +294,41 @@ function ui_convertNoteToTask(noteId, _testOverrides) {
 // ============================================================
 
 /**
+ * 【Slice 2,2026-09-02 新增】结构化 Task Dashboard——供 Web UI 的
+ * Dashboard 面板用，返回 JSON 对象而不是文本。跟 25_DashboardEngine
+ * （Telegram 用）是两条独立路径，互不依赖；本函数只转发
+ * TaskQueryEngine.getTaskDashboard 的返回值，不重复实现任何过滤/分组
+ * 逻辑。sanitize 需要覆盖每个 bucket 数组、以及 by_os_domain 里每个组的
+ * 数组——跟其它返回 Task 的函数一样，要防住 due_date/due_time/
+ * due_datetime 在 google.script.run 传输边界变成 Date 实例导致响应被
+ * 静默清空（见 50_UIBridge.gs 文件头 Date 序列化说明）。
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true, dashboard:object}|{ok:false, code, message}}
+ */
+function ui_getTaskDashboard(_testOverrides) {
+  try {
+    var chatId = _resolveChatId_(_testOverrides);
+    var dashboard = TaskQueryEngine.getTaskDashboard(chatId);
+    var sanitizedDashboard = {
+      overdue:          _sanitizeTaskDatesForTransport_(dashboard.overdue),
+      today:            _sanitizeTaskDatesForTransport_(dashboard.today),
+      this_week:        _sanitizeTaskDatesForTransport_(dashboard.this_week),
+      upcoming:         _sanitizeTaskDatesForTransport_(dashboard.upcoming),
+      recurring:        _sanitizeTaskDatesForTransport_(dashboard.recurring),
+      high_priority:    _sanitizeTaskDatesForTransport_(dashboard.high_priority),
+      by_os_domain:     {},
+      project_due_view: dashboard.project_due_view
+    };
+    Object.keys(dashboard.by_os_domain).forEach(function (os) {
+      sanitizedDashboard.by_os_domain[os] = _sanitizeTaskDatesForTransport_(dashboard.by_os_domain[os]);
+    });
+    return { ok: true, dashboard: sanitizedDashboard };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
  * 只返回非终态 Task（PENDING/BLOCKED/WAITING）——跟 Business_Rules「一」
  * 里 Task→Project 的前置校验对齐（终态 Task 转 Project 没有意义）。
  * TaskQueryEngine.getTasks 只支持单值精确匹配，多状态过滤在这里做。
@@ -791,9 +826,15 @@ function ui_cancelProject(projectId, _testOverrides) {
  *
  * @param {string} title
  * @param {object} [meta]  透传字段：category/priority/due_date/due_time/
- *                          recurring/notes/tags/project_id/workflow_id
+ *                          recurring/notes/tags/project_id/workflow_id/
+ *                          description/context/budget/source_domain
  *                          （均可省略，未提供的字段由 TaskEngine 走既有
- *                          默认值）
+ *                          默认值；description/context/budget 三个是
+ *                          【Slice 1,2026-09-01】新增转发——Engine 早就
+ *                          支持，先前 Bridge 没转发，见 2026-08-31 审计；
+ *                          source_domain 合法值见 20_TaskEngine.gs 的
+ *                          OS_REGISTRY，非法值会被 TaskEngine 自己忽略，
+ *                          不需要本函数重复校验）
  * @param {object} [_testOverrides]  仅测试使用：{chatId, decisionOwner}
  * @returns {{ok:true, task:object}|{ok:false, code:'EMPTY_TITLE'|string, message}}
  */
@@ -816,6 +857,10 @@ function ui_createTask(title, meta, _testOverrides) {
       tags:           meta.tags,
       project_id:     meta.project_id,
       workflow_id:    meta.workflow_id,
+      description:    meta.description,
+      context:        meta.context,
+      budget:         meta.budget,
+      source_domain:  meta.source_domain,
       source_module:  'UIBridge.ui_createTask',
       decision_owner: decisionOwner
     }, chatId);
@@ -836,7 +881,11 @@ function ui_createTask(title, meta, _testOverrides) {
  *
  * @param {string} title
  * @param {object} [meta]  透传字段：description/execution_mode/
- *                          parent_project_id
+ *                          parent_project_id/source_domain（最后一个是
+ *                          【Slice 1,2026-09-01】新增——Project 本来就有
+ *                          这个 Metadata Standard 字段，只是没开放编辑，
+ *                          这次复用，不是新字段；合法值见 20_TaskEngine.gs
+ *                          的 OS_REGISTRY，跟 Task 共用同一份）
  * @param {object} [_testOverrides]  仅测试使用：{chatId, decisionOwner}
  * @returns {{ok:true, project:object}|{ok:false, code:'EMPTY_TITLE'|string, message}}
  */
@@ -853,6 +902,7 @@ function ui_createProject(title, meta, _testOverrides) {
       description:        meta.description,
       execution_mode:      meta.execution_mode,
       parent_project_id:    meta.parent_project_id,
+      source_domain:  meta.source_domain,
       source_module:  'UIBridge.ui_createProject',
       decision_owner: decisionOwner
     }, chatId);

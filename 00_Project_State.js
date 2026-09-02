@@ -1073,3 +1073,161 @@
  * 成为日常习惯性动作。要把这一项改成 Active，需要未来几个窗口持续
  * 观察到逐文件、逐改动的 checkpoint 习惯，而不是本次一次性的完整审计。
  */
+
+// ============================================================
+// 二十五、UI V2 Slice 1（Core UI Consistency）—— 已交付,等待 Carson
+//        Test Gate / Regression Gate（2026-09-01）
+// ============================================================
+
+/**
+ * 背景：2026-08-31 的 UI Enhancement Architecture & UX Audit → 2026-09-01
+ * 的 Capability Gap Review → Implementation Plan（5-Slice），三份文档
+ * 依次交付并被 Carson 逐份批准；本节记录 Plan 里 Slice 1 的实际实现。
+ * 范围：Unified Create/Edit、OS/Domain selector（Task+Project）、
+ * Priority、Due date/time、Enter/focus 行为。
+ *
+ * 改动文件：20_TaskEngine.gs、27_ProjectEngine.gs、50_UIBridge.gs、
+ * ui_index.html、00_ADR.gs（新增 ADR-2026-09-01-027）、
+ * 00_Data_Ownership.gs（source_domain 条目同步更新）。完整改动内容见
+ * ADR-2026-09-01-027 的 Affected Modules 和 Decision。
+ *
+ * 验证状态（对照「二十四」自己定的纪律，如实记录，不夸大）：
+ *   - 代码语法：✅ VERIFIED——5 个改动文件全部经 node --check
+ *     （ui_index.html 额外提取 <script> 内容单独检查）通过。
+ *   - 真实 GAS/Spreadsheet/浏览器端到端：⚠️ 完全未验证——本窗口没有
+ *     实际连接 Carson 的 Google Apps Script/Sheets 环境的能力，全部
+ *     改动只经过静态代码审阅 + 语法检查。这不是"大概率没问题"，是
+ *     "尚未验证"，两者不能混为一谈。
+ *   - Test Gate / Regression Gate：按 Carson 的既定流程，由他在真实
+ *     环境里跑，结果回贴后再决定是否进入 Slice 2——本节记录的是
+ *     "已交付"，不是"已验证通过"。
+ *
+ * 交付时做出的、需要 Carson 知悉/可能需要修正的具体范围决定：
+ *   1. OS_REGISTRY 初始值只收了 PersonalLifeOS/PropertyOS/RiderOS/
+ *      InvestmentOS/Other 五个——Carson 原始请求里举例提到的
+ *      ProcurementOS/InventoryOS/ComplianceOS/FinanceOS/CalendarOS/
+ *      HealthOS/NewsOS/ContentOS 没有收进枚举，因为找不到独立证据
+ *      证明这些已经是正式注册的 OS（详见 ADR-027）。
+ *   2. Project 的 Edit 表单额外加了 execution_mode——这是本次审计
+ *      发现的同类型缺口（Create 能设、Edit 不能改），套用了 Carson
+ *      已经批准的同一条原则做的延伸，但 Carson 这几轮消息里没有
+ *      逐字确认这一项，值得他看一眼是否认可。
+ *   3. Context 字段的 placeholder 文案（"@home, @errand"）是 GTD
+ *      方法论里"情境标签"的常见含义，代码/文档里没有找到这个字段
+ *      本来的确切定义，是推测填的，Carson 如果另有所指需要改文案。
+ *   4. 前端 OS_REGISTRY 是后端同名全局量的手抄副本（做法上跟既有
+ *      category/priority/recurring 完全一致），不是动态拉取——新增
+ *      OS 目前仍然要改两处。
+ *   5. Create/Edit 没有做成一个真正通用的、数据驱动的 schema renderer
+ *      ——两个表单分别手写了对应字段的 HTML/JS，字段列表现在保持一致，
+ *      但"保持一致"依赖的是这次改动本身的完整性，不是结构上不可能
+ *      再次出现分歧。理由：本窗口无法实际跑这份 GAS+HTML 代码，一个
+ *      更通用的渲染抽象层出错的方式会更难被肉眼审出、也更难被 Carson
+ *      在他自己的环境里定位问题——权衡之后选择了更笨、但更容易逐行核对
+ *      的写法。如果 Carson 更想要真正 schema-driven 的版本，可以作为
+ *      后续一次单独的重构提出。
+ *   6. 本次加的"保存成功后聚焦回标题输入框"是等真实 google.script.run
+ *      响应回来之后才做的，不是乐观更新——完整的乐观 UI（点击后立刻
+ *      显示、失败再回滚）刻意留给 Slice 5，因为那部分需要先有真实
+ *      延迟数字才能决定值不值得做、怎么做防重复提交。
+ *
+ * 明确保持不变（按 Carson 的要求核对过）：
+ *   - 07_IdentityEngine.gs、09_IdempotencyManager.gs、
+ *     08_DeduplicationEngine.gs：零改动。
+ *   - source_domain 两个 Engine 里都确认【不在】IDENTITY_AFFECTING_FIELDS
+ *     里，重新归类不会触发 identity 重算。
+ *   - 28_WorkflowEngine.gs、29_NoteEngine.gs：零改动——按 Carson 明确
+ *     决定，本轮不给这两个实体接入 source_domain。
+ *   - Done/Cancel 两个方向（Task 和 Project）：本 Slice 完全没有碰
+ *     completeTask/cancelTask/completeProject/cancelProject 或它们的
+ *     UIBridge 包装，继续走既有正式 Command，没有被拉进共享字段改动里。
+ *
+ * 下一步：等 Carson 在真实环境跑完 Test Gate + Regression Gate、结果
+ * 贴回来——通过后才进入 Slice 2（Overall Dashboard）。
+ */
+
+// ============================================================
+// 二十六、UI V2 Slice 2（Task Dashboard）—— 已交付,等待 Carson
+//        Test Gate / Regression Gate（2026-09-02）
+// ============================================================
+
+/**
+ * 背景：Carson 因为在外送外卖、暂时无法做 Slice 1 的实机验证，明确指示
+ * "不要因为 Slice 1 未验证就阻塞 Slice 2"，同时明确要求本窗口在动手前
+ * 重新核对当前真实代码状态、不能只依赖之前的报告。已按此执行——重新读了
+ * 24_ViewEngine.gs/25_DashboardEngine.gs/12_TaskQueryEngine.gs/
+ * 14_ProjectQueryEngine.gs，并且发现一处此前审计没有完全说清楚的地方，
+ * 见下方"核对中发现的修正"。
+ *
+ * 改动文件：24_ViewEngine.gs（_isNonTerminal_ 收紧）、
+ * 12_TaskQueryEngine.gs（新增 getTaskDashboard）、50_UIBridge.gs（新增
+ * ui_getTaskDashboard）、ui_index.html（新增 Dashboard nav + panel）。
+ * 25_DashboardEngine.gs（Telegram 契约）：零改动，确认冻结。
+ * 20_TaskEngine.gs/27_ProjectEngine.gs（Slice 1 交付物）：零改动。
+ *
+ * 核对中发现的修正（如实记录，不夸大也不回避）：
+ *   之前的审计把 ViewEngine._isNonTerminal_ 只排除 DONE/CANCELLED 这件事
+ *   记成"确认的 bug"。本轮重新核对 10_ProjectionEngine.gs 后发现这个
+ *   定性不准确——projectTaskConvertedToProject_/projectTaskNotSelected_
+ *   已经会把 CONVERTED/NOT_SELECTED 状态的 Task 从 ActiveTasks 物理删除，
+ *   而 12_TaskQueryEngine.gs 的七个高频视图（V4.8 修复）全部读
+ *   ActiveTasks——所以在现有调用路径下，这个不一致目前【不会】被实际
+ *   触发，是潜在（latent）问题，不是活跃（live）bug。仍然做了收紧（见
+ *   ViewEngine 文件内注释），理由是防御性的：本次新增的
+ *   getTaskDashboard() 直接构建在这个函数之上。这个修正本身印证了 Carson
+ *   "先重新核对当前代码、不要只信之前报告"这条要求的价值。
+ *
+ * 设计取舍（Carson 要求先分析"最小安全 adapter"方案，这里记录结论）：
+ *   getTaskDashboard() 放在 12_TaskQueryEngine.gs 内部（不是新文件、不是
+ *   塞进 25_DashboardEngine.gs）——理由：这个文件本来就是"本 OS 唯一允许
+ *   直接读 Tasks/ActiveTasks 的模块"，新函数内部把 ActiveTasks
+ *   只读一次、复用 24_ViewEngine.gs 的既有纯函数过滤器做多个 bucket，
+ *   没有新写一条 Task 查询/过滤逻辑，也没有改动
+ *   25_DashboardEngine.gs 一个字符——两条路径（Telegram 文本 / Web UI
+ *   JSON）自此完全独立，互不牵连。
+ *
+ * OS 分组对既有值不一致的处理：_normalizeOsDomainForGrouping_ 只在
+ * 读取/展示时把 'Personal Life'（Slice 1 之前的旧默认值）和
+ * 'PersonalLifeOS'（Slice 1 之后的新默认值）当同一组——不改写 Sheet 里
+ * 任何一行的实际存储值，不是 data migration，Carson 已经明确要求不要做
+ * 后者。
+ *
+ * Project 边界：project_due_view 字段显式返回
+ * {status:'BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT', message:...}——
+ * 没有给 Project 加任何日期字段，没有假设 Project deadline。
+ *
+ * 验证状态（Carson 要求的四态口径，如实标注，不把 pending 当 PASS）：
+ *   - 代码语法：STATIC VERIFIED——4 个改动文件全部经 node --check
+ *     （ui_index.html 提取 <script> 内容单独检查）通过。
+ *   - _isNonTerminal_ 收紧对既有七个高频视图的行为影响：STATIC VERIFIED
+ *     （逻辑推导：ActiveTasks 已经物理排除 CONVERTED/NOT_SELECTED，收紧
+ *     前后对这七个函数的实际输出无差异）——但这是静态推导，不是实跑验证，
+ *     仍然建议 Carson 实机跑一次现有 Track 2 Sort/Filter 用例确认。
+ *   - getTaskDashboard/ui_getTaskDashboard 实际返回结构、去重是否正确、
+ *     OS 分组是否正确：LIVE TEST PENDING。
+ *   - Dashboard 面板浏览器渲染、Done/Cancel 快捷操作、导航切换：
+ *     LIVE TEST PENDING。
+ *   - Project 相关部分：BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT（按
+ *     设计如此，不是缺陷）。
+ *   - Slice 1（Task/Project 的 OS selector、Create/Edit parity 等）：
+ *     SLICE_1_LIVE_VALIDATION_PENDING——本轮沙盒重新核对确认文件仍然
+ *     完整、语法仍然有效，但真实浏览器/GAS 行为仍然是 Carson 回家后才能
+ *     验证的，没有因为 Slice 2 的开展而改变这个状态。
+ *
+ * Test Gate（Carson 回家后，Slice 1 + Slice 2 一起跑）：
+ *   1. 打开 Dashboard 面板，确认 Overdue/Today/This Week/Upcoming/
+ *      Recurring/High Priority 分区正确显示，同一个任务不会在多个时间类
+ *      分区里重复出现。
+ *   2. 确认 By OS/Domain 分组里，Slice 1 之前创建的任务（source_domain=
+ *      'Personal Life'）和之后创建的任务（'PersonalLifeOS'）被合并显示
+ *      在同一组，不是分成两组。
+ *   3. 在 Dashboard 面板点 Done/Cancel，确认任务正确变更状态且从
+ *      Dashboard 消失，Tasks 面板本身的数据也同步反映。
+ *   4. 确认 Projects 相关的提示文字正确显示"pending Project Deadline
+ *      Contract"，没有任何 Project 出现在任何 Due 分区里。
+ *   5. 确认 Telegram 端（如果方便测试）/today /week 等指令输出跟改动前
+ *      完全一致（25_DashboardEngine.gs 零改动的直接验证）。
+ *
+ * 下一步：等 Carson 把 Slice 1 + Slice 2 的实机结果一起贴回来——通过后
+ * 才进入 Slice 3（Note Edit）。
+ */

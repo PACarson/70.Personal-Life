@@ -1306,3 +1306,99 @@
  *   Carson 批准或否决后，本条目需要相应更新 Status/Decision Date，
  *   并在 00_Project_State.gs 相应章节同步。
  */
+
+// ============================================================
+// ADR-2026-09-01-027：source_domain 正式成为 Task/Project 的
+//                      OS/Domain 归属字段（复用既有字段,不新增）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-09-01-027
+ * Status          : Accepted
+ * Decision Date   : 2026-09-01
+ * Supersedes      : (none——source_domain 此前从未有过正式的可编辑性/
+ *                   语义决定，00_Data_Ownership.gs「三」原本的描述是
+ *                   "创建时一次性写入，不可变"，本条正式取代那条描述，
+ *                   但那条描述本身不是一份独立 ADR，无编号可 supersede)
+ * Superseded By   : (none)
+ * Affected Modules: 20_TaskEngine.gs（新增顶层 OS_REGISTRY 全局量、
+ *                   UPDATABLE_FIELDS 新增 source_domain）、
+ *                   27_ProjectEngine.gs（UPDATABLE_FIELDS 新增
+ *                   source_domain，复用同一份 OS_REGISTRY）、
+ *                   50_UIBridge.gs（ui_createTask/ui_createProject 新增
+ *                   转发 source_domain；ui_updateTask/ui_updateProject
+ *                   不需要改动，两者已经把 changes 透传给 Engine）、
+ *                   ui_index.html（Create/Edit 两个表单新增 OS/Domain
+ *                   selector）
+ * Related ADR     : (none直接相关——本条是本项目第一次把 source_domain
+ *                   从"沉默字段"变成正式可用的业务字段)
+ *
+ * Context
+ *   2026-08-31 的 UI Enhancement Architecture & UX Audit 发现：Task 需要
+ *   一个能表达"这个 Task 属于哪个 OS/Domain"的字段，但既有的 category/
+ *   source_module/source_domain 都不完全是这个语义——category 是活动
+ *   类型枚举，source_module 是"哪个内部模块创建/建议的"，source_domain
+ *   虽然枚举取值意图上最接近（'Personal Life'/'Property'/'Rider'/
+ *   'Investment'/...），但被文档定义为"创建时一次性写入，不可变"的
+ *   provenance，而且 100% 处于休眠状态——所有既有记录的这个字段值
+ *   清一色是默认值 'Personal Life'，从未被任何调用路径设置成别的值。
+ *   2026-09-01，Carson 审阅 Gap Review 后明确决定：复用 source_domain，
+ *   不新增第二个字段；Task 和 Project 都要支持（Project 经核实同样
+ *   已经有这个字段，只是同样从未开放编辑）；Workflow/Note 这次不接入。
+ *
+ * Decision
+ *   1. source_domain 的语义正式从"创建 provenance"改为"这条记录的业务
+ *      OS/Domain 归属"，允许在 Create 和 Edit 两处设置——这是对既有
+ *      Metadata Standard 里这一个字段的例外：其余十个 Metadata 字段
+ *      继续保持"创建时一次性写入，不可变"。
+ *   2. 合法枚举是一个独立的顶层全局量 OS_REGISTRY（定义在
+ *      20_TaskEngine.gs），当前值：['PersonalLifeOS', 'PropertyOS',
+ *      'RiderOS', 'InvestmentOS', 'Other']——只包含目前有独立证据确认
+ *      是真实/已规划的 OS（个人生活本身、Property OS 草案、以及
+ *      Personal AI Core 相关文档提到的 Rider OS/Investment OS 规划），
+ *      不包含 Carson 原始请求里出现过的其它例子（ProcurementOS/
+ *      InventoryOS/ComplianceOS/FinanceOS/CalendarOS/HealthOS/NewsOS/
+ *      ContentOS）——那些当时是举例性质，没有独立证据证明已经是正式
+ *      注册的 OS，按"不要自行创造不存在的 OS"的要求没有收进来。新增
+ *      OS 只需要改这一个数组。ReminderOS 也没有收进来：它是平台级
+ *      提醒投递服务，不是一个"Task 可以属于"的生活领域，语义上不适用。
+ *   3. 故意不放进 ProductivityConfig 或 LifeProjectConfig 任何一个
+ *      Object.freeze() 字面量里——这两个 CFG 对象分别在各自文件里求值，
+ *      如果互相引用会产生跨文件加载顺序依赖；改成独立全局量，只在函数
+ *      体内读取（真正调用发生时整个项目早已加载完毕），规避这个风险。
+ *   4. Workflow（28_WorkflowEngine.gs）、Note（29_NoteEngine.gs）本次
+ *      不接入这个字段——两者的 _resolveMetadata_ 保持完全不变，这是
+ *      Carson 2026-09-01 的明确决定，不是遗漏。
+ *
+ * Consequences
+ *   正面：不新增字段，不产生 category/source_module/source_domain
+ *   三者互相表达 OS 归属的重复概念；新增 OS 只需要改一个数组；
+ *   source_domain 改动不触发 identity 重算（两个 Engine 的
+ *   IDENTITY_AFFECTING_FIELDS 均未包含它，也不应该包含）。
+ *
+ *   代价：既有的每一行 Task/Project，其 source_domain 列目前存的都是
+ *   旧默认值 'Personal Life'（有空格、无 OS 后缀）；本条 ADR 生效后
+ *   新建的记录会拿到新默认值 'PersonalLifeOS'；这两个字符串目前【不
+ *   一致】，会导致按 source_domain 分组统计时把同一个 OS 的记录分成
+ *   两组。本条 ADR 刻意不对既有 Sheet 数据做迁移/改写（范围之外，也没
+ *   有被要求）——如果 Carson 想要一份干净、统一的取值，需要另外一次
+ *   明确的、独立决定的数据迁移，不应该被当成本条 ADR 的隐含部分。
+ *   Slice 2（Overall Dashboard 的 OS 分组）实现时需要显式处理或至少
+ *   知道这个不一致。
+ *
+ *   前端（ui_index.html）的 OS_REGISTRY 是后端同名全局量的手抄副本，
+ *   跟既有 category/priority/recurring 的既有模式一致——不是动态从
+ *   后端拉取。新增 OS 因此仍然需要改两处（前端 JS 数组 + 后端
+ *   OS_REGISTRY），不是真正意义上的单点注册；如果要做到真正单点，
+ *   需要一次单独的、新增一个只读 UIBridge 函数在页面加载时拉取枚举的
+ *   小改动，这次没有做，属于已知的、可接受的折中。
+ *
+ * Notes
+ *   完整 Gap Review 讨论见 Personal_Life_OS_UIV2_Architecture_Capability_
+ *   Gap_Review_2026-09-01.md 第 1 项；本条属于 Implementation Plan 的
+ *   Slice 1。execution_mode 在 Project Edit 表单的暴露是同一次 Slice 1
+ *   改动里顺带做的，跟本条 ADR 描述的 source_domain 决定是两件不同的事，
+ *   不在本条覆盖范围内，没有独立 ADR（判断是：这跟 Task 侧已经被批准的
+ *   "Create 能设置的字段 Edit 也要能改"是同一类、非 schema/identity
+ *   相关的 UI 层修复，不需要单独走 ADR）。
+ */

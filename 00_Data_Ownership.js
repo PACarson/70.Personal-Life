@@ -83,11 +83,47 @@
  *                      |                                       | 取值固定为
  *                      |                                       | 'User'（自己
  *                      |                                       | 建议自己）
- *   source_domain        | 'Personal Life' \| 'Property' \|       | 创建时一次性
- *                      | 'Rider' \| 'Investment' \| 'News' \| ... | 写入，不可变；
- *                      | （开放字符串，不用枚举锁死——未来       | 本项目产生的
- *                      | Domain OS 会不断增加，锁死会导致        | 记录固定填
- *                      | 每次新增 Domain 都要回来改这个文件）     | 'Personal Life'
+ *   source_domain        | 见 20_TaskEngine.gs 顶层 OS_REGISTRY（当前： | 【2026-09-01
+ *                      | 'PersonalLifeOS' \| 'PropertyOS' \|      | 起，ADR-2026-
+ *                      | 'RiderOS' \| 'InvestmentOS' \| 'Other'）  | 09-01-027】
+ *                      | ——单点注册，Task/Project 共用同一份，     | Task/Project
+ *                      | 不在别处另抄一份枚举                      | 均可编辑，不
+ *                      |                                          | 再是创建时
+ *                      |                                          | 一次性写入；
+ *                      |                                          | 语义是"这条
+ *                      |                                          | 记录的业务
+ *                      |                                          | OS/Domain 归
+ *                      |                                          | 属"，不是
+ *                      |                                          | provenance
+ *                      |                                          | ——"谁创建/
+ *                      |                                          | 谁建议"继续
+ *                      |                                          | 由 creator/
+ *                      |                                          | suggested_by/
+ *                      |                                          | source_module
+ *                      |                                          | 表达，两组
+ *                      |                                          | 概念不混用。
+ *                      |                                          | 新建记录默认
+ *                      |                                          | 'PersonalLifeOS'；
+ *                      |                                          | 2026-09-01
+ *                      |                                          | 之前创建的
+ *                      |                                          | 既有记录仍是
+ *                      |                                          | 旧默认值
+ *                      |                                          | 'Personal
+ *                      |                                          | Life'（无 OS
+ *                      |                                          | 后缀），两者
+ *                      |                                          | 尚未统一，见
+ *                      |                                          | ADR-2026-09-
+ *                      |                                          | 01-027 的
+ *                      |                                          | Consequences。
+ *                      |                                          | Workflow/Note
+ *                      |                                          | 不适用本条，
+ *                      |                                          | 继续维持
+ *                      |                                          | 原本"创建时
+ *                      |                                          | 一次性写入，
+ *                      |                                          | 不可变，固定
+ *                      |                                          | 填 'Personal
+ *                      |                                          | Life'"的旧
+ *                      |                                          | 行为不变。
  *   source_module         | 自由文本，如 'NoteEngine' /             | 创建时一次性
  *                      | 'BusinessRuleEngine'                    | 写入，不可变
  *   source_event_id        | Events 表的 event_id，可空             | 创建时一次性
