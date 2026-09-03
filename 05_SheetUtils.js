@@ -320,44 +320,51 @@ function batchUpsertRowsByKey_(sheetName, keyHeader, rowDataObjArray) {
  * 判断 due_date 是否已经过期。只处理日期类，里程类('40000km'这种)先跳过
  * （依赖 RiderConnector 的当前里程数据，暂时无法判断）。
  *
- * 【2026-09-02 修复，Carson 实机测试报告】纯日期字符串（'2026-09-02'这种，
- * 没有 due_time）经 parseDueDate_ 解析后是当天 00:00:00（本地时区午夜）——
- * 原来直接拿这个时间点跟 Date.now() 比，导致"今天到期"的任务从当天
- * 凌晨过后的每一刻起就被判定成 overdue，实机验证到的症状是：今天到期的
- * 任务出现在 Overdue，没有出现在 Today（ViewEngine.today/overdue 两个
- * 视图的过滤条件本身没有问题，是这个共用的过期判断把"今天"提前判成
- * "已过期"）。修复：纯日期字符串比到"当天结束"（23:59:59.999），今天
- * 到期的任务要等到明天才算 overdue，跟日历意义上的"今天到期"直觉一致。
- * 带时间部分的字符串（如果未来某处传入完整 datetime）维持原来的精确
- * 时刻比较，不受影响。这是 05_SheetUtils.gs 的共用函数，改动会同时影响
+ * 【2026-09-02 第二次修复，Carson 实机复测后指出】第一版热修（比较
+ * endOfDueDay vs Date.now()）只在输入是纯 'YYYY-MM-DD' 字符串时生效——
+ * 用 String(原始值) 做正则匹配来判断"是不是纯日期"，但 Sheets 里被识别
+ * 成日期类型的格子，sheet.getRange().getValues() 读回来的实际类型是
+ * 原生 Date 实例（当天本地 0 点），不是字符串！String(Date 实例) 产出的
+ * 是 "Thu Sep 03 2026 00:00:00 GMT+0800..." 这种格式，永远匹配不上
+ * /^\d{4}-\d{2}-\d{2}$/，导致第一版热修对 Sheets 里真实存储的日期格子
+ * 完全没有生效，走回了原来"直接拿午夜时刻跟 Date.now() 比"的老路，
+ * bug 原样重现——Carson 用 Node 复现验证过这一点，诊断准确。
+ *
+ * 这一版不再尝试"用字符串格式侦测这是不是纯日期"，因为这种侦测方式本身
+ * 就是脆弱的（依赖调用方传进来的是哪种具体类型/格式）——改成统一按
+ * "日历日"粒度比较：把 due 和"此刻"都各自丢弃时分秒、只留年月日，
+ * 严格早于才算逾期。这个简化是安全的，因为 isOverdue_ 目前仅有的两个
+ * 调用点（24_ViewEngine.overdue()、26_AnalyticsEngine.computeStatistics）
+ * 传进来的永远是 due_date（日期字段），从来不是 due_datetime（精确到
+ * 时刻的派生字段）——"日历日粒度"本来就是这个字段唯一有意义的语义，
+ * 不需要靠猜格式来决定要不要看时分秒。Date 实例输入交给下面
+ * parseDueDate_ 的新分支直接处理，不再绕一圈 String() 再重新 parse。
+ *
+ * 这是 05_SheetUtils.gs 的共用函数，改动会同时影响
  * 24_ViewEngine.overdue()（Task Dashboard 的 Overdue 分区）和
- * 26_AnalyticsEngine.computeStatistics 的 overdueCount 统计——两处目前都
- * 是同一个共用逻辑的独立调用点，不是各自重复实现，所以在这里改一次就
- * 同时修好两处，不需要也不应该在各自调用点分别打补丁。这不改动
- * 25_DashboardEngine.gs 一个字符——它本身没有直接调用 isOverdue_，只是
- * 通过 ViewEngine.overdue() 间接受益于这个共用逻辑变得更准确，Telegram
- * 端 /today 的 Overdue 分区计数会因此变化（不再把今天到期的任务算进
- * 逾期），这是修复一个两边共用的真实 bug，不是为了 Web UI 而改
- * Telegram 的输出契约/格式本身。
- * @param {string} dueDateRaw  原始 due_date 字符串
+ * 26_AnalyticsEngine.computeStatistics 的 overdueCount 统计——两处都是
+ * 同一个共用逻辑的独立调用点，这里改一次就同时修好两处。不改动
+ * 25_DashboardEngine.gs 一个字符，但 Telegram 端 /today 的 Overdue 分区
+ * 计数会因此变得更准（不再把今天到期的任务算进逾期）——这是修复一个
+ * 两边共用的真实 bug，不是为了 Web UI 而改 Telegram 的输出契约本身。
+ * @param {string|Date} dueDateRaw  原始 due_date，字符串或 Sheets 原生 Date 实例
  */
 function isOverdue_(dueDateRaw) {
   if (!dueDateRaw) return false;
-  var raw = String(dueDateRaw).trim();
 
-  if (/km$/i.test(raw)) {
+  // 里程类只可能以字符串形式出现（Date 实例不会长这样），判断放在这里、
+  // 不影响下面的日期解析路径。
+  if (!(dueDateRaw instanceof Date) && /km$/i.test(String(dueDateRaw).trim())) {
     return false;
   }
 
-  var due = parseDueDate_(raw);
+  var due = parseDueDate_(dueDateRaw);
   if (!due || isNaN(due.getTime())) return false;
 
-  var isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
-  if (isDateOnly) {
-    var endOfDueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate(), 23, 59, 59, 999);
-    return endOfDueDay.getTime() < Date.now();
-  }
-  return due.getTime() < Date.now();
+  var now = new Date();
+  var dueDay   = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  var todayDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return dueDay.getTime() < todayDay.getTime();
 }
 
 /**
@@ -367,13 +374,25 @@ function isOverdue_(dueDateRaw) {
  * 手动按本地时区午夜算，带时间的字符串则正常解析（ES2015+规范：带T
  * 无offset的日期时间字符串按本地时区解析，只有纯日期才按UTC，2026-06-25
  * 外部审计MEDIUM RISK 2复核确认过，详见92_ReminderEngine.gs历史记录）。
+ *
+ * 【2026-09-02 新增分支】Sheets 把被识别成日期类型的格子读回来时给的是
+ * 原生 Date 实例，不是字符串——之前这个函数没有处理这种输入类型，调用方
+ * （比如旧版 isOverdue_）只能先 String() 转一道再传进来，绕这一圈本身
+ * 就是问题的根源（见 isOverdue_ 上面的说明）。现在直接支持 Date 实例，
+ * 校验后原样返回，不需要也不应该再经过字符串这一层。
  */
 function parseDueDate_(raw) {
-  var dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!raw) return null;
+  if (raw instanceof Date) {
+    return isNaN(raw.getTime()) ? null : raw;
+  }
+  var rawStr = String(raw).trim();
+  var dateOnlyMatch = rawStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (dateOnlyMatch) {
     return new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]));
   }
-  return new Date(raw);
+  var d = new Date(rawStr);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // ============ 共用：数值四舍五入 ============

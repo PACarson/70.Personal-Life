@@ -1281,3 +1281,61 @@
  *
  * 下一步：等这一处 hotfix 的实机确认，通过后进入 Slice 3（Note Edit）。
  */
+
+// ============================================================
+// 二十八、isOverdue_ 第一版热修不完整——Carson 指出根因,已二次修复
+//        （2026-09-02，同日）
+// ============================================================
+
+/**
+ * Carson 复测/分析后指出：第一版热修（比较 endOfDueDay）判断"是不是纯
+ * 日期"靠对 String(原始输入) 做正则匹配——但 Sheets 里被识别成日期类型
+ * 的格子，getValues() 读回来的实际类型是原生 Date 实例，不是字符串；
+ * String(Date 实例) 产出 "Thu Sep 03 2026 00:00:00 GMT+0800..." 这种
+ * 格式，永远匹配不上 /^\d{4}-\d{2}-\d{2}$/，导致第一版热修对 Sheets 里
+ * 真实的日期格子完全没有生效，bug 原样重现。诊断准确，已用 Node 复现
+ * 确认——本窗口第一版验证时只测了字符串输入，没有测 Date 实例输入，是
+ * 本窗口自己验证方法的疏漏，这里如实记录，不归咎为"当时没法预见"。
+ *
+ * 二次修复不是照搬 Carson 给出的"侦测这是不是纯日期"版本（判断
+ * Date 实例是否 getHours()===0，字符串是否匹配正则），而是换了一种更
+ * 不容易再踩坑的做法：不再侦测"这是不是纯日期"，直接统一按"日历日"
+ * 粒度比较——把 due 和"此刻"都丢弃时分秒、只留年月日，严格早于才算
+ * 逾期。这样处理是安全的，因为核对过 isOverdue_ 目前仅有的两个调用点
+ * （24_ViewEngine.overdue()、26_AnalyticsEngine.computeStatistics）
+ * 传进来的永远是 due_date，从来不是精确到时刻的 due_datetime——日历日
+ * 粒度本来就是这个字段唯一有意义的语义，不需要靠猜格式决定要不要看
+ * 时分秒，这个"侦测格式"的动作本身正是第一版热修出问题的地方。
+ *
+ * parseDueDate_() 同步加了 raw instanceof Date 的直接分支——之前只能
+ * 处理字符串，Date 实例传进来要先被调用方 String() 转一道再传，这一圈
+ * 本身就是问题根源，现在直接原生支持。
+ *
+ * Carson 同时建议在 12_TaskQueryEngine.getTaskDashboard() 里对 active
+ * 任务的日期字段做一次预处理再喂给各个 View 函数——这一处没有采纳：
+ * 根因已经在 isOverdue_/parseDueDate_ 这一层修掉，getTaskDashboard 本身
+ * 调用的还是同一套 ViewEngine 函数，不需要也不应该在这一个调用点上再
+ * 加一层重复的类型防护——那样会制造第二份"日期类型怎么处理"的逻辑，
+ * 跟这份代码库一直以来"发现重复实现要合并、不要在多处分别打补丁"的
+ * 原则相反，而且不会让 Telegram 端的其它调用路径一起受益。
+ *
+ * 顺手独立核实了一件事（不是假设）：24_ViewEngine._dueDateOf_（供
+ * today/tomorrow/thisWeek/thisMonth/upcoming 五个视图共用）不受这个
+ * bug 影响——它调用 parseDueDate_ 前自己已经 String() 了一次，Date 实例
+ * 经这个路径能正确 round-trip 回同一个日历日（用 Node 从真实文件提取
+ * 函数验证过，年月日完全一致），所以 Carson 这次只报告 Overdue 出问题、
+ * Today 本身没问题，跟这个独立验证的结果一致。这也是为什么这一版没有
+ * 动 24_ViewEngine.gs 一个字符——它没有坏，不属于这次该改的范围。
+ *
+ * 验证状态：
+ *   - STATIC VERIFIED：直接从改动后的真实 05_SheetUtils.js 文件里提取
+ *     函数（不是手抄测试片段）用 Node 跑：字符串-今天/Date实例-今天均为
+ *     false，字符串-昨天/Date实例-昨天均为 true，明天两种输入均为
+ *     false，空值/里程字符串/非法 Date 均为 false——Date 实例这条路径
+ *     这次真正跑通了，不再是仅字符串路径通过。
+ *   - LIVE TEST PENDING：请 Carson 用同一条今天到期的 Task 在真实
+ *     Dashboard 里再验证一次 Today/Overdue 分区，这次应该能看到它正确
+ *     出现在 Today。
+ *
+ * 下一步：等这次的实机确认，通过后进入 Slice 3（Note Edit）。
+ */
