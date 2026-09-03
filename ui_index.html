@@ -171,6 +171,7 @@
       display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
     }
     .item-title { font-size: 14px; font-weight: 500; line-height: 1.45; word-break: break-word; }
+    .item-title.note-content { white-space: pre-wrap; }
     .item-desc { font-size: 13px; color: var(--ink-dim); margin-top: 4px; line-height: 1.4; word-break: break-word; }
 
     .item-trace {
@@ -282,10 +283,10 @@
       <div class="nav-brand"><strong>Personal</strong> Life OS</div>
       <!-- Slice 2, 2026-09-02: Task-only for now — Project is explicitly
            BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT, see panel-dashboard.
-           Notes stays the default active panel; this round didn't ask to
-           change the landing page, so that wasn't changed. -->
-      <div class="nav-item enabled" data-panel="dashboard">Dashboard</div>
-      <div class="nav-item enabled active" data-panel="notes">Notes</div>
+           2026-09-04: Dashboard is now the default landing panel (Carson
+           requested the switch); Notes no longer auto-active on load. -->
+      <div class="nav-item enabled active" data-panel="dashboard">Dashboard</div>
+      <div class="nav-item enabled" data-panel="notes">Notes</div>
       <div class="nav-item enabled" data-panel="tasks">Tasks <span class="nav-count" id="taskCount"></span></div>
       <div class="nav-item enabled" data-panel="projects">Projects <span class="nav-count" id="projectCount"></span></div>
       <div class="nav-item">Workflows <span class="nav-soon">soon</span></div>
@@ -296,7 +297,7 @@
     <main class="workspace">
 
       <!-- Dashboard Panel (Slice 2, 2026-09-02) -->
-      <section class="panel" id="panel-dashboard">
+      <section class="panel visible" id="panel-dashboard">
         <h1>Dashboard</h1>
         <p class="sub">Task-only for now &middot; grouped by OS/Domain &middot; Project due-view pending Project Deadline Contract</p>
         <div id="dashboardStatus" class="status-line"></div>
@@ -304,7 +305,7 @@
       </section>
 
       <!-- Notes Panel -->
-      <section class="panel visible" id="panel-notes">
+      <section class="panel" id="panel-notes">
         <h1>Notes</h1>
         <p class="sub">capture → convert · vertical slice 1</p>
 
@@ -693,7 +694,7 @@
         card.innerHTML =
           '<div class="item-header-row">' +
             '<div style="flex:1">' +
-              '<div class="item-title">' + escapeHtml(note.content) + '</div>' +
+              '<div class="item-title note-content">' + escapeHtml(note.content) + '</div>' +
               '<div class="item-trace" style="margin-top:6px;">' +
                 '<span>' + escapeHtml(note.creator || 'User') + '</span><span class="sep">\u00b7</span>' +
                 '<span>' + escapeHtml(note.created_method || 'Manual') + '</span><span class="sep">\u00b7</span>' +

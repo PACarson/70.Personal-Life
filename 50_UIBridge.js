@@ -224,7 +224,7 @@ function ui_getOpenNotes(_testOverrides) {
   try {
     var chatId = _resolveChatId_(_testOverrides);
     var notes = NoteQueryEngine.getOpenNotes(chatId);
-    return { ok: true, notes: notes };
+    return { ok: true, notes: _sanitizeTaskDatesForTransport_(notes) };
   } catch (e) {
     return _wrapError_(e);
   }

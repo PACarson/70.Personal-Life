@@ -1339,3 +1339,55 @@
  *
  * 下一步：等这次的实机确认，通过后进入 Slice 3（Note Edit）。
  */
+
+// ============================================================
+// 二十九、isOverdue_ v2 实机确认通过 + 三处补充修复（2026-09-04）
+// ============================================================
+
+/**
+ * Carson 反馈：05_SheetUtils.js 已实机验证，测试通过——二十八章记录的
+ * isOverdue_ v2（日历日粒度比较）在真实 GAS+Sheets+浏览器环境下确认
+ * 生效。Session Handoff Checkpoint 2026-09-02「一、当前状态」与
+ * 「五、下一步」列出的两处待确认（isOverdue_ v2 是否实机通过、Carson
+ * 实际部署的 05_SheetUtils.js 是否已是这一版）就此解除，从 LIVE TEST
+ * PENDING 转为 LIVE VERIFIED PASS。Slice 1 + 2 剩余的分区级验证清单
+ * （This Week/Upcoming/Recurring/High Priority）本轮未见 Carson 明确
+ * 提及，如实记录为仍未确认，不假设已随口覆盖。
+ *
+ * 同一窗口内 Carson 另外要求了三处改动，均已实施、node --check 通过：
+ *
+ * 1. 50_UIBridge.js：ui_getOpenNotes 补上 _sanitizeTaskDatesForTransport_
+ *    包裹，补齐 ADR-2026-08-26-025 既定规则遗漏的一处 return site（不是
+ *    新规则，是把已 Accepted 的规则应用到之前漏掉的地方）。已核对该
+ *    函数按字段名泛化处理、非 Task 专属：Note 对象没有 due_date/
+ *    due_time/due_datetime 不受影响，其余字段若为 Date 会被兜底分支
+ *    捕获并记录日志，安全适用。
+ *
+ * 2. ui_index.html：默认落地面板从 Notes 改成 Dashboard——只调整了
+ *    nav-item 的 active class 与 panel 的 visible class 这两处静态
+ *    标记（二十六章确认过四个面板的数据是页面加载时一次性全部拉取，
+ *    不是按需懒加载，这处改动不需要联动任何数据加载逻辑），同时更新了
+ *    旁边一条已经过时的注释（原文写"这轮没有要求换默认面板"，现已不再
+ *    准确）。
+ *
+ * 3. ui_index.html：Notes 卡片内容换行保留——note.content 原本已经过
+ *    escapeHtml 转义（无 XSS 风险变化），但容器没有 white-space 声明，
+ *    浏览器会把 \n 折叠掉。没有直接改共用的 .item-title 规则（Task/
+ *    Project 标题也在用这个类），而是新增一个 .item-title.note-content
+ *    修饰类，只挂在 Notes 卡片的渲染那一行，Task/Project 渲染路径零
+ *    改动。
+ *
+ * 验证状态：
+ *   - isOverdue_ v2：LIVE VERIFIED PASS（Carson 本轮报告通过，未附带
+ *     具体分区截图/日志，如实记录为「Carson 报告通过」而非独立复核）。
+ *   - 上述 1/2/3：STATIC VERIFIED（node --check 通过、grep 复查 5 处
+ *     改动均已生效且无重复遗漏），LIVE TEST PENDING（GAS/浏览器环境不
+ *     在本窗口手边，请 Carson 部署后确认：① 打开网页第一眼看到的是不是
+ *     Dashboard；② Notes 里带换行的内容是否正确分行显示；③ 顺手看一眼
+ *     Notes 面板本身加载无报错——ui_getOpenNotes 这处改动不改变任何可见
+ *     行为，主要靠没有报错侧面确认）。
+ *
+ * 下一步：等以上 3 处实机确认；同时仍在等 Slice 1+2 剩余分区（This
+ * Week/Upcoming/Recurring/High Priority）的完整 Test Gate 确认——通过
+ * 后再进入 Slice 3（Note Edit）。
+ */
