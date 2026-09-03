@@ -297,3 +297,25 @@
  * 服务端，看不到浏览器里的 JS）——这不是测试覆盖的缺口，是这套测试体系
  * 的既有边界，四个排序选项的正确性需要人工在浏览器里点一遍验证。
  */
+
+// ============================================================
+// 六、getTaskDashboard() — 只给 Web UI 用，Telegram 侧没有对应指令
+//    （2026-09-02 新增，Implementation Plan Slice 2）
+// ============================================================
+
+/**
+ * `12_TaskQueryEngine.getTaskDashboard(chatId)` / `50_UIBridge.
+ * ui_getTaskDashboard` 是全新增加的能力（不是把既有能力换个包装），
+ * 只给 Web UI 的 Dashboard 面板用——目前没有任何 Telegram 指令调用它，
+ * 也没有计划加一个。这跟本文件其它几节"内部能力做好了但没接指令"不是
+ * 同一种情况：这次的原因不是"暂缓"，是"这个能力的产出形态（结构化
+ * JSON，含跨 bucket 去重、OS 分组）本来就是为 Web UI 设计的，Telegram
+ * 端已有的 `25_DashboardEngine.buildTodayDashboard`/`buildWeeklyDashboard`
+ * 才是给 Telegram 用的对应能力，两者故意保持独立（见
+ * 00_ADR.gs ADR-2026-09-02-029），不是"少做了一半"。
+ *
+ * 内部复用 `24_ViewEngine.gs` 现有的 today/overdue/thisWeek/upcoming/
+ * recurring/highPriority 纯函数过滤器，没有新写任何过滤逻辑；
+ * `_readActiveTasks_` 只读一次，避免每个 bucket 各自重新读表。完整设计
+ * 记录见 00_Project_State.gs「二十六」。
+ */

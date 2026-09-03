@@ -1,7 +1,14 @@
 /**
  * 00_Business_Rules.gs
- * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Personal Life OS v5.3（Design Phase — Architecture Freeze）—
  * Business Rules
+ *
+ * Changelog: v5.2 → v5.3（2026-09-02，UI V2 Capability Gap Review 之后）
+ * ——新增「十一」Conversion No-Silent-Loss Principle（跨全部 Conversion
+ * 的通用原则）；「一」Task→Project 补充这条原则的具体落地规则（完整
+ * ADR 见 00_ADR.gs ADR-2026-09-02-028）。这一版只记录决定本身，
+ * BLOCKED 判断的实际代码尚未实现（Implementation Plan Slice 4，
+ * 还没开始）——见该 ADR 的 Status。
  *
  * Changelog: v5.1 → v5.2——新增「十」Task 状态到 Canonical Lifecycle
  * 的完整映射表（ADR-017）。
@@ -69,6 +76,22 @@
  * 00_Entity_Relationship.gs「四」）——一个 Task 转成 Project 后，
  * 理论上还能再被转回 Task，每次都是独立、对称的操作，血缘通过
  * Timeline 完整可查。
+ *
+ * 【v5.3 新增，2026-09-02，见「十一」No-Silent-Loss Principle、
+ * ADR-2026-09-02-028】Task→Project 现状：源 Task 的 due_date/due_time/
+ * due_datetime 完全不映射到目标 Project——因为 Project 目前没有这几个
+ * 字段（Project Deadline Contract 尚未批准）。这条决定：源 Task 带
+ * 非空 due_date/due_time 时，转换必须返回结构化 BLOCKED（不是静默完成，
+ * 也不是靠一次性确认弹窗放行丢失），提示大意为"Project 尚不支持
+ * deadline，暂时无法转换"。不带日期的 Task 转换行为不变。
+ *
+ * 【状态：DECIDED，代码尚未实现】——这是 Implementation Plan Slice 4
+ * 的范围，本文件这次只记录决定本身，`42_ConversionEngine.
+ * convertTaskToProject`/`50_UIBridge.ui_convertTaskToProject`
+ * 目前的实际代码还没有加这条 BLOCKED 检查，见 ADR-028 的 Status 字段。
+ * Project Deadline Contract 一旦批准，这条规则本身也需要跟着重新评估
+ * （届时 Project 有地方存日期了，可能就不再需要 BLOCKED，改成正常
+ * 映射）。
  */
 
 // ============================================================
@@ -289,4 +312,35 @@
  * Project/Workflow 不需要映射表——v5.2 起它们的原生 status 直接就是
  * Canonical Lifecycle 词汇（见 00_Sheets_Structure.gs「三」「四」），
  * mapTaskStatusToCanonical_ 是本文件唯一需要的映射函数。
+ */
+
+// ============================================================
+// 十一、Conversion No-Silent-Loss Principle（v5.3 新增，2026-09-02，
+//      完整 ADR 见 00_ADR.gs ADR-2026-09-02-028）
+// ============================================================
+
+/**
+ * 原则（适用于本文件「一」「三」描述的全部 Conversion，不只是
+ * Task→Project）：
+ *
+ *   任何 Conversion 都不能静默丢失用户已经存在的数据。
+ *
+ * 具体要求：如果源实体的某个字段，目标实体的 schema 里没有地方可以
+ * 存放（比如现状 Task→Project 转换里的 due_date/due_time/
+ * due_datetime），转换必须满足以下二选一，不能是第三种（静默丢弃）：
+ *
+ *   (a) 返回结构化 BLOCKED，附带清楚的原因，让用户知道为什么现在不能转
+ *   (b) 转换前给用户一个明确的、需要主动确认的提示，说明这个字段不会
+ *       被带过去
+ *
+ * 这条原则不预设"BLOCKED"和"确认后继续"哪个更好——由每一条具体转换
+ * 规则自己决定（Task→Project 目前决定用 (a)，见「一」的补充说明和
+ * ADR-028）。唯一不允许的是：既不提示、也不阻止，让数据在用户没有
+ * 察觉的情况下消失。
+ *
+ * 这条原则本身不是"发现一个新 bug 才有的补丁"——2026-08-31 的审计
+ * 发现 Task→Project 转换会静默丢失日期信息时，这条原则被正式确立为
+ * 跨所有 Conversion 的通用要求，而不只是对付这一个具体案例的一次性
+ * 修复。未来任何新的 Conversion（比如尚未实现的 Task→Note，见
+ * ADR-2026-09-02-030）设计时都要先对照这条原则检查一遍。
  */

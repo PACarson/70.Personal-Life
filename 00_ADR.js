@@ -1402,3 +1402,173 @@
  *   "Create 能设置的字段 Edit 也要能改"是同一类、非 schema/identity
  *   相关的 UI 层修复，不需要单独走 ADR）。
  */
+
+// ============================================================
+// ADR-2026-09-02-028：Conversion No-Silent-Loss Principle +
+//                      Task→Project 的 BLOCKED 决定
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-09-02-028
+ * Status          : Accepted（决定本身已批准；对应的代码尚未实现——见
+ *                   Consequences 最后一段，这是 DECIDED 不等于
+ *                   IMPLEMENTED 的一个明确例子）
+ * Decision Date   : 2026-09-02
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 00_Business_Rules.gs「一」「十一」（本条决定的
+ *                   权威文本落在这里）；后续实现会涉及
+ *                   42_ConversionEngine.convertTaskToProject、
+ *                   50_UIBridge.ui_convertTaskToProject、ui_index.html
+ *                   的 Convert-to-Project 流程——这三处目前都还没有改动
+ * Related ADR     : 与 Project Deadline Contract（00_Architecture_
+ *                   Review.md 的 Review #4/Schema Impact Audit/Identity
+ *                   Impact Review 一脉）互相独立、但结论互相影响——那个
+ *                   决定一旦批准，本条的 BLOCKED 判断本身需要重新评估
+ *
+ * Context
+ *   2026-08-31 的 UI Enhancement Architecture & UX Audit 发现：Task→
+ *   Project 转换时，源 Task 的 due_date/due_time/due_datetime 会被完全
+ *   静默丢弃——不是因为代码疏忽，是因为 Project 目前没有 schema 能存放
+ *   这些字段（Project Deadline Contract 尚未批准）。这个具体发现促成了
+ *   一条更通用的原则被正式确立：任何 Conversion 都不能静默丢失用户
+ *   已经存在的数据（完整原则见 00_Business_Rules.gs「十一」）。
+ *
+ * Decision
+ *   1. 通用原则：Conversion 遇到"源字段在目标 schema 里无处安放"时，
+ *      必须二选一——结构化 BLOCKED，或者转换前需要用户主动确认——不能
+ *      是第三种（静默丢弃）。
+ *   2. Task→Project 的具体选择：选 BLOCKED，不是确认弹窗。理由：
+ *      Project 现在连"合法保存这个字段"的地方都没有，确认弹窗解决的
+ *      是"用户知情"，解决不了"Domain Contract 缺失"这个更根本的问题——
+ *      让用户"确认丢弃"掩盖的是 Project 这一侧 schema 能力不足的事实，
+ *      而不是真正给了用户一个可以接受的选择。
+ *   3. 不允许因为这条决定，就在 Slice 4 里顺手给 Project 加 due_date
+ *      字段来"解决"BLOCKED——那是绕开 Project Deadline Contract 该走的
+ *      正式审批流程，本条决定本身不构成那个审批。
+ *
+ * Consequences
+ *   正面：不会再有用户数据在转换过程中无声消失，不管是这一条具体规则
+ *   还是「十一」的通用原则，都是可以审计、可以解释给用户听的行为。
+ *
+ *   代价：Task→Project 转换从"总是能转"变成"带日期时会被拒绝"，这是
+ *   刻意的体验收紧，直到 Project Deadline Contract 批准为止。
+ *
+ *   【重要】本条截至 2026-09-02 记录时，只是决定，不是实现——
+ *   `42_ConversionEngine.convertTaskToProject`/`50_UIBridge.
+ *   ui_convertTaskToProject` 的实际代码还是 2026-08-31 审计时读到的
+ *   原样，没有 BLOCKED 检查。这是 Implementation Plan 的 Slice 4 范围，
+ *   Slice 1/2 都还没有触碰这部分代码。任何读到这条 ADR 的人（包括未来
+ *   的 Claude 窗口）不应该假设代码已经跟上——请先看
+ *   00_Project_State.gs 最新的 Slice 进度记录，再决定要不要去查代码。
+ *
+ * Notes
+ *   完整讨论见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
+ *   Review_2026-09-01.md 第 5.1 节。
+ */
+
+// ============================================================
+// ADR-2026-09-02-029：Web UI Task/Overall Dashboard 的 Domain Dashboard
+//                      边界确认
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-09-02-029
+ * Status          : Accepted（决定 + 对应代码都已完成——见 Affected
+ *                   Modules；这是跟 ADR-028 相反的例子：这条是
+ *                   DECIDED 且 IMPLEMENTED）
+ * Decision Date   : 2026-09-02
+ * Supersedes      : (none——是对既有 ADR-2026-07-24-007/
+ *                   00_Domain_Boundary.gs「四」Dashboard Ownership 原则
+ *                   的一次具体应用确认，不是推翻或修改那条原则本身)
+ * Superseded By   : (none)
+ * Affected Modules: 00_Domain_Boundary.gs「四」（新增应用确认段落）、
+ *                   12_TaskQueryEngine.gs（getTaskDashboard，已实现）、
+ *                   50_UIBridge.gs（ui_getTaskDashboard，已实现）、
+ *                   ui_index.html（Dashboard 面板，已实现）
+ * Related ADR     : ADR-2026-07-24-007（Dashboard Ownership 原则本身）
+ *
+ * Context
+ *   Carson 在 2026-09-01 的审阅意见里，把 Overall Dashboard 描述为
+ *   "跨 OS 的执行总览"——这个措辞如果按字面理解，容易被误读成"跨读
+ *   Property OS/Investment OS 自己的数据"，那样会违反既有的 Domain/
+ *   Execution 边界（ADR-2026-07-24-012、00_Domain_Boundary.gs「七」）。
+ *   本条 ADR 记录的是：核实过实际需求和实际实现后，这个"跨 OS"其实是
+ *   "按 source_domain 标签跨类别展示"，不是"跨系统读取"，两者是不同
+ *   的事。
+ *
+ * Decision
+ *   Web UI 的 Task/Overall Dashboard 正式确认：只读本项目自己拥有的
+ *   Task 表（经 ActiveTasks），按 source_domain 字段分组——分组维度是
+ *   "这条记录标注属于哪个 OS"，不是"从哪个系统读来的"。只要 Property
+ *   OS/Investment OS 还没有变成独立运行、自己拥有数据的系统（目前
+ *   确实还没有），这个分组就不构成跨 Domain 数据聚合，Dashboard 仍然是
+ *   00_Domain_Boundary.gs「四」定义的 Domain Dashboard，不是 Execution
+ *   Dashboard，本项目实现它没有越界。
+ *
+ * Consequences
+ *   现在：允许本项目继续实现和维护这个 Dashboard，不需要因为"跨 OS"
+ *   这个措辞而把它重新定性成 Life Execution OS 的职责。
+ *
+ *   未来风险（记录但不是现在要解决的问题）：如果 Property OS/
+ *   Investment OS 未来真的变成独立系统，"按 source_domain 分组"这件事
+ *   本身要不要继续留在本项目、还是应该移交给 Life Execution OS 改成
+ *   真正的跨系统聚合，需要那时候重新评估——本条决定只对"现状"负责。
+ *
+ * Notes
+ *   完整讨论见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
+ *   Review_2026-09-01.md 第 2 节措辞澄清部分。
+ */
+
+// ============================================================
+// ADR-2026-09-02-030：Task → Note Conversion Contract（占位，尚未
+//                      正式起草——不要假设这条已经有完整决定）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-09-02-030
+ * Status          : Proposed（仅仅是占位——连"提议的方案"都还没有正式
+ *                   写完整，下面 Decision 部分列的是"需要回答的问题"，
+ *                   不是"已经回答的问题"。任何人（包括未来的 Claude
+ *                   窗口）都不应该把这条当成已批准的设计）
+ * Decision Date   : (未定)
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 待定——至少会涉及 42_ConversionEngine.gs（新增
+ *                   convertTaskToNote）、20_TaskEngine.gs（可能需要
+ *                   schema 层面的决定，见下）、29_NoteEngine.gs
+ * Related ADR     : ADR-2026-09-02-028（No-Silent-Loss Principle，
+ *                   本条最终方案也要符合那条原则）
+ *
+ * Context
+ *   Carson 明确要求：Task→Note 不能直接照抄 Task↔Project 的模式实现，
+ *   必须先有一份完整 ADR，而且不认同"原地把 Task 变成 Note"，倾向
+ *   "新建 Note + 明确处理原 Task 实体"（跟既有 Note→Task/Note→Project
+ *   的非破坏性先例对称）。
+ *
+ * Decision（未决——这是需要在正式起草时回答的问题清单，不是答案）
+ *   1. 非破坏性转换时，源 Task 标记成什么终态？是复用现有单一用途的
+ *      `converted_to_project_id` 字段（不够用，因为这次目标类型是
+ *      Note 不是 Project），还是新增一对通用的
+ *      `converted_to_type`/`converted_to_id`（Note 已经有这一对，
+ *      Task 目前没有）？
+ *   2. 新 Note 要不要把 `source_task_id` 设成源 Task 的 ID？
+ *      `convertNoteToTask` 处理反向血缘时明确选择"不填 source_task_id，
+ *      血缘走事件本身"——这次是否沿用同样的窄口径，还是这次反过来该填？
+ *   3. 幂等性检查的具体判断条件（参照既有 5 个转换的模式，但需要写清楚
+ *      具体到 Task→Note 的版本）。
+ *   4. 是否需要处理"这个 Task 已经有 project_id/workflow_id 关联"这种
+ *      情况——转成 Note 之后，这些关联信息是保留、丢弃、还是也要走
+ *      No-Silent-Loss Principle 判断？
+ *
+ * Consequences
+ *   （本条完整起草后再补——现在只是问题清单，还没有可以评估后果的
+ *   具体方案。）
+ *
+ * Notes
+ *   完整背景见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
+ *   Review_2026-09-01.md 第 5.2 节。在这份 ADR 被真正起草完整、状态
+ *   改成 Accepted 之前，Implementation Plan 的 Slice 4 Part B（Task→
+ *   Note）不得开始写代码——这是 Carson 明确要求的顺序，不是本项目
+ *   自己的习惯性谨慎。
+ */

@@ -133,9 +133,19 @@
  *     同级），描述的是"这个 Task 本身在等什么"，不是跨 Domain 的等待
  *     协调——两者概念不同，不要混淆，Waiting Engine 本身不属于本项目。
  *
- *   Project → Task 降级（反向转换） — 本次只要求"Task 可以转去
- *     Project"，没有要求反向操作。完整范围声明见 00_ADR.gs
- *     ADR-2026-07-24-006。
+ *   Project → Task 降级（反向转换） — 【此条已过期，2026-09-02 更正】
+ *     原文写"本次只要求 Task 可以转去 Project，没有要求反向操作"，引用
+ *     ADR-2026-07-24-006——但后续 ADR-2026-07-24-015 已经把这条决定
+ *     推翻，正式把 Task↔Project 转换定成双向，`27_ProjectEngine.
+ *     checkEligibleForTaskDemotion_`/`markProjectConvertedToTask_` 早就
+ *     实现了这个反方向（完整规则见 00_Business_Rules.gs「一」）。这里
+ *     的范围声明当时没有跟着"双向化"决定一起更新，是 2026-08-31 审计
+ *     发现的一处文档过期，现予更正——本条目前已经不是"刻意不做的范围"，
+ *     只是历史记录里遗留的过期措辞。
+ *
+ *     顺带一提：这个"决定被推翻但范围声明没跟着更新"的模式，正是本节
+ *     开头「三」想要避免的——本次更正只处理这一条已发现的具体问题，不
+ *     代表已经逐条重新核对过本文件其它每一处引用仍然准确。
  *
  *   BusinessRule 的语义相似度匹配 — "遇到类似情况可以直接引用"，V1
  *     只做标签/关键词匹配（见 00_Business_Rules.gs），不做 AI 语义
@@ -177,6 +187,24 @@
  * 需要跨读至少一个其它 Domain 的数据才能拼出来 → Execution Dashboard，
  * 属于 Life Execution OS，本项目不实现。跟本文件「五」区分 Review 归属
  * 的判断标准是同一个模式，两处保持一致，便于记忆。
+ *
+ * 【v5.3 新增，2026-09-02，应用确认，完整 ADR 见
+ * 00_ADR.gs ADR-2026-09-02-029】Web UI 新增的 Task/Overall Dashboard
+ * （`12_TaskQueryEngine.getTaskDashboard`，Implementation Plan Slice 2）
+ * 按上面的判断方法核实过：它只读本项目自己的 Task 表（经
+ * ActiveTasks），按 `source_domain` 字段分组展示——这个分组是"把本
+ * Domain 自己拥有的记录，按它们各自标注的业务 OS/Domain 归类"，不是
+ * "跨读 Property OS/Investment OS 自己的数据库"（这两个目前也还没有
+ * 独立跑起来的系统，无从跨读）。**因此它仍然是本节定义的 Domain
+ * Dashboard，不是 Execution Dashboard**，本项目实现它没有越界。
+ * Project 目前不参与这个 Dashboard——不是因为它会导致跨 Domain 聚合，
+ * 单纯是 Project 还没有 due_date schema（Project Deadline Contract 
+ * 尚未批准），等那个决定批准后，Project 归入这个 Dashboard 仍然只是
+ * "读本项目自己另一张表"，不会改变这里的 Domain Dashboard 定性。
+ * 如果未来 Property OS/Investment OS 真的成为独立运行的系统，届时
+ * "按 source_domain 分组"这件事本身是否还站得住、要不要改由 Life
+ * Execution OS 接管，需要重新评估——这不是本条现在要回答的问题，这里
+ * 只确认现状没有越界。
  */
 
 // ============================================================
