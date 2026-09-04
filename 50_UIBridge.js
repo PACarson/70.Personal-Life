@@ -231,6 +231,31 @@ function ui_getOpenNotes(_testOverrides) {
 }
 
 /**
+ * 【Slice 3, 2026-09-04】跟 ui_updateProject 同一个模式。
+ */
+function ui_updateNote(noteId, changes, _testOverrides) {
+  try {
+    if (!noteId) {
+      return { ok: false, code: 'MISSING_NOTE_ID', message: '缺少 noteId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+
+    var existing = NoteQueryEngine.getNote(noteId, chatId);
+    if (!existing) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Note（可能已经被删除）' };
+    }
+
+    var updated = NoteEngine.updateNote(noteId, changes || {}, chatId);
+    if (!updated) {
+      return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
+    }
+    return { ok: true, note: _sanitizeTaskDatesForTransport_(updated) };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
  * @param {string} content
  * @param {object} [_testOverrides]  仅测试使用：{chatId, decisionOwner}
  * @returns {{ok:true, note:object}|{ok:false, code, message}}
@@ -393,6 +418,13 @@ function ui_getActiveProjects(filters, _testOverrides) {
  * @returns {{ok:true, project:object, already_converted?:boolean}|
  *           {ok:false, code:'NOT_FOUND'|string, message}}
  */
+/**
+ * 【Slice 4 Part A, 2026-09-04】新增 blocked 分支——带日期的 Task 现在
+ * 会被 ConversionEngine 挡下，见 ADR-2026-09-02-028。跟
+ * ui_convertProjectToTask 的 result.blocked 处理同一个模式：转成
+ * code:'BLOCKED'，不是裸错误，前端应该当正常的 business-rule 提示
+ * 呈现，不是报红。
+ */
 function ui_convertTaskToProject(taskId, _testOverrides) {
   try {
     if (!taskId) {
@@ -408,6 +440,9 @@ function ui_convertTaskToProject(taskId, _testOverrides) {
     if (result.not_found) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除或转换过）' };
     }
+    if (result.blocked) {
+      return { ok: false, code: 'BLOCKED', message: result.reason };
+    }
     return { ok: true, project: _sanitizeTaskDatesForTransport_(result.project), already_converted: !!result.already_converted };
   } catch (e) {
     return _wrapError_(e);
@@ -415,11 +450,14 @@ function ui_convertTaskToProject(taskId, _testOverrides) {
 }
 
 /**
- * Project→Task 有 Task→Project 没有的第三种结果：{blocked:true, reason}
- * ——ADR-015 的前置校验没通过（还有 Sub-Project 或未完成 Task），不是
- * 异常，是一个正常、预期内的"暂时不能转换"结果，转成 code:'BLOCKED'
- * 而不是裸错误，前端应该用不同于"出错了"的方式呈现（说明原因，不是
- * 报红）。
+ * 【2026-09-04 更新】这条注释原来写"Project→Task 有 Task→Project 没有的
+ * 第三种结果"——这句话现在不准确了：Slice 4 Part A 给 Task→Project 也
+ * 加了 result.blocked 分支（ADR-2026-09-02-028，源 Task 带日期、Project
+ * 无处安放时触发），见 ui_convertTaskToProject 上面的注释。这里的
+ * blocked 触发原因不同（这里是 ADR-015 的前置校验：还有 Sub-Project 或
+ * 未完成 Task），但 code:'BLOCKED' 这个 UI 契约是两个方向共用的同一
+ * 套——都是正常、预期内的"暂时不能转换"结果，不是异常，前端应该用不同
+ * 于"出错了"的方式呈现（说明原因，不是报红）。
  *
  * 已知限制（不是这次引入的，是 TaskEngine.createTaskFromConversion_
  * 本身的既有设计——见该函数 JSDoc"预留，不接受调用方覆盖映射规则"）：

@@ -1391,3 +1391,210 @@
  * Week/Upcoming/Recurring/High Priority）的完整 Test Gate 确认——通过
  * 后再进入 Slice 3（Note Edit）。
  */
+
+// ============================================================
+// 三十、Slice 1 + 2 完整 Test Gate 收尾确认（2026-09-04，同日）
+// ============================================================
+
+/**
+ * Carson 确认：This Week/Upcoming/Recurring/High Priority 四个分区测试
+ * 通过。至此二十六章列出的 Slice 1 + Slice 2 完整 Test Gate/Regression
+ * Gate 清单全部转为 LIVE VERIFIED PASS，不再有分区级别的未确认项——
+ * 二十九章记录的"未确认、不阻塞"状态在这里正式解除，不是被延后处理。
+ *
+ * 下一步：Slice 3（Note Edit）正式开始，设计沿用
+ * Personal_Life_OS_UIV2_Implementation_Plan_2026-09-01.md；开始前先对
+ * 29_NoteEngine.js / 10_ProjectionEngine.js / 50_UIBridge.js /
+ * ui_index.html 做一次现状核对，不假设文档描述与现在的代码一致。
+ */
+
+// ============================================================
+// 三十一、Slice 3（Note Edit）交付（2026-09-04）
+// ============================================================
+
+/**
+ * 开工前按惯例先核对了现状（不是直接照抄 Implementation Plan 的设计
+ * 假设代码没变）：29_NoteEngine.js 确认截至开工时只有 create/archive/
+ * markConverted_，没有 update；10_ProjectionEngine.js 确认 NOTE_CREATED/
+ * NOTE_ARCHIVED/NOTE_CONVERTED 三个 case 都在但没有 NOTE_UPDATED；
+ * 参照了 27_ProjectEngine.updateProject 与 50_UIBridge.ui_updateProject
+ * 的完整实现作为结构模板（结构复用，不是代码复制，字段/校验逻辑按
+ * Note 自己的 Schema 重新写）。
+ *
+ * 交付范围，跟 Implementation Plan「Slice 3」的文件改动表逐条对应：
+ *
+ * 1. `29_NoteEngine.js`：新增 `updateNote(noteId, changes, chatId)`。
+ *    `UPDATABLE_FIELDS = ['content', 'category']`；`LifeNoteConfig` 新增
+ *    `IDENTITY_AFFECTING_FIELDS: ['content', 'category']`（两个可编辑
+ *    字段同时也是全部的身份影响字段，因为 Note 没有独立于这两者之外的
+ *    身份维度）。`FORBIDDEN_FIELDS` 校验原样复用，携带 due_date 等字段
+ *    时显式 throw（不是静默过滤），报错文案跟 createNote 一致，满足
+ *    Implementation Plan Test Gate 里"报错行为跟 Create 时一致"这条。
+ *    `category` 值不在 `NOTE_CATEGORIES` 枚举里时该字段静默不写入（这一
+ *    条不 throw，跟 updateProject 对 execution_mode/source_domain 非法值
+ *    的处理方式一致——只有 FORBIDDEN_FIELDS 才 throw，枚举越界是"忽略
+ *    这个字段"，两者不是同一类校验失败）。`deriveFromEvent` 补上
+ *    `NOTE_UPDATED` 分支（`11_ProjectionRebuilder` 重放用），不补的话
+ *    重放出来的状态会缺失更新过的 content/category，是真实的正确性
+ *    问题，不是顺手锦上添花。
+ *
+ * 2. `10_ProjectionEngine.js`：dispatch 新增 `NOTE_UPDATED` case，新增
+ *    `projectNoteUpdated_`，实现跟 `projectProjectUpdated_`/
+ *    `projectWorkflowUpdated_` 完全同一个模式（payload 里只有变化字段，
+ *    删掉 note_id 后原样 upsert，不是重新查一遍全量再整体覆写）。
+ *
+ * 3. `50_UIBridge.js`：新增 `ui_updateNote(noteId, changes,
+ *    _testOverrides)`，跟 `ui_updateProject` 同一个模式（先查存在性，
+ *    再调用 Engine，返回值套 `_sanitizeTaskDatesForTransport_`——updated
+ *    的字段本身都不是 Date，套上纯粹是跟随本项目"transport 边界统一走
+ *    这层防护"的既定规则，不是这次发现了新的 Date 风险）。
+ *
+ * 4. `ui_index.html`：Notes 卡片新增 Edit 表单——一个 `textarea`（content）
+ *    + 一个 `select`（category，五个枚举值内联生成 `<option>`，没有像
+ *    OS 下拉那样抽一个共用 helper，因为目前只有这一处用到）。键盘行为
+ *    跟 Task/Project 的 textarea 完全同款：只认 Ctrl/Cmd+Enter 保存，
+ *    普通 Enter 交给浏览器自己处理成换行（textarea 原生行为，不需要
+ *    额外拦截）。
+ *
+ * 本轮范围之外、刻意没做的事（如实记录，不是遗漏）：
+ *   - Create（`ui_createNote`/Add Note 输入框）现在仍然不能指定
+ *     category，新建的 Note 一律落到默认值 'IDEA'——Implementation Plan
+ *     的文件改动表只列了 Edit 相关的 4 个文件，没有把 `ui_createNote`
+ *     或 Create 表单列进去，所以没有主动加。如果 Carson 想要 Create
+ *     也能选 category，是一个很小的独立追加，不在本次范围内先斩后奏。
+ *   - Note 卡片折叠视图本身没有新增 category 徽章类的展示——
+ *     Implementation Plan 只要求"新增 Edit 能力"，没有要求"让折叠视图
+ *     展示 category"，两者是不同的改动，没有因为 Task/Project 卡片有
+ *     徽章就顺手也给 Note 加一个。
+ *
+ * 【治理文档归属修正，非代码改动，值得单独记录】Implementation Plan
+ * 原文"完成后需要更新 00_Command_Reference.gs"这一条，跟
+ * 00_Command_Reference.gs 自己文件头「目的」段落的分工规则相矛盾——
+ * 该文件头明确规定"已实现但暂未通过 Telegram 暴露的能力"不放在那份
+ * 文件（原文举的例子正是 updateTask()），而是记在 00_Known_Limitations.
+ * gs。updateNote 是同一条排除规则下的同类项（Note 域至今没有任何
+ * Telegram 指令，不止 updateNote 一个函数），且 grep 确认 updateTask/
+ * updateProject 至今也确实都没有被加进 Command Reference，此前没有
+ * 例外。按治理文件自己的规则走，没有照 Implementation Plan 字面指示去
+ * 改 Command Reference，改在了 00_Known_Limitations.gs「七」，并在该节
+ * 末尾写明了这处不一致的具体理由，供以后对照。
+ *
+ * 验证状态：
+ *   - 29_NoteEngine.js / 10_ProjectionEngine.js / 50_UIBridge.js /
+ *     ui_index.html（<script> 部分单独抽出验证）：node --check 全部
+ *     通过。
+ *   - STATIC VERIFIED，LIVE TEST PENDING——GAS/Sheets/浏览器环境不在
+ *     本窗口手边。Implementation Plan 列出的 Test Gate（改 content/
+ *     category 正确重算 identity 且 note_id 不变；尝试设置 due_date 等
+ *     禁止字段被拒绝；NOTE_UPDATED 事件正确落到 Sheet 行）和 Regression
+ *     Gate（既有 create/archive/convert 不受影响）都还没有实机跑过，
+ *     需要 Carson 部署后确认。
+ *
+ * 下一步：等 Slice 3 实机确认；之后按 Implementation Plan 的顺序进
+ * Slice 4（Conversion）——Part A（Task→Project BLOCKED、Project→Task UI
+ * 整合确认）可以直接开始，因为 ADR-2026-09-02-028 本身就是批准（不需要
+ * 再等一次批准）；Part B（Task→Note）在 ADR-2026-09-02-030 正式定稿、
+ * 状态改成 Accepted 之前不能先写代码。
+ */
+
+// ============================================================
+// 三十二、Slice 4 Part A（Task→Project BLOCKED）交付（2026-09-04）
+// ============================================================
+
+/**
+ * Carson 当时在外送外卖，无法做 LIVE TEST，明确指示不要因此阻塞、不要
+ * 预防性修 Slice 3、不要做无关重构，直接进 Slice 4 Part A。
+ *
+ * 开工前核对现状（不是照抄 ADR-028 写的时候的代码快照）：确认
+ * `42_ConversionEngine.convertTaskToProject`/`convertProjectToTask` 双向
+ * 转换本身早已实现（Sprint 3），这次要加的只是"源 Task 带日期时
+ * BLOCKED"这一条新检查，不是从零搭转换流程；Task→Project 的 UI 入口
+ * （按钮/端点）也早就存在。全项目 grep 确认 `convertTaskToProject` 只有
+ * `ui_convertTaskToProject` 一个调用方（另外两处在测试文件里），Telegram
+ * 侧（06_TaskIntentParser.gs）没有任何调用——「不要影响 Telegram
+ * contract」这条约束在改动前就已经天然满足，不是靠这次改动维持的。
+ *
+ * 交付范围：
+ *
+ * 1. `42_ConversionEngine.js`：`convertTaskToProject` 的幂等分支之后、
+ *    创建 Project 之前，新增一条检查——`sourceTask.due_date` /
+ *    `due_time` / `due_datetime` 任一非空时，直接
+ *    `return { blocked: true, reason: '...' }`，不创建 Project、不标记
+ *    源 Task、不发布任何事件。放在幂等分支之后是有意为之：已经转换过的
+ *    Task 不该因为带日期，在重复调用时从"返回既有 Project"变成
+ *    "BLOCKED"——幂等优先于这条新规则。写法上镜像
+ *    `convertProjectToTask` 里 `checkEligibleForTaskDemotion_` 不通过时
+ *    `return {blocked:true, reason:...}` 的既有风格，不是发明一种新
+ *    形状。顺手修正了这个函数 JSDoc 里从来没对过的 `@returns`（原来写
+ *    `invalid_state`，这个函数从未返回过这个值，是最初写文档时就没对上，
+ *    不是这次引入的偏差）。
+ *
+ * 2. `50_UIBridge.js`：`ui_convertTaskToProject` 新增
+ *    `if (result.blocked) return {ok:false, code:'BLOCKED', message:
+ *    result.reason};`，跟 `ui_convertProjectToTask` 处理 ADR-015 那个
+ *    blocked 分支的写法完全同一个模式。顺带更新了 `ui_convertProjectToTask`
+ *    上方一条现在过时的注释——原文说"Project→Task 有 Task→Project 没有
+ *    的第三种结果"，这句话在这次改动后不再成立，已改写清楚两个方向
+ *    现在都有 blocked，只是触发原因不同。
+ *
+ * 3. `ui_index.html`：Task 卡片新增 `.item-blocked-reason` 元素——
+ *    跟 Project 卡片一模一样的 CSS class、一模一样的默认隐藏
+ *    `style="display:none;"`，不是新发明一套样式。`convertTaskToProject()`
+ *    这个前端函数新增 `result.code === 'BLOCKED'` 分支，命中时把
+ *    `result.message` 写进这个卡片内联元素、`display:block`，不进
+ *    `tasksStatus` 那条通用错误状态行——跟 `convertProjectToTask()`
+ *    现有的处理方式逐行对应，是复制这个已经验证过的模式，不是重新设计
+ *    一套"BLOCKED 应该怎么呈现"。
+ *
+ * 4. `00_Business_Rules.js`「一」、`00_ADR.js` ADR-028：把两处明确写着
+ *    "代码尚未实现"的状态声明更新为"已实现，见本节"，原文保留未删——
+ *    这两处当时写的是真实状态，不是错误，删除会丢失"这条规则曾经有多久
+ *    是纯文档状态"这个信息。
+ *
+ * Task→Note Part B：本轮没有碰。没有新增 UI 按钮、没有写任何转换
+ * semantics、没有预先决定 ADR-030 该怎么答。ADR-030 现状：Status 仍是
+ * Proposed（占位），Decision 部分列的是问题清单不是答案，本轮没有去
+ * 回答这些问题——这不是本轮的授权范围。
+ *
+ * 其它明确冻结项，本轮确认全部保持不动：Project Deadline Contract、
+ * Drag Ordering/UI-I6、source_domain 历史数据 migration、OS_REGISTRY
+ * 扩大、25_DashboardEngine.js（Telegram）、Quick Add——grep 确认这几个
+ * 文件/能力这次都没有被触碰。
+ *
+ * Regression 检查（针对"不带日期的 Task→Project"这条现有路径）：
+ *   - 新检查是幂等分支之后新插入的一条 early-return，不带日期的 Task
+ *     命中条件为 false，直接跳过，落到 `projectMeta = projectMeta || {}`
+ *     往后——这一段和这次改动之前逐字节相同，没有改动。
+ *   - `36_Tests_Sprint3Acceptance.js`（`testBidirectionalConversion_`）和
+ *     `38_Tests_UIBridge.js`（3 个 convertTaskToProject 相关用例）逐一
+ *     核对：全部用 `TaskEngine.createTask(title, {}, chatId)` 创建测试
+ *     Task，`{}` 空 meta 意味着这几个测试 Task 都没有 due_date，不会
+ *     命中新检查，预期结果不变。这几个测试目前也没有一条覆盖"带日期
+ *     被 BLOCKED"这个新分支本身——如实记录这是一个测试覆盖空白，不是
+ *     这次顺手补的（本项目至今没有本地 GAS mock/测试运行基础设施，
+ *     这几个 `36_`/`38_` 文件本来就是要在 Apps Script 里跑的，这次也
+ *     没有新建一个）。
+ *   - 全项目 `.js` 文件跑了一遍 `node --check`，没有一个失败——确认
+ *     这次改动没有波及任何其它文件。
+ *
+ * identity/projection/event 影响：三者都没有被触碰。BLOCKED 分支是
+ * 纯粹的提前 return，不调用 `ProjectEngine.createProject`、不调用
+ * `TaskEngine.markTaskConverted_`、不发布任何 Event——没有创建就没有
+ * identity 要算，没有事件就没有 projection 要写。不带日期的既有路径
+ * 完全没有改动，identity/projection/event 行为原样不变。
+ *
+ * 验证状态：
+ *   - 42_ConversionEngine.js / 50_UIBridge.js / 00_Business_Rules.js /
+ *     00_ADR.js：node --check 通过；ui_index.html 的 `<script>` 部分
+ *     单独抽出验证同样通过；全项目 `.js` 扫了一遍，无一失败。
+ *   - STATIC VERIFIED（代码逻辑 + 既有测试用例的静态核对）。
+ *   - LIVE TEST PENDING——GAS/Sheets/浏览器环境不在这次窗口手边，
+ *     需要 Carson 送完外卖回来后实机确认（清单见给 Carson 的报告）。
+ *   - 不属于 STATIC VERIFIED 也不属于 LIVE TEST PENDING 的：NOT
+ *     TESTED——带日期 Task 被 BLOCKED 这个新行为本身，除了逐行读代码
+ *     推演，没有任何自动化测试或实机验证覆盖过，如实记录，不写成 PASS。
+ *
+ * 下一步：等 Slice 4 Part A 实机确认。Part B（Task→Note）在 ADR-030
+ * 定稿 Accepted 之前不能开始写代码——现状是占位、问题清单，不是可以
+ * 直接实施的设计。
+ */

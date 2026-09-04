@@ -144,6 +144,7 @@ var ProjectionEngine = (function () {
         case 'NOTE_CREATED':                 projectNoteCreated_(event);               break;
         case 'NOTE_ARCHIVED':                projectNoteArchived_(event);              break;
         case 'NOTE_CONVERTED':               projectNoteConverted_(event);             break;
+        case 'NOTE_UPDATED':                 projectNoteUpdated_(event);               break;
         case 'REVIEW_GENERATED':             projectReviewGenerated_(event);           break;
         case 'BUSINESS_RULE_CREATED':        projectBusinessRuleCreated_(event);       break;
         case 'WORKFLOW_TEMPLATE_CAPTURED':   projectWorkflowTemplateCaptured_(event);  break;
@@ -514,6 +515,18 @@ var ProjectionEngine = (function () {
       converted_to_type: p.target_type,
       converted_to_id: p.target_id
     });
+  }
+
+  // 【Slice 3, 2026-09-04】跟 projectProjectUpdated_/projectWorkflowUpdated_
+  // 同一个模式：payload 里只有变化的字段（+ note_id），原样透传给
+  // upsertRowByKey_，不需要重新构造一份"完整对象"。
+  function projectNoteUpdated_(event) {
+    var p = event.payload || {};
+    if (!p.note_id) return;
+    var fields = shallowCopy_(p);
+    delete fields.note_id;
+    if (Object.keys(fields).length === 0) return;
+    upsertRowByKey_(NOTES_SHEET, 'note_id', p.note_id, fields);
   }
 
   // ============ Review Projector（Sprint 3 新增） ============

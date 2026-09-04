@@ -38,7 +38,11 @@ var LifeNoteConfig = Object.freeze({
   CREATED_METHODS:  ['Manual', 'AI Suggestion', 'Rule Generated', 'Imported', 'Converted'],
   APPROVAL_STATUSES: ['APPROVED', 'PENDING', 'REJECTED'],
   // Note 硬性禁止携带的字段——见文件头"硬性边界"
-  FORBIDDEN_FIELDS: ['due_date', 'due_time', 'due_datetime', 'reminder_policy']
+  FORBIDDEN_FIELDS: ['due_date', 'due_time', 'due_datetime', 'reminder_policy'],
+  // 【Slice 3, 2026-09-04】updateNote 的身份影响字段——Note 没有"标题"，
+  // content 本身就是去重/识别依据，category 纳入的理由见
+  // 07_IdentityEngine.generateNoteIdentity 顶部注释
+  IDENTITY_AFFECTING_FIELDS: ['content', 'category']
 });
 
 var NoteEngine = (function () {
@@ -141,6 +145,73 @@ var NoteEngine = (function () {
     return {};
   }
 
+  // ============ Update（Slice 3, 2026-09-04） ============
+
+  var UPDATABLE_FIELDS = ['content', 'category'];
+
+  /**
+   * 更新 Note 的可编辑字段。白名单只有 content/category——Note 没有
+   * 标题/截止日期这类字段可编辑。FORBIDDEN_FIELDS 校验在这里同样强制
+   * 生效，不因为是 Edit 就单独开后门，行为跟 createNote 拒绝时一致。
+   * content/category 任一变化都触发 identity 重算（两者都是
+   * generateNoteIdentity 的组成字段）。
+   *
+   * @throws {Error}  message 以 "INVALID_FIELD" 开头，携带了
+   *                  FORBIDDEN_FIELDS 里的字段时抛出，跟 createNote 同款
+   */
+  function updateNote(noteId, changes, chatId) {
+    var existing = NoteQueryEngine.getNote(noteId, chatId);
+    if (!existing) {
+      Logger.log('[NoteEngine] updateNote: 找不到 Note ' + noteId);
+      return null;
+    }
+
+    changes = changes || {};
+
+    var forbidden = CFG.FORBIDDEN_FIELDS.filter(function (f) { return changes.hasOwnProperty(f); });
+    if (forbidden.length > 0) {
+      throw new Error('INVALID_FIELD: Note 不支持 Reminder/Deadline，收到了不允许的字段: ' + forbidden.join(', ') +
+        '——如果这件事需要提醒/截止日期，应该建 Task 或 Project，不是 Note。');
+    }
+
+    var payload = { note_id: noteId };
+    UPDATABLE_FIELDS.forEach(function (f) {
+      if (changes.hasOwnProperty(f)) {
+        var v = changes[f];
+        if (f === 'category' && CFG.NOTE_CATEGORIES.indexOf(v) === -1) return;
+        payload[f] = v;
+      }
+    });
+
+    if (Object.keys(payload).length === 1) return null;
+
+    var merged = shallowCopy_(existing);
+    for (var k in payload) merged[k] = payload[k];
+
+    var identityFieldChanged = CFG.IDENTITY_AFFECTING_FIELDS.some(function (f) {
+      return payload.hasOwnProperty(f);
+    });
+    if (identityFieldChanged) {
+      var newIdentity = IdentityEngine.generateNoteIdentity(
+        merged.chat_id || chatId || existing.chat_id,
+        merged.content,
+        merged.category
+      );
+      payload.identity = newIdentity;
+      merged.identity   = newIdentity;
+    }
+
+    payload.updated_time = new Date().toISOString();
+
+    var event = EventBus.publish('NOTE_UPDATED', payload, chatId || existing.chat_id, 'NoteEngine');
+
+    if (event && event.projection_ok === false) {
+      materializeNoteRow_(noteId, merged);
+    }
+
+    return payload;
+  }
+
   // ============ 转换标记（仅供 42_ConversionEngine.gs 调用） ============
 
   /**
@@ -200,6 +271,11 @@ var NoteEngine = (function () {
           stateMap[p.note_id].converted_to_id = p.target_id;
         }
         break;
+      case 'NOTE_UPDATED':
+        if (stateMap[p.note_id]) {
+          for (var k in p) if (k !== 'note_id') stateMap[p.note_id][k] = p[k];
+        }
+        break;
     }
     return stateMap;
   }
@@ -222,6 +298,7 @@ var NoteEngine = (function () {
     createNote:           createNote,
     createNoteDirect_:    createNoteDirect_,
     archiveNote:          archiveNote,
+    updateNote:           updateNote,
     markNoteConverted_:   markNoteConverted_,
     deriveFromEvent:      deriveFromEvent,
     materializeNoteRow_:  materializeNoteRow_

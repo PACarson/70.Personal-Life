@@ -13,7 +13,15 @@
  * 存在的直接目的是让 Claude/外部审计在做 Architecture Review 时，看到
  * 这里列出的行为，不要当成 bug 或遗漏去提修复建议。
  *
- * LAST_UPDATED: 2026-08-21 — 「二、updateTask() Internal API」补充
+ * LAST_UPDATED: 2026-09-04 — 新增「七、updateNote() Internal API」，
+ * 见该节，同时借此机会修正 Implementation Plan Slice 3 文档里一处
+ * 跟本文件头「目的」段落自相矛盾的指向（详见该节末尾说明）。
+ *
+ * 2026-09-02 — 新增「六、getTaskDashboard()」。【2026-09-04 补记：该节
+ * 内容确实是 2026-09-02 那次加入的，但当时漏了同步这里的
+ * LAST_UPDATED 历史——这是补记遗漏，不是编造时间】
+ *
+ * 2026-08-21 — 「二、updateTask() Internal API」补充
  * scopeKey 修复说明，见该节末尾【2026-08-21 补充】，以及
  * 00_Project_State.gs「十四」。
  *
@@ -318,4 +326,43 @@
  * recurring/highPriority 纯函数过滤器，没有新写任何过滤逻辑；
  * `_readActiveTasks_` 只读一次，避免每个 bucket 各自重新读表。完整设计
  * 记录见 00_Project_State.gs「二十六」。
+ */
+
+// ============================================================
+// 七、updateNote() — Internal API，同样没有 Telegram 指令
+//    （2026-09-04 新增，Implementation Plan Slice 3）
+// ============================================================
+
+/**
+ * updateNote() — Internal API
+ *
+ * 实现：29_NoteEngine.updateNote(noteId, changes, chatId)。
+ * Status: Implemented, fully functional, not yet routed through any
+ *         Telegram command.
+ *
+ * Current callers: 50_UIBridge.ui_updateNote()，只服务 Web UI 的 Notes
+ *   面板内联 Edit 表单。06_TaskIntentParser.gs 没有 Note 域的任何
+ *   intent——呼应本文件「四」已经记录过的事实：Note/Project/Workflow/
+ *   Review/BusinessRule 整层至今都没有 Telegram 指令，不是 updateNote
+ *   一个函数单独落后于同层其它能力。
+ *
+ * Anticipated future callers: 跟「二」updateTask() 同一类——未来如果这一
+ *   层被指令化、未来 AI Agent 直接调用、未来批量脚本。
+ *
+ * 保留原因：跟「二」同一套逻辑，Engine 层能力不需要等 Telegram 指令
+ * 出现才算数。identity 重算已处理（content/category 任一变化都调用
+ * IdentityEngine.generateNoteIdentity 重新计算，完整设计记录见
+ * 00_Project_State.gs「三十一」），FORBIDDEN_FIELDS 校验复用 createNote
+ * 同一套，没有为了 Edit 开后门。
+ *
+ * 【文档归属说明，非"新限制"，是本条记录本身的落脚点澄清】
+ * Personal_Life_OS_UIV2_Implementation_Plan_2026-09-01.md「Slice 3」
+ * 原文写"完成后需要更新 00_Command_Reference.gs"——但本文件头「目的」
+ * 段落已经明确：00_Command_Reference.gs 只记录"已经对外生效"的规则，
+ * "已实现但暂未通过 Telegram 暴露的能力"（该文件头原文点名 updateTask()
+ * 举例）明确不放在那份文件，放这里。updateNote 是 updateTask 同一条
+ * 排除规则下的同类项，此前 updateTask()/updateProject() 也都没有被加进
+ * Command Reference（可 grep 该文件确认），这次不例外，记在这里而不是
+ * Command Reference，不是漏做 Implementation Plan 那一步，是那一步的
+ * 指向本身跟治理文件自己的分工规则不一致，按治理文件的规则走。
  */
