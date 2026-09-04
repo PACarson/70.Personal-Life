@@ -1598,3 +1598,45 @@
  * 定稿 Accepted 之前不能开始写代码——现状是占位、问题清单，不是可以
  * 直接实施的设计。
  */
+
+// ============================================================
+// 三十三、ADR-2026-09-02-030 正式起草（2026-09-04，仍是 Proposed）
+// ============================================================
+
+/**
+ * Carson 指示：Slice 4 Part A 保持 STATIC VERIFIED/LIVE TEST PENDING
+ * 不动（人在外面送外卖，不能 LIVE TEST，明确不要因此停下，也不要
+ * 预防性修改 Part A），转入 ADR-030 的正式 Design/Decision 阶段。
+ *
+ * 起草前重新审计了 11 项指定范围：Task/Note 数据模型、
+ * 29_NoteEngine.gs、20_TaskEngine.gs、42_ConversionEngine.gs、
+ * 50_UIBridge.gs、10_ProjectionEngine.gs、Identity/Dedup contract、
+ * Event/Projection contract、既有 Task↔Project 先例、刚交付的
+ * updateNote() 完整 lifecycle——不是照抄 2026-09-02 占位版本的假设。
+ *
+ * 关键证据（完整版见 ADR-030 本体 Context 段）：Task 42 个字段 vs Note
+ * 19 个字段，schema 差距远大于当年 Task↔Project 那次；identity/dedup
+ * 按 Sheet 隔离，Task 跟 Note 之间不存在碰撞风险；Task 的转换血缘走
+ * "每类型一个专属字段"（`converted_to_project_id`）+"每方向一个专属
+ * 事件名"（`TASK_CONVERTED_TO_PROJECT`），跟 Note 那套通用
+ * type/id+单一事件名是两套不同但各自成立的既有习惯，这次跟 Task 侧
+ * 保持一致；`convertTaskToProject`现有实现"先创建目标、后检查源
+ * terminal-state"这个顺序本身可能让 terminal 状态的源 Task 产生孤儿
+ * Project——这不属于本次范围（是既有代码既有行为），但 Task→Note 的
+ * 顺序设计特意没有复制这个缺陷。
+ *
+ * ADR-030 结论：A/B/C 三组问题（Conversion Semantics、Data Mapping、
+ * Identity/Event/Projection）已经有证据支撑的明确答案，完整写进了
+ * ADR 本体，不是问题清单了。但还剩 D 组 5 个真正的产品判断题——
+ * `recurring`/`priority`/`budget` 三个字段该 BLOCK、拼进文本、还是
+ * 静默丢；`project_id`/`workflow_id`/`parent_task_id`/
+ * `depends_on_task_ids`/`branch_group` 这类结构性关联字段是否需要
+ * 比现有 Task→Project 先例更严格的处理；是否需要转换前 UI 确认弹窗——
+ * 这些不是证据不够，是证据同时支持几种都合理的答案，按 Carson 的明确
+ * 指示（不要为了看起来完整而强行 Accepted），这次没有替他单方面拍板，
+ * 状态维持 **Proposed**。
+ *
+ * 下一步不是"继续起草"，是等 D 组 5 个问题的答案——一旦回答且跟 A/B/C
+ * 组不冲突，可以直接把 ADR-030 状态改成 Accepted，不需要重新起草整份
+ * ADR。Slice 4 Part B 在那之前不得开始写代码。
+ */
