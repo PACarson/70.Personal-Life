@@ -1462,6 +1462,13 @@
  *   的 Claude 窗口）不应该假设代码已经跟上——请先看
  *   00_Project_State.gs 最新的 Slice 进度记录，再决定要不要去查代码。
  *
+ * 【2026-09-04 更新】上面这段"只是决定，不是实现"在 Slice 4 Part A
+ * 交付后已经不再成立——BLOCKED 检查已经写入
+ * 42_ConversionEngine.convertTaskToProject，UIBridge/UI 两层的翻译也
+ * 已完成，STATIC VERIFIED（LIVE TEST PENDING）。保留上面原文不删，是
+ * 因为它记录的是"当时的真实状态"，不是错误；完整实现细节见
+ * 00_Project_State.gs「三十二」，不在这里重复。
+ *
  * Notes
  *   完整讨论见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
  *   Review_2026-09-01.md 第 5.1 节。

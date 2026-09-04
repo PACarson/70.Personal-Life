@@ -46,7 +46,12 @@ var ConversionEngine = (function () {
    * @param {object} projectMeta  { description, parent_project_id,
    *                                execution_mode }
    * @param {string} chatId
-   * @returns {{project:object}|{not_found:true}|{invalid_state:true,...}}
+   * @returns {{project:object, already_converted?:boolean}|{not_found:true}|
+   *           {blocked:true, reason:string}}
+   *   【2026-09-04 更正】此前这里写的是 {invalid_state:true,...}——查了一遍
+   *   代码，这个函数从来没有返回过 invalid_state，是文档跟代码从一开始
+   *   就没对上，不是这次改动引入的偏差。新增的 blocked 是这次 Slice 4
+   *   Part A 真实加入的分支（ADR-2026-09-02-028）。
    */
   function convertTaskToProject(taskId, projectMeta, chatId) {
     var sourceTask = TaskQueryEngine.getTask(taskId, chatId);
@@ -56,6 +61,23 @@ var ConversionEngine = (function () {
     if (String(sourceTask.status || '').toUpperCase() === 'CONVERTED' && sourceTask.converted_to_project_id) {
       var existingProject = ProjectQueryEngine.getProject(sourceTask.converted_to_project_id);
       return { project: existingProject, already_converted: true };
+    }
+
+    // 【Slice 4 Part A, 2026-09-04，ADR-2026-09-02-028 + Business_Rules
+    // 「十一」No-Silent-Loss Principle】源 Task 带日期时，Project 现在
+    // 没有 schema 能存放，必须结构化 BLOCKED，不能静默丢弃。跟
+    // convertProjectToTask 的 checkEligibleForTaskDemotion_ 同一个
+    // "先校验、不满足直接 return {blocked:true, reason}" 风格。放在
+    // 幂等分支之后：已经转换过的 Task 不应该因为带日期而在重复调用时
+    // 突然变成 BLOCKED——幂等优先于这条新校验。Project Deadline
+    // Contract 一旦批准，这条检查本身要重新评估（见 ADR-028 Related
+    // ADR 一栏），不是这次顺手解决。
+    if (sourceTask.due_date || sourceTask.due_time || sourceTask.due_datetime) {
+      return {
+        blocked: true,
+        reason: 'Project 尚不支持 deadline（due_date/due_time），暂时无法转换。' +
+                '等 Project Deadline Contract 批准后可以重新尝试。'
+      };
     }
 
     projectMeta = projectMeta || {};

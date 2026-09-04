@@ -85,10 +85,12 @@
  * 也不是靠一次性确认弹窗放行丢失），提示大意为"Project 尚不支持
  * deadline，暂时无法转换"。不带日期的 Task 转换行为不变。
  *
- * 【状态：DECIDED，代码尚未实现】——这是 Implementation Plan Slice 4
- * 的范围，本文件这次只记录决定本身，`42_ConversionEngine.
- * convertTaskToProject`/`50_UIBridge.ui_convertTaskToProject`
- * 目前的实际代码还没有加这条 BLOCKED 检查，见 ADR-028 的 Status 字段。
+ * 【状态：DECIDED，已实现（2026-09-04，Slice 4 Part A）】
+ * `42_ConversionEngine.convertTaskToProject` 已加入这条 BLOCKED 检查，
+ * `50_UIBridge.ui_convertTaskToProject` 已翻译成 code:'BLOCKED'，
+ * ui_index.html 已展示为卡片内联提示（跟 Project→Task 同款元素）。
+ * STATIC VERIFIED，LIVE TEST PENDING——完整实现细节见
+ * 00_Project_State.gs「三十二」。
  * Project Deadline Contract 一旦批准，这条规则本身也需要跟着重新评估
  * （届时 Project 有地方存日期了，可能就不再需要 BLOCKED，改成正常
  * 映射）。
