@@ -1640,3 +1640,57 @@
  * 组不冲突，可以直接把 ADR-030 状态改成 Accepted，不需要重新起草整份
  * ADR。Slice 4 Part B 在那之前不得开始写代码。
  */
+
+// ============================================================
+// 三十四、ADR-2026-09-02-030 由 Carson 正式拍板 D 组，转为 Accepted
+//    （2026-09-04，仍无 Part B 代码）
+// ============================================================
+
+/**
+ * Carson 直接给出 D1-D5 的正式 Decision（不是让本窗口继续起草问题），
+ * 同时明确指示：完成一致性检查后如果通过，把 ADR-030 状态改成
+ * Accepted；但 Accepted 之后必须停在 SLICE_4_PART_B — IMPLEMENTATION
+ * READY，不得在本轮开始任何 Part B 代码（convertTaskToNote/UIBridge/
+ * UI/Projection/schema migration 全部不做），等他另外明确指示再单独
+ * Proceed。Slice 4 Part A 与 Slices 1/2/3/4A 的 LIVE TEST PENDING
+ * 状态本轮不因为 ADR 工作而改变。
+ *
+ * D1-D5 摘要（完整决定文本见 ADR-030 本体 D 组）：recurring 非空
+ * BLOCKED；priority/budget 非默认/非空时不建 Note 独立字段，作为
+ * content 注解保留，不 silent drop；project_id/workflow_id/
+ * parent_task_id/depends_on_task_ids/sequence_index/branch_group/
+ * branch_resolution_policy 比 Task→Project 更严格——同样不建 Note
+ * 独立字段、非空时保留为 content 注解，只留 source_task_id +
+ * converted_to_note_id 两条明确 lineage，不复制 Task 的 execution
+ * graph 进 Note，这条不追溯到既有 Task→Project；转换前 UI
+ * Confirmation 必须有，流程明确为 Convert to Note → Confirmation →
+ * Validate → Execute，BLOCKED 判断必须发生在真正创建/修改之前。
+ *
+ * D 组拍板后做了一次逐字段复核（不是走过场）：把 Task 全部 42 个字段
+ * 重新过了一遍，发现此前 A/B/C 草稿漏列了 4 个字段的处置——`context`
+ * （并入 B1 的 content 拼接）、`tags`（跟 priority/budget 同档，
+ * content 注解保留）、`priority_ai_recommended`（现状全项目没有任何
+ * Producer 写过这个字段，当前实际永远为空，如实记录不是"决定丢弃"）、
+ * `source_project_id`（Task 自己更早一层的转换血缘，跟 D4 同档处理）。
+ * 已经全部补写进 ADR-030 的 B5 小节，不是遗漏不补，是发现即补。
+ *
+ * Consistency Check 结果（完整版见 ADR-030 本体，逐条编号对应
+ * Carson 要求的 6 项检查）：D 组跟 A/B/C、Architecture Freeze、
+ * ADR-028、既有 Note lifecycle 均无冲突；Task→Project 与 Task→Note
+ * 的差异（有无 Confirmation、BLOCK 清单范围、结构性字段处理方式）
+ * 已经清楚写在 ADR 里；identity/event/projection/lineage（C 组）
+ * 完全没有被 D 组触碰，保持一致；silent data loss 审计（见上一段）
+ * 确认没有遗留未处置的字段。全部通过，无需要求 Carson 重新决策的
+ * 冲突项。
+ *
+ * ADR-030 状态：**Accepted**（2026-09-04）。本轮改动范围仅
+ * `00_ADR.gs`/本文件两个治理文件，`42_ConversionEngine.gs`/
+ * `50_UIBridge.gs`/`ui_index.html`/`20_TaskEngine.gs`零改动——
+ * Accepted 不等于开始实施，ADR 本体已经列出完整 Implementation
+ * Gate（8 项）。
+ *
+ * 当前检查点：**SLICE_4_PART_B — IMPLEMENTATION READY**。下一步不是
+ * 自动继续写代码，是等 Carson 另外明确指示 Proceed Part B。Slice 4
+ * Part A 保持原状不动（STATIC VERIFIED / LIVE TEST PENDING）；
+ * Slice 1/2/3/4A 的 LIVE TEST PENDING 状态本轮未变。
+ */

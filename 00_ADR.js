@@ -1529,19 +1529,22 @@
 
 // ============================================================
 // ADR-2026-09-02-030：Task → Note Conversion Contract
-//    （2026-09-04 正式起草——大部分问题已有证据支持的答案，剩余几个
-//    产品判断题明确列出，状态维持 Proposed，不强行 Accepted）
+//    （2026-09-04 起草，同日 D 组由 Carson 正式拍板，consistency check
+//    通过，状态改为 Accepted——Accepted 不等于 Part B 已实现，见文末
+//    Implementation Gate，本条本身不包含任何代码改动）
 // ============================================================
 
 /**
  * ADR Number      : ADR-2026-09-02-030
- * Status          : Proposed（比 2026-09-02 占位版本进了一大步——下面
- *                   大部分问题已经有证据支撑的答案，不再是纯问题清单。
- *                   维持 Proposed 是因为还剩 5 个真正的产品判断题
- *                   （见 Decision 部分 D 组），这些不是"证据不够"，是
- *                   "证据支持好几种都合理的答案，需要 Carson 选"，
- *                   不应该由这次窗口替他单方面拍板。）
- * Decision Date   : (Accepted 前留空)
+ * Status          : **Accepted**（2026-09-04）——A/B/C 组基于代码证据、
+ *                   D 组由 Carson 正式拍板，Consistency Check（见文末）
+ *                   逐项通过，没有发现跟 A/B/C、Architecture Freeze、
+ *                   ADR-028、既有 Note lifecycle 冲突的地方。Accepted
+ *                   只代表"设计完整、可以开始实施"，不代表 Part B 已经
+ *                   写了任何代码——本条本身只改了 00_ADR.gs/
+ *                   00_Project_State.gs 两个治理文件，Implementation
+ *                   Gate 见文末，尚未执行。
+ * Decision Date   : 2026-09-04
  * Supersedes      : (none)
  * Superseded By   : (none)
  * Affected Modules: 42_ConversionEngine.gs（新增 convertTaskToNote）、
@@ -1552,7 +1555,8 @@
  *                   ui_convertTaskToNote）、10_ProjectionEngine.gs
  *                   （新增 TASK_CONVERTED_TO_NOTE case + 
  *                   TIMELINE_ENTITY_MAP 登记）、ui_index.html（Task 卡片
- *                   新增 Convert to Note 入口）
+ *                   新增 Convert to Note 入口 + confirmation 交互，本条
+ *                   Accepted 时全部尚未实现）
  * Related ADR     : ADR-2026-09-02-028（No-Silent-Loss Principle，本条
  *                   的 BLOCK 清单直接援引同一原则，不是另起一套）；
  *                   ADR-2026-08-26-025（transport 边界 Date 防护，
@@ -1604,20 +1608,23 @@
  *       枚举值，不新增状态）。
  *
  * 【B 组：Data Mapping —— 有明确答案的部分】
- *   B1. `Task.title` + `Task.notes`（如果有）+ `Task.description`
- *       （如果有）拼接进 `Note.content`——具体格式：标题独占一行，
- *       notes/description 另起一段，中间空一行分隔（跟 Carson 之前在
- *       "白色空间/换行"那次追加需求里定的 `white-space:pre-wrap`
- *       方向一致，拼接后的换行会被正常保留显示）。理由：Note 没有独立
- *       的 title 字段，必须挤进同一个 content，跟 Note→Task 反向操作
- *       时"Note.content → Task.title"这种"整段塞进单一字段"是对称
- *       操作，不是新发明。
+ *   B1. `Task.title` + `Task.context`（如果有）+ `Task.notes`（如果有）+
+ *       `Task.description`（如果有）拼接进 `Note.content`——具体格式：
+ *       标题独占一行，context/notes/description 依次另起一段，中间空
+ *       一行分隔（跟 Carson 之前在"白色空间/换行"那次追加需求里定的
+ *       `white-space:pre-wrap` 方向一致，拼接后的换行会被正常保留
+ *       显示）。理由：Note 没有独立的 title 字段，必须挤进同一个
+ *       content，跟 Note→Task 反向操作时"Note.content → Task.title"
+ *       这种"整段塞进单一字段"是对称操作，不是新发明。
  *   B2. **必须 BLOCKED 的字段（跟 ADR-028 同一标准：目标 Domain 明确
  *       禁止，不是"恰好没建映射"）**：`due_date`、`due_time`、
  *       `due_datetime`、`reminder_policy` 任一非空——直接复用 Note 的
  *       `FORBIDDEN_FIELDS` 常量做检查，不重新发明一份新清单，理由跟
  *       Task→Project 完全一样：这是 Note Domain 的硬性边界，不是这条
- *       转换该不该做映射的问题。
+ *       转换该不该做映射的问题。**`recurring` 非空同样 BLOCKED**——这条
+ *       不在 Note 的 `FORBIDDEN_FIELDS` 里，是 D1（见下）单独拍板的，
+ *       跟前四个字段的证据等级不同，放在一起列是因为实现时是同一次
+ *       检查（见 Implementation Gate），不代表证据来源相同。
  *   B3. `Task.category` → 不做枚举映射（Task 六个类目跟 Note 五个类目
  *       语义不重叠，没有哪个映射是"明显对的"），新 Note 落到默认值
  *       `'IDEA'`，原 category 值作为文本保留进 B1 拼接的 content 里
@@ -1631,6 +1638,56 @@
  *       填对应字段"是另一个方向的选择（Task 没有对应的通用字段，那次
  *       是"没地方填"，这次是"有现成字段，理所当然该填"），不是同一个
  *       决定的两次，两边独立判断，结论不需要对称。
+ *   B5. 【2026-09-04 D 组拍板后逐字段复核 Task 全部 42 个字段时，补充
+ *       发现 4 个此前没有显式交代的字段——如实记录，不是这次才产生的
+ *       缺口，是这次审计才发现之前的草稿漏列了】
+ *     - `tags`：跟 D2/D3/D4 同一档处理——不建 Note 独立字段，非空时
+ *       作为一行注解保留进 content（跟 category/priority/budget 那行
+ *       并列），不 silent drop。
+ *     - `priority_ai_recommended`：现状全项目没有任何 Producer 写过这
+ *       个字段（`22_PriorityEngine.gs`尚未接入，见该字段定义处注释
+ *       "建列不建值"）——当前实际上永远是空，这次没有实际数据可丢，
+ *       如实记录不是"决定丢弃"，是"目前没有值可处理"；未来这个字段
+ *       一旦开始被写入，处理方式应该跟 `priority` 保持一致（同一档，
+ *       不需要另开一次 ADR）。
+ *   `source_project_id`（Task 自己"从哪个 Project 转过来的"血缘，
+ *       不是这次转换新产生的字段）：跟 D4 的结构性字段同一档处理——
+ *       非空时作为注解保留进 content，不建 Note 独立字段。这是一个
+ *       很深的边缘情况（一个本来就是从 Project 转换来的 Task，现在
+ *       又被转成 Note），按跟 D4 一致的口径处理，不单独破例。
+ *     - Task 自己的 `source_task_id`（如果这个 Task 本身也是从某个更
+ *       早的 Note 转换来的）：不覆盖 B4 的决定——B4 的 `source_task_id`
+ *       给的是"这次转换"的血缘（指向这次转换的源 Task），Task 自己
+ *       原本携带的、指向更早血缘的 `source_task_id` 值不会被延续（Note
+ *       的 schema 里这个字段只有一个位置，一次只能记一层血缘，不是
+ *       链表）。如果这一层更早的血缘需要保留，走跟 D4 相同的"注解进
+ *       content"处理，不新增字段。
+ *     - 以下字段确认**安全丢弃**，不需要保留（系统/生命周期元数据，
+ *       不是用户数据）：`task_id`/`identity`/`timestamp`（这个字段
+ *       本身看起来是 `created_time`的历史重复项，不是这次决定引入
+ *       的疑点）/`status`/`completed_at`（能转换的 Task 本来就是非
+ *       终态，这个字段必然为空，不存在需要保留的值）/`reminder_count`
+ *       （提醒已触发次数，不是用户输入）/`archived`（Task 专属的软删
+ *       标记，Note 有自己的 status 生命周期）/`converted_to_project_id`
+ *       （非空的前提是 status 已经是 CONVERTED，那种 Task 本来就不满足
+ *       "非终态"这条前置条件，不会走到这条新转换）。
+ *     - "Metadata 十一字段"（`creator`/`suggested_by`/`source_domain`/
+ *       `source_module`/`source_event_id`/`created_method`/
+ *       `created_time`/`updated_time`/`decision_owner`/
+ *       `approval_status`，不含上面单独讨论过的 `source_task_id`）：
+ *       跟既有全部 4 个转换函数（`convertNoteToTask`/
+ *       `convertNoteToProject`/`convertTaskToProject`/
+ *       `convertProjectToTask`）完全一致的既有处理方式——
+ *       `creator`/`suggested_by`/`source_domain`/`decision_owner`
+ *       继承自源 Task，`source_module`固定写
+ *       `'ConversionEngine.convertTaskToNote'`，`created_method`固定
+ *       写 `'Converted'`，`created_time`/`updated_time`/
+ *       `approval_status`跟手动创建 Note 完全一样，走
+ *       `createNoteDirect_`自己的默认逻辑，不是这条 ADR 需要单独决定
+ *       的新问题。
+ *   `chat_id`：不是"丢弃"，是自然延续——新 Note 创建时会传入跟源
+ *       Task 相同的 `chatId`，两条记录本来就该在同一个 chat 上下文里，
+ *       不需要额外处理。
  *
  * 【C 组：Identity / Event / Projection —— 有明确答案】
  *   C1. Note identity：直接复用 Slice 3 刚交付的
@@ -1674,36 +1731,93 @@
  *       B2 的 BLOCKED 字段检查），全部通过之后才创建 Note，最后标记源
  *       ——校验放在创建之前，不是创建之后才发现不该创建。
  *
- * 【D 组：需要 Carson 决定的产品判断题——不是证据不足，是证据支持
- *   好几种都合理的答案】
- *   D1. `recurring`（非空时）：BLOCK（跟 due_date 同一档，理由是
- *       "转成 Note 会静默丢失'这件事还会再来一次'这个行为"）？还是
- *       允许转换、把 recurring 规则也拼进 content 文本里（类似 B3 对
- *       category 的处理）？—— `recurring` 不在 Note 的
- *       `FORBIDDEN_FIELDS` 里，跟 due_date 不是同一个证据等级，这次
- *       没有直接援引 ADR-028 的资格，需要单独决定。
- *   D2. `priority`（非默认 MEDIUM 时）：静默按 B3 模式拼进 content
- *       文本？还是要求转换前弹一次确认（ADR-028 原文允许的第二种
- *       手段）？还是不管，直接丢？
- *   D3. `budget`（非空时）：跟金额相关，是否需要比 priority 更谨慎的
- *       处理（比如强制要求确认，不能静默拼文本了事）？
+ * 【D 组：正式 Decision（Carson 2026-09-04 拍板，非本窗口代为决定）】
+ *   D1. `recurring`：**BLOCKED**。理由：recurring 不是单纯 Task
+ *       metadata，是"持续产生 Task"的行为定义，转换成 Note 时静默丢失
+ *       recurrence 是不可接受的语义损失——跟 B2 的四个 FORBIDDEN_FIELDS
+ *       证据等级不同（这条不是 Note Domain 显式禁止，是这次单独判断
+ *       "行为定义丢失"够不够严重到该 BLOCK），但处理档位跟 B2 合并
+ *       实现（见上面 B2 末尾说明 + Implementation Gate）。
+ *   D2. `priority`：不映射为 Note 独立字段（Note 没有 priority 概念，
+ *       这个概念属于 Task execution semantics，不是 Note 核心
+ *       schema）。非默认值时（HIGH/CRITICAL/LOW，MEDIUM 是 schema
+ *       默认值本身不算"用户特意设置"，不触发这条）作为一行注解保留进
+ *       B1 拼接的 content，不 silent drop。
+ *   D3. `budget`：跟 D2 同一档——不映射为 Note 独立字段，非空时作为
+ *       注解保留进 content，不 silent drop。金额相关，处理力度上跟
+ *       priority 一致，不需要比它更谨慎（Carson 原文两条并列决定，
+ *       没有要求 budget 额外加确认）。
  *   D4. `project_id`/`workflow_id`/`parent_task_id`/
- *       `depends_on_task_ids`/`branch_group`/`sequence_index`（任一
- *       非空时）：这些是"跟其它实体的结构性关联"，不是"这个 Task 自身
- *       的属性"。**这次起草没有把这些列进 B2 的强制 BLOCK 清单**——
- *       核对发现现有 `convertTaskToProject`对这几个字段完全没有特殊
- *       处理（一个属于 Project/Workflow 的 Task 转成 Project 一样不会
- *       被挡），这次如果单独给 Task→Note 加一条更严格的规则，会跟
- *       既有 Task→Project 的先例不一致，所以按现状先不加特殊逻辑，
- *       允许静默丢弃这些关联字段——但这是"跟着现有先例保持一致"的
- *       选择，不是"这样做明显是对的"的选择，如果 Carson 认为这本身
- *       就是 Task→Project 也该补的漏洞，这条也需要重新考虑，不只是
- *       Task→Note 一条线的事。
- *   D5. 是否要求转换前 UI 确认弹窗（不只是 BLOCKED 卡片提示，是主动
- *       确认"要不要转"）：ADR-028 的原则本身允许"BLOCKED 或要求确认"
- *       二选一，B2 清单选了 BLOCKED（跟 due_date 同标准），但 D1/D2/
- *       D3 如果 Carson 选择"允许转换但要保留痕迹"，是不是也应该在 UI
- *       上加一次确认，而不是静默转换+静默拼文本？
+ *       `depends_on_task_ids`/`sequence_index`/`branch_group`/
+ *       `branch_resolution_policy`：**比 Task→Project 更严格**——不
+ *       建 Note 独立结构字段承接这些关系（Note 本来也没有这类字段），
+ *       Task→Note 只建立两条明确的 conversion lineage：
+ *       `source_task_id`（B4）+ `converted_to_note_id`（C3），不为了
+ *       "保留关系"把 Task 的 execution graph 复制进 Note。这些字段
+ *       非空时，跟 D2/D3 同一档处理——作为注解保留进 content，不
+ *       silent drop。这是相对于既有 `convertTaskToProject`（对这几个
+ *       字段完全不处理）的一次刻意收紧，**不追溯**到 Task→Project——
+ *       Carson 这次的决定范围明确是 Task→Note，没有要求联动修改
+ *       Task→Project，这次不做那个额外改动。
+ *   D5. UI Confirmation：**必须要有**。理由：conversion 会改变源 Task
+ *       的生命周期（终态、不可逆）；content mapping 本身不可逆（B1
+ *       拼接后无法从 Note.content 精确拆回原来的 title/context/notes/
+ *       description 四个独立字段）；recurring 等字段存在会直接
+ *       BLOCKED；用户误点之后，靠 Note Edit（`updateNote`）改不回原
+ *       Task 的完整语义（`updateNote`的白名单只有 content/category，
+ *       连 Task 曾经有的 due_date/priority/recurring 这些概念在 Note
+ *       侧根本不存在，不是"改回去"能解决的）。流程明确为：
+ *       **Convert to Note → Confirmation → Validate → Execute**——
+ *       Confirmation 是通用"确定要转换"提示，在 Validate（B2/D1 的
+ *       BLOCKED 检查）之前；不论 Confirmation 阶段的结果如何，
+ *       BLOCKED 判断必须发生在真正创建 Note/修改源 Task 之前，这条
+ *       跟 C7 已经确立的"先校验、后创建"顺序完全一致，D5 只是在
+ *       Validate 前面又加了一步 Confirmation，没有改变 Validate 必须
+ *       先于 Execute 这个不可动摇的前提。UI 这次不实现，只是把这个
+ *       流程写进 Implementation Gate（见文末），Part B 实施时必须
+ *       照做。
+ *
+ * Consistency Check（2026-09-04，D 组拍板后逐项核对，不是走过场）
+ *   1. D1-D5 vs A/B/C：D1（recurring BLOCK）是 B2 清单的追加项，不是
+ *      矛盾，只是证据等级不同（已在 B2 末尾标注清楚，不混淆两种
+ *      证据）。D2/D3/D4 三条统一延续 B3（category）已经确立的"默认值/
+ *      注解进 content，不建 Note 新字段"模式——D 组没有发明新模式，是
+ *      把 B3 的模式扩大适用范围，风格一致。D5 跟 C7（"先校验后创建"）
+ *      不矛盾，是在其之前再加一层，不改变 C7 本身。结论：无冲突。
+ *   2. D1-D5 vs Architecture Freeze（v5.2 Canonical Identity/
+ *      Lifecycle）：D 组全部内容都是"转换发生前的校验/确认"和"转换时
+ *      content 怎么拼"，不涉及重新定义任何实体的 Canonical Identity
+ *      或 Lifecycle 状态机本身。结论：无冲突。
+ *   3. D1-D5 vs ADR-028（No-Silent-Loss）：D1 选 BLOCK、D2/D3/D4 选
+ *      "保留痕迹不 silent drop"，都落在 ADR-028 原文"结构化 BLOCKED
+ *      或要求显式确认，二选一，禁止静默丢弃"这个范围内——D5 的
+ *      Confirmation 要求，进一步覆盖了 D2/D3/D4 这些"允许转换但要
+ *      保留痕迹"的情况，让它们也经过一次用户确认，比 ADR-028 的最低
+ *      要求更保守，不是不够、是更严。结论：无冲突，且比原则的下限
+ *      更谨慎。
+ *   4. D1-D5 vs 既有 Note lifecycle（`updateNote`/create/archive/
+ *      convert）：D2/D3/D4 保留进 content 的文本，创建后完全是普通
+ *      content 的一部分，用户之后用 Slice 3 的 `updateNote`编辑、
+ *      删除这些注解行，走的是完全通用的 content 编辑，不需要
+ *      `updateNote`本身知道这段文本"曾经是从 Task 字段搬过来的"——
+ *      没有引入任何 Note Edit 需要特殊感知的新状态。结论：无冲突。
+ *   5. Task→Project 与 Task→Note 差异是否清晰：是。Task→Project 无
+ *      Confirmation（点击即执行，除非命中 BLOCKED）、BLOCK 清单只有
+ *      due_date 三兄弟、结构性字段完全不处理；Task→Note 有强制
+ *      Confirmation、BLOCK 清单多一个 recurring、结构性字段显式
+ *      "保留痕迹不丢弃"。两条对比清楚写在这条 ADR 里（Context + D4
+ *      原文），不是隐含的差异。
+ *   6. identity/event/projection/lineage 是否仍然一致：是。D 组只
+ *      决定"Execute 之前发生什么、content 里拼什么文本"，不触碰 C 组
+ *      已经定的身份计算方式（C1/C2）、事件命名（C4）、projection 实现
+ *      模式（C5/C6）、血缘字段（C3/B4）——这些 D 组一处都没有改动。
+ *   7. 是否存在 silent data loss：B5（本条 ADR 前面新增的审计补充）
+ *      逐一核对了 Task 全部 42 个字段，除了本来就该丢的系统/生命周期
+ *      元数据（task_id/identity/timestamp/status/completed_at/
+ *      reminder_count/archived/converted_to_project_id）和自然延续的
+ *      `chat_id`、走既有 Metadata 标准处理的"十一字段"之外，其余
+ *      每个字段都有明确去向（BLOCKED、或保留进 content 注解、或拼进
+ *      主体叙述文本）。结论：没有发现遗留的 silent-drop 字段。
  *
  * Consequences / Trade-offs
  *   - 选 A1（create+mark）而不是"原地变形"：跟既有 Note→Task/Note→
@@ -1730,26 +1844,68 @@
  * projector、一条 TIMELINE_ENTITY_MAP 登记、一个 deriveFromEvent 分支，
  * 全部是新增，不修改任何既有事件的既有行为。
  *
- * UI Impact（F 组，草案，非最终——最终样式取决于 D5 的答案）：
+ * UI Impact（D5 已拍板为必须，以下仍是草案，Part B 实施时才建 UI）：
+ *   - 流程：Convert to Note → Confirmation（通用"确定要转换"提示）→
+ *     Validate（B2/D1 的 BLOCKED 检查）→ Execute。
  *   - 入口：Task 卡片 `.item-actions`，跟现有 "Convert to Project"
  *     按钮并排放一个 "Convert to Note"。
  *   - BLOCKED 呈现：复用 Slice 4 Part A 刚做的 `.item-blocked-reason`
  *     卡片内联元素，同一套视觉语言，不重新设计。
- *   - 如果 D5 决定需要确认弹窗，目前 ui_index.html 里没有任何现成的
- *     "confirm 弹窗"模式可以直接复用（现有交互都是"点击即执行"或
- *     "内联展开表单"），需要新设计——这本身也是 D5 没决定之前无法
- *     往下细化 UI 的原因之一。
+ *   - Confirmation 弹窗：目前 ui_index.html 里没有任何现成的"confirm
+ *     弹窗"模式可以直接复用（现有交互都是"点击即执行"或"内联展开
+ *     表单"），Part B 实施时需要新设计，这是 Implementation Gate 里
+ *     单列的一项。
  *
  * Migration Impact：无迁移。`converted_to_note_id` 是新字段，现有
  * Task 行该字段读出来是 `undefined`/空，不影响任何既有逐行读取逻辑
  * （跟 Slice 1 给 Task/Project 新增 source_domain 时的迁移结论一致：
  * 新增列不需要回填历史行）。
  *
+ * Implementation Gate（SLICE_4_PART_B — IMPLEMENTATION READY——
+ * ADR Accepted 之后、真正动手写代码之前，必须逐条满足/确认的清单；
+ * 本条 ADR 本身不包含任何以下代码改动）
+ *   1. Schema：`20_TaskEngine.gs`的 Task 行新增 `converted_to_note_id`
+ *      列（空默认值，见 Migration Impact，无需回填）。
+ *   2. `20_TaskEngine.gs`：需要一个标记"转成 Note"的函数——是扩展现有
+ *      `markTaskConverted_`加一个目标类型参数，还是新写一个独立的
+ *      `markTaskConvertedToNote_`（跟现有"一个类型一个专属函数/字段"
+ *      的既有习惯更一致）——留给实施时决定，两种都不违反本条 ADR，
+ *      但不能碰 `markTaskConverted_`已有调用方（`convertTaskToProject`）
+ *      的现有行为。同时补 `TaskEngine.deriveFromEvent`对应的新分支
+ *      （重放用，见 C6 的既有要求延伸到这条新事件）。
+ *   3. `42_ConversionEngine.gs`：新增 `convertTaskToNote(taskId,
+ *      noteMeta, chatId)`——校验顺序必须是"先查完存在性 + 非终态 +
+ *      B2/D1 的 BLOCKED 条件，全部通过才创建 Note，最后标记源"（C7
+ *      已经决定的顺序，不能因为要实现 D5 的 Confirmation 而在 UI 层
+ *      放松这条后端校验顺序——Confirmation 是 UI 层的用户确认，不能
+ *      替代后端自己的 Validate）。content 拼接需要合并 B1/B3/D2/D3/
+ *      D4/B5 全部决定项，不能只实现其中一部分。
+ *   4. `50_UIBridge.gs`：新增 `ui_convertTaskToNote`，`result.blocked`
+ *      → `{ok:false, code:'BLOCKED'}`，跟现有两个方向同一个模式，
+ *      返回值套 `_sanitizeTaskDatesForTransport_`（ADR-025 标准
+ *      动作）。
+ *   5. `10_ProjectionEngine.gs`：新增 `TASK_CONVERTED_TO_NOTE` case +
+ *      `projectTaskConvertedToNote_` + `TIMELINE_ENTITY_MAP`登记
+ *      （C5，否则静默不上 Timeline）。
+ *   6. `ui_index.html`：Convert to Note 按钮 + 新设计的 Confirmation
+ *      交互（D5，UI Impact 已标注现在没有可复用的弹窗模式）+ 复用
+ *      `.item-blocked-reason`展示 BLOCKED。
+ *   7. 完成后按既有习惯更新 `00_Project_State.gs`记录、`00_ADR.gs`
+ *      本条状态如需要的话（本条已经是 Accepted，不需要再改）。
+ *   8. 验证要求延续本项目一贯标准：node --check + 全项目语法扫描 +
+ *      对既有 Task→Project/Note 相关测试的 regression 核对 + 明确
+ *      区分 STATIC VERIFIED / LIVE TEST PENDING，不得把没有实机验证
+ *      的项目写成 PASS。
+ *
  * Notes
  *   完整背景见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
- *   Review_2026-09-01.md 第 5.2 节。D 组 5 个问题回答之前，这条 ADR
- *   状态维持 Proposed，Implementation Plan Slice 4 Part B 不得开始
- *   写代码——这是 Carson 明确要求的顺序。D 组回答后，如果答案跟 A/B/C
- *   组已经定的部分不冲突，可以把这条整体状态改成 Accepted，不需要
- *   重新起草。
+ *   Review_2026-09-01.md 第 5.2 节。本条 2026-09-04 由 Proposed 改为
+ *   Accepted——D 组 5 项由 Carson 正式拍板，Consistency Check 逐项
+ *   通过。**Accepted 不等于 Part B 已实现**：本条从起草到 Accepted，
+ *   全程只改动了 `00_ADR.gs`/`00_Project_State.gs`两个治理文件，
+ *   `42_ConversionEngine.gs`/`50_UIBridge.gs`/`ui_index.html`/
+ *   `20_TaskEngine.gs`一行代码都没有碰。当前检查点：
+ *   **SLICE_4_PART_B — IMPLEMENTATION READY**——Implementation Gate
+ *   已经列完整，等 Carson 另外明确指示才开始写代码，不因为 ADR
+ *   Accepted 就自动继续实施。
  */
