@@ -1694,3 +1694,145 @@
  * Part A 保持原状不动（STATIC VERIFIED / LIVE TEST PENDING）；
  * Slice 1/2/3/4A 的 LIVE TEST PENDING 状态本轮未变。
  */
+
+// ============================================================
+// 三十五、Slice 4 Part B（Task→Note）实现交付（2026-09-04）
+// ============================================================
+
+/**
+ * Carson 正式指示 Proceed，给出详细 dependency order + 十四项具体要求。
+ * 开工前先做了一次全项目扫描（不是假设"什么都还没做"）——发现
+ * `20_TaskEngine.gs` 的 schema（`converted_to_note_id`）、
+ * `markTaskConvertedToNote_`、`deriveFromEvent` 的
+ * `TASK_CONVERTED_TO_NOTE`分支、以及 `00_Sheets_Structure.gs`的
+ * changelog 记录**已经存在**，风格、命名、跟 ADR-030 的引用全部一致。
+ * 逐行审计这部分（终态检查、幂等判断、event publish +
+ * materializeTaskRow_ fallback、deriveFromEvent 分支）后确认实现正确、
+ * 跟 `markTaskConverted_`既有模式完全对应，未发现问题，本轮直接在
+ * 这个基础上继续，没有重复造轮子，也没有不加审计就假设它是对的。
+ *
+ * 本轮新实现（此前确实不存在，全部从零写的部分）：
+ *
+ * 1. `42_ConversionEngine.gs`：`convertTaskToNote(taskId, noteMeta,
+ *    chatId)`。校验顺序：存在性 → 幂等/已转换检查 → 非终态检查 →
+ *    B2+D1 的 BLOCKED 字段检查，全部通过才建 Note——没有复制
+ *    `convertTaskToProject`现在"先建目标再查源状态"的顺序。content
+ *    拼接完整实现 ADR-030 B1（title+context+notes+description 主体）+
+ *    B3/B5/D2/D3/D4（category/priority 非默认/budget/tags/
+ *    project_id/workflow_id/parent_task_id/depends_on_task_ids/
+ *    sequence_index（0 是合法值，用 !==null 判断不用真值判断）/
+ *    branch_group/branch_resolution_policy/source_project_id/
+ *    priority_ai_recommended 作为注解，一条都没有就不加这段）。
+ *
+ * 2. `50_UIBridge.gs`：`ui_convertTaskToNote`，`blocked`跟
+ *    `invalid_state`统一转成 `code:'BLOCKED'`（对 UI 是同一类"正常
+ *    业务规则提示"，不细分子类型）。
+ *
+ * 3. `10_ProjectionEngine.gs`：`TASK_CONVERTED_TO_NOTE` dispatch case +
+ *    `projectTaskConvertedToNote_`（完整镜像
+ *    `projectTaskConvertedToProject_`，**包括从 ACTIVE_TASKS_SHEET
+ *    删除这一步**——这步不是可选的，不删的话源 Task 转成 Note 后还会
+ *    继续出现在依赖 ActiveTasks 的 active views 里，直接违反 Carson
+ *    第七项"source Task 不会继续被当作未处理 Task"的要求）+
+ *    `TIMELINE_ENTITY_MAP`登记。核对过 `materializeTaskRow_`
+ *    fallback 路径本身已经按 status 是否终态通用处理 ActiveTasks
+ *    清理，不需要额外补。
+ *
+ * 4. `ui_index.html`：Task 卡片新增 "Convert to Note" 按钮 + 一个新的
+ *    `.confirm-form`（复用跟 `.edit-form`/`.capture-form`/
+ *    `.create-form`同一条 CSS 规则加一个新 class，不是另写一份重复
+ *    样式）承载确认文案 + Cancel/Confirm 两个按钮。流程严格是
+ *    Intent（点 Convert to Note）→ Confirmation（弹出确认框，这一步
+ *    零 server 调用）→ 用户点 Confirm 才调 `ui_convertTaskToNote`
+ *    → Domain 侧做真正的 BLOCKED/Validate 判断。点 Cancel 只是收起
+ *    确认框，没有任何 `google.script.run`调用，零 mutation。BLOCKED
+ *    复用既有 `.item-blocked-reason`，系统级错误走既有 `tasksStatus`
+ *    错误状态行——两者路径分开，跟 Slice 4 Part A 同款。UI 本身不
+ *    判断 recurring/due_date 之类的业务规则，只负责 Intent→
+ *    Confirmation→UIBridge 这一段。
+ *
+ * 5. `54_Tests_TaskToNoteConversion.gs`（新文件，编号接续现有测试
+ *    文件里最大的 53）：Carson 要求的 14 项里，13 项可由 GAS 服务端
+ *    验证的全部覆盖（BLOCKED 五个字段各自触发+不产生 Note；成功转换
+ *    产生恰好一条 Note、source_task_id/converted_to_note_id 正确；
+ *    事件确实发布、projection 确实落地；`deriveFromEvent`重放结果跟
+ *    实时 projection 一致——刻意没有调用全局的
+ *    `rebuildTasksProjection()`，那个不按 chatId 隔离、会重建整张
+ *    Sheet，拿来跑一次范围很小的验收测试不合适，改成直接对
+ *    `deriveFromEvent`喂一个真实发布过的事件、在纯内存 stateMap 上
+ *    验证，更小、更安全、也更针对性；重复转换幂等）。第 14 项
+ *    （confirmation cancel 零 mutation）是纯前端 JS 行为——点 Cancel
+ *    时代码根本不发 HTTP 请求，这一层没有服务端测试能验证的对象，
+ *    如实记录为需要人工在浏览器里确认，不是遗漏。
+ *
+ * 6. 顺手修正 `00_Business_Rules.gs`「十一」一处现在过时的
+ *    "尚未实现的 Task→Note"措辞——这是一句忠实反映"这条原则确立时
+ *    Task→Note 还没做"的历史陈述，因为过时而更新，不是发现了错误。
+ *
+ * 【Transactional Safety 审计——如实记录，没有假装 GAS/Sheets 有
+ * 数据库事务，也没有为了看起来完整发明不存在的机制】
+ *
+ * 失败窗口 A：Note 创建成功，但紧接着的 `markTaskConvertedToNote_`
+ * 没能跑完（脚本超时/崩溃/配额等，在两个顶层 Engine 调用之间发生，
+ * 不是某一次 Sheets API 调用内部的失败）。结果：Note 独立存在，源
+ * Task 停留在原状态（不是 CONVERTED）。核对后发现这个风险**部分被
+ * 现有基础设施缓解**：`NoteEngine.createNote`走的是
+ * `IdempotencyManager.createNoteIfNotExists`，先按
+ * `generateNoteIdentity(chatId, content, category)`查重——只要重试时
+ * 源 Task 字段没被改动过，content 是确定性拼出来的，重试会命中同一个
+ * identity、返回同一条 Note，不会产生第二条重复 Note。**没有被完全
+ * 消除的部分**：源 Task 在重试成功之前会一直显示为"未转换"，用户
+ * 可能会困惑（Note 已经在、Task 却还显示活跃）——这跟既有
+ * `convertTaskToProject`同一种失败窗口下的风险是同一类，不是这次
+ * 新引入的、独有的缺陷，本轮没有为此新增重试/告警机制。
+ *
+ * 失败窗口 B：`markTaskConvertedToNote_`内部 `EventBus.publish`——
+ * 事件本身写入 Events 表（append，独立一步）成功，但紧接着同步触发
+ * 的 `ProjectionEngine.dispatch`（把 status/converted_to_note_id 真的
+ * 写进 Task 行）失败。核对 `02_EventBus.gs`确认这条路径**已经有完整
+ * 处理**：`event.projection_ok`会被置为 false，调用方
+ * （`markTaskConvertedToNote_`）据此触发 `materializeTaskRow_`兜底
+ * 直写；就算这次兜底也失败，Events 表里的事件是真实、完整写入的，
+ * `rebuildAllProjections()`可以事后从事件历史重建正确状态——这条
+ * 恢复路径是既有基础设施，不是本轮新造的。
+ *
+ * 结论：两个失败窗口都如实记录，窗口 A 有部分缓解但不完整、窗口 B
+ * 基本有完整的既有恢复路径，都不是这次转换特有的新缺陷，是这个
+ * 没有真实 transaction 的架构本身的既有特性，跟 `convertTaskToProject`
+ * 一直以来承担的风险是同一类。
+ *
+ * Regression 检查：全项目 `.js`（含新增的
+ * `54_Tests_TaskToNoteConversion.gs`）node --check 全部通过。本轮
+ * 全部改动是新增函数/新增 case/新增 UI 元素，**没有修改任何既有函数
+ * 的函数体**（唯二例外是两处纯注释的文档状态更正，见上文第 6 点）。
+ * 逐一核对了会创建 Task 的既有测试文件（35/36/38/39/51/53），确认
+ * 没有一个测试给 Task 设置 `recurring`，本轮改动不会让它们的行为
+ * 发生变化。`convertTaskToProject`/`convertProjectToTask`/
+ * `convertNoteToTask`/`convertNoteToProject`/
+ * `convertNoteToGoalCandidate`五个既有转换函数、Note 的
+ * create/archive/update/convert 全部生命周期、Task 的
+ * Done/Cancel/Dashboard/Query/Identity、EventBus/Projection/
+ * ProjectionRebuilder/Timeline/Deduplication 基础设施、
+ * `25_DashboardEngine.gs`（Telegram）——本轮都没有一行代码涉及。
+ *
+ * 验证状态：
+ *   - 全部新增/改动代码：node --check 通过（STATIC VERIFIED）。
+ *   - `54_Tests_TaskToNoteConversion.gs`的 5 个测试函数：只是写好了，
+ *     **没有在真实 GAS/Sheets 环境里跑过**——如实记录为 NOT TESTED，
+ *     不是 PASS，需要 Carson 部署后手动执行
+ *     `runTaskToNoteConversionGate()`确认。
+ *   - 第 14 项（confirmation cancel）：NOT TESTED，需要人工浏览器
+ *     确认（打开网络面板，点 Cancel，确认没有请求发出）。
+ *   - 完整功能（Convert to Note 按钮点击 → 确认 → 转换成功/BLOCKED
+ *     的实际视觉呈现）：LIVE TEST PENDING，浏览器环境不在本窗口手边。
+ *
+ * Scope Freeze 确认：本轮没有碰 ADR-031、Drag Ordering/UI-I6、Project
+ * Deadline Contract、source_domain migration、Quick Add、Note
+ * category Create enhancement、category 徽章、Telegram
+ * DashboardEngine、也没有做任何跟这次任务无关的重构或"通用 conversion
+ * 抽象框架"。
+ *
+ * 下一步：等 Carson 部署后跑 `runTaskToNoteConversionGate()` +
+ * 浏览器手动验证 UI 流程（含第 14 项）。Slice 4 Part A 与 Slices
+ * 1/2/3 的 LIVE TEST PENDING 状态本轮未变。
+ */

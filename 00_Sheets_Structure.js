@@ -1,7 +1,13 @@
 /**
  * 00_Sheets_Structure.gs
- * Personal Life OS v5.2（Design Phase — Architecture Freeze）—
+ * Personal Life OS v5.3（Design Phase — Architecture Freeze）—
  * Google Sheets Structure
+ *
+ * Changelog: v5.2 → v5.3——Tasks 新增 `converted_to_note_id`（见「一」
+ * v5.3 新增列），ADR-2026-09-02-030（Task→Note Conversion Contract）
+ * Accepted 后的 schema 落地，Slice 4 Part B。新增列，不改变、不移动
+ * 任何既有列，历史行该列读出来为空——跟 v5.1 新增
+ * `converted_to_project_id`同一类变更，不是破坏性 schema 变更。
  *
  * Changelog: v5.1 → v5.2——LIFE_PROJECTS.status / LIFE_WORKFLOWS.status
  * 原生改用 Canonical Entity Lifecycle 词汇（见「三」「四」），Tasks
@@ -61,6 +67,16 @@
  * 语义上不同于 CANCELLED——CANCELLED 代表"本该执行、后来取消"，
  * NOT_SELECTED 代表"从一开始就没有被选中执行的资格"，完整论证见
  * 00_ADR.gs ADR-2026-07-24-008）。
+ *
+ * v5.3 新增列（追加在 v5.1 新增列之后，2026-09-04，ADR-2026-09-02-030）：
+ *
+ *   converted_to_note_id         — 可空，跟 `converted_to_project_id`
+ *                                同一类字段（每种转换目标一个专属列，
+ *                                不是通用 type/id 对，理由见 ADR-030
+ *                                Context/C3）。Task 转换成 Note 后，
+ *                                这一列写入新 Note 的 note_id；status
+ *                                同时变成 CONVERTED（复用既有枚举值，
+ *                                不新增）。历史行该列为空，不需要回填。
  */
 
 // ============================================================

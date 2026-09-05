@@ -450,6 +450,42 @@ function ui_convertTaskToProject(taskId, _testOverrides) {
 }
 
 /**
+ * 【Slice 4 Part B, 2026-09-04, ADR-2026-09-02-030】跟
+ * `ui_convertTaskToProject`/`ui_convertProjectToTask`同一个模式。
+ * `ConversionEngine.convertTaskToNote`可能返回 `blocked`（B2/D1 的
+ * 字段检查没通过）或 `invalid_state`（已经转换过、或终态 Task）——
+ * 对 UI 来说这两种都是"正常的业务规则提示，不是系统错误"，统一转成
+ * `code:'BLOCKED'`，不细分子类型，跟 D5 定的"BLOCKED 用
+ * .item-blocked-reason 呈现"这条 UI 契约保持单一、简单。
+ */
+function ui_convertTaskToNote(taskId, _testOverrides) {
+  try {
+    if (!taskId) {
+      return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    var decisionOwner = _resolveDecisionOwner_(_testOverrides);
+
+    var result = ConversionEngine.convertTaskToNote(taskId, {
+      decision_owner: decisionOwner
+    }, chatId);
+
+    if (result.not_found) {
+      return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除或转换过）' };
+    }
+    if (result.blocked) {
+      return { ok: false, code: 'BLOCKED', message: result.reason };
+    }
+    if (result.invalid_state) {
+      return { ok: false, code: 'BLOCKED', message: result.reason };
+    }
+    return { ok: true, note: _sanitizeTaskDatesForTransport_(result.note), already_converted: !!result.already_converted };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
  * 【2026-09-04 更新】这条注释原来写"Project→Task 有 Task→Project 没有的
  * 第三种结果"——这句话现在不准确了：Slice 4 Part A 给 Task→Project 也
  * 加了 result.blocked 分支（ADR-2026-09-02-028，源 Task 带日期、Project

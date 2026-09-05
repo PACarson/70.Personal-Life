@@ -191,6 +191,9 @@ var TaskEngine = (function () {
       // ── Sprint 1 新增：转换血缘（建列，Sprint 3 由 ConversionEngine 使用）──
       source_project_id:                        meta.source_project_id || '',
       converted_to_project_id:                     '',
+      // 【Slice 4 Part B, 2026-09-04, ADR-2026-09-02-030】跟上面同一类
+      // 专属字段，不是通用 type/id 对，见该 ADR Context/C3。
+      converted_to_note_id:                         '',
 
       // ── Sprint 1 新增：Metadata 十一字段 ─────────────────────────────
       creator:          metadata.creator,
@@ -495,6 +498,47 @@ var TaskEngine = (function () {
   }
 
   /**
+   * 【Slice 4 Part B, 2026-09-04, ADR-2026-09-02-030】跟
+   * `markTaskConverted_`同一个结构，目标类型换成 Note。仅供
+   * 42_ConversionEngine.gs 的 convertTaskToNote 调用——调用前 Note
+   * 必须已经创建成功（ADR-030 C7：先完整校验+创建目标，最后才标记源，
+   * 这个函数本身只负责"标记"这一步，不负责校验，校验在
+   * convertTaskToNote 里已经做完）。
+   *
+   * @param {string} taskId
+   * @param {string} newNoteId
+   * @param {string} chatId
+   */
+  function markTaskConvertedToNote_(taskId, newNoteId, chatId) {
+    var existing = TaskQueryEngine.getTask(taskId, chatId);
+    if (!existing) return { not_found: true };
+
+    var currentStatus = String(existing.status || '').toUpperCase();
+    if (currentStatus === 'CONVERTED') {
+      if (existing.converted_to_note_id === newNoteId) {
+        return { already_converted: true, task: existing }; // 幂等
+      }
+      return { invalid_state: true, current_status: currentStatus,
+        reason: 'Task 已经转换过（Project 或 Note），不能再转换一次' };
+    }
+    var terminalStatuses = ['DONE', 'CANCELLED', 'NOT_SELECTED'];
+    if (terminalStatuses.indexOf(currentStatus) !== -1) {
+      return { invalid_state: true, current_status: currentStatus,
+        reason: '只有非终态的 Task 才能转换为 Note' };
+    }
+
+    var payload = { task_id: taskId, status: 'CONVERTED', converted_to_note_id: newNoteId,
+      updated_time: new Date().toISOString() };
+    var event = EventBus.publish('TASK_CONVERTED_TO_NOTE', payload, chatId || existing.chat_id, 'TaskEngine');
+
+    if (event && event.projection_ok === false) {
+      materializeTaskRow_(taskId, { status: 'CONVERTED', converted_to_note_id: newNoteId });
+    }
+
+    return {};
+  }
+
+  /**
    * 【Sprint 3 落地】Project→Task 转换时，创建目标侧的新 Task——仅供
    * 42_ConversionEngine.gs 调用。字段映射规则见
    * 00_Business_Rules.gs「一」：Project.title → Task.title，
@@ -569,6 +613,14 @@ var TaskEngine = (function () {
         }
         break;
 
+      // 【Slice 4 Part B, 2026-09-04, ADR-2026-09-02-030】
+      case 'TASK_CONVERTED_TO_NOTE':
+        if (stateMap[p.task_id]) {
+          stateMap[p.task_id].status = 'CONVERTED';
+          stateMap[p.task_id].converted_to_note_id = p.converted_to_note_id;
+        }
+        break;
+
       case 'REMINDER_SENT':
         if (stateMap[p.task_id]) {
           stateMap[p.task_id].reminder_count = (stateMap[p.task_id].reminder_count || 0) + 1;
@@ -639,6 +691,7 @@ var TaskEngine = (function () {
     cancelTask:            cancelTask,
     markTaskNotSelected_:   markTaskNotSelected_,
     markTaskConverted_:      markTaskConverted_,
+    markTaskConvertedToNote_: markTaskConvertedToNote_,
     createTaskFromConversion_: createTaskFromConversion_,
     getPendingTasks:         getPendingTasks,
     deriveFromEvent:          deriveFromEvent,

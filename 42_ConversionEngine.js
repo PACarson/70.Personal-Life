@@ -145,6 +145,148 @@ var ConversionEngine = (function () {
     return { task: task };
   }
 
+  // ============ Task → Note（Slice 4 Part B, 2026-09-04,
+  //              ADR-2026-09-02-030） ============
+
+  /**
+   * ADR-030 C7：校验必须先于创建——跟 `convertTaskToProject` 现在
+   * "先建目标、再查源状态"的顺序刻意不同。全部 BLOCKED 判断（B2 的
+   * `FORBIDDEN_FIELDS` 四兄弟 + D1 的 recurring）、以及非终态前置
+   * 检查，都在真正调用 `NoteEngine.createNote` 之前完成——一旦开始
+   * 创建，后面只有"标记源"这一步可能失败，不会再有"创建了目标才
+   * 发现不该创建"的情况。
+   *
+   * content 拼接严格按 ADR-030 B1/B3/B5/D2/D3/D4：主体叙述（title +
+   * context + notes + description）+ 一段"转换来源"注解（非默认/非空
+   * 的 category/priority/budget/tags/结构性字段/source_project_id，
+   * 有几个写几个，一个都没有就不加这段，不制造空壳注解）。
+   *
+   * 失败窗口（如实记录，不假装有 transaction，完整分析见
+   * 00_Project_State.gs 本次交付章节）：本函数内 Note 创建成功、但
+   * 下面 `markTaskConvertedToNote_` 失败时，源 Task 会停留在原状态，
+   * Note 已经独立存在——重试时因为 content 是从源 Task 字段确定性
+   * 拼出来的，`NoteEngine.createNote`→`IdempotencyManager.
+   * createNoteIfNotExists`会按 identity 命中同一条 Note、不会产生
+   * 第二条重复 Note，但源 Task 在重试成功之前仍会显示为"未转换"。
+   *
+   * @param {string} taskId
+   * @param {object} [noteMeta]  { decision_owner }——跟其它既有转换
+   *                             函数一致，调用方只转发 decision_owner，
+   *                             其余字段全部从源 Task 派生，不接受
+   *                             调用方覆盖，ADR-030 没有开放这个口子。
+   * @param {string} chatId
+   * @returns {{note:object, already_converted?:boolean}|{not_found:true}|
+   *           {blocked:true, reason:string}|
+   *           {invalid_state:true, current_status:string, reason:string}}
+   */
+  function convertTaskToNote(taskId, noteMeta, chatId) {
+    var sourceTask = TaskQueryEngine.getTask(taskId, chatId);
+    if (!sourceTask) return { not_found: true };
+
+    var currentStatus = String(sourceTask.status || '').toUpperCase();
+
+    // 幂等 / 已被另一种转换消费掉：提前查是为了在真正创建 Note 之前
+    // 就能短路，不是"创建了才发现已经转换过"。
+    if (currentStatus === 'CONVERTED') {
+      if (sourceTask.converted_to_note_id) {
+        return { note: NoteQueryEngine.getNote(sourceTask.converted_to_note_id), already_converted: true };
+      }
+      return { invalid_state: true, current_status: currentStatus,
+        reason: 'Task 已经转换过（转去了 Project），不能再转换成 Note' };
+    }
+
+    // ADR-030 C7 + Business_Rules「一」既有的"只有非终态 Task 才能
+    // 转换"前置条件——跟 `markTaskConvertedToNote_`内部的同一条检查
+    // 重复，是有意的：这里提前查是为了在创建 Note 之前就挡住，不是
+    // 信任那边的重复检查就够、这边可以省略。
+    var terminalStatuses = ['DONE', 'CANCELLED', 'NOT_SELECTED'];
+    if (terminalStatuses.indexOf(currentStatus) !== -1) {
+      return { invalid_state: true, current_status: currentStatus,
+        reason: '只有非终态的 Task 才能转换为 Note' };
+    }
+
+    // ADR-030 B2：跟 Note 自己的 FORBIDDEN_FIELDS 同一份清单，不重新
+    // 发明一份新的；D1：recurring 单独判断，证据等级跟前四个不同
+    // （不在 FORBIDDEN_FIELDS 里，是这次单独拍板的行为语义损失），
+    // 但处理档位（BLOCKED）相同，合并成一次检查、一次报错。
+    var blockedFields = LifeNoteConfig.FORBIDDEN_FIELDS.filter(function (f) {
+      return !!sourceTask[f];
+    });
+    if (sourceTask.recurring) blockedFields.push('recurring');
+    if (blockedFields.length > 0) {
+      return {
+        blocked: true,
+        reason: 'Note 不支持这个 Task 携带的字段（' + blockedFields.join('、') + '），暂时无法转换。' +
+                '这类信息一旦转成 Note 会被静默丢失，按规则必须挡下来，不能悄悄丢掉。'
+      };
+    }
+
+    noteMeta = noteMeta || {};
+
+    // ── B1：主体叙述 —— title 独占一行，context/notes/description
+    //    依次另起一段，中间空行分隔（配合 Slice 3 的
+    //    white-space:pre-wrap，换行会被正常保留显示）───────────────
+    var bodyParts = [sourceTask.title || ''];
+    if (sourceTask.context)     bodyParts.push(sourceTask.context);
+    if (sourceTask.notes)       bodyParts.push(sourceTask.notes);
+    if (sourceTask.description) bodyParts.push(sourceTask.description);
+
+    // ── B3/B5/D2/D3/D4：转换来源注解 —— 只有非默认/非空的才写，一条
+    //    都没有就完全不加这一段（不制造空壳注解）。MEDIUM 是 priority
+    //    的 schema 默认值本身，不算"用户特意设置"，不触发这一行
+    //    （D2 原文口径）。sequence_index 用 0 是合法值，不能用真值
+    //    判断，要单独判 null/undefined/空字符串。─────────────────────
+    var annotations = [];
+    if (sourceTask.category)                                     annotations.push('category: ' + sourceTask.category);
+    if (sourceTask.priority && sourceTask.priority !== 'MEDIUM')  annotations.push('priority: ' + sourceTask.priority);
+    if (sourceTask.budget)                                       annotations.push('budget: ' + sourceTask.budget);
+    if (sourceTask.tags)                                         annotations.push('tags: ' + sourceTask.tags);
+    if (sourceTask.project_id)                                   annotations.push('project_id: ' + sourceTask.project_id);
+    if (sourceTask.workflow_id)                                  annotations.push('workflow_id: ' + sourceTask.workflow_id);
+    if (sourceTask.parent_task_id)                                annotations.push('parent_task_id: ' + sourceTask.parent_task_id);
+    if (sourceTask.depends_on_task_ids)                           annotations.push('depends_on_task_ids: ' + sourceTask.depends_on_task_ids);
+    if (sourceTask.sequence_index !== '' && sourceTask.sequence_index !== undefined && sourceTask.sequence_index !== null)
+                                                                   annotations.push('sequence_index: ' + sourceTask.sequence_index);
+    if (sourceTask.branch_group)                                  annotations.push('branch_group: ' + sourceTask.branch_group);
+    if (sourceTask.branch_resolution_policy)                       annotations.push('branch_resolution_policy: ' + sourceTask.branch_resolution_policy);
+    if (sourceTask.source_project_id)                             annotations.push('source_project_id（更早一层血缘）: ' + sourceTask.source_project_id);
+    // priority_ai_recommended：现状全项目没有任何 Producer 写值（见
+    // ADR-030 B5），如实反映"当前没有值"，不虚构——这一行目前永远
+    // 不会触发，字段一旦开始被写入会自动纳入，不需要再改这段代码。
+    if (sourceTask.priority_ai_recommended)                       annotations.push('priority_ai_recommended: ' + sourceTask.priority_ai_recommended);
+
+    if (annotations.length > 0) {
+      bodyParts.push('[Converted from Task ' + taskId + ' \u00b7 ' + annotations.join(' \u00b7 ') + ']');
+    }
+
+    var content = bodyParts.join('\n\n');
+
+    // ── C1/B3：category 不做枚举映射，新 Note 落 createNote 自己的
+    //    默认值（不在这里传 category），原 Task 的 category 已经在
+    //    上面的注解里保留为文本 ──────────────────────────────────────
+    var note = NoteEngine.createNote(content, {
+      creator:        'User',
+      suggested_by:   sourceTask.suggested_by || '',
+      source_domain:  sourceTask.source_domain || '',
+      source_module:  'ConversionEngine.convertTaskToNote',
+      source_task_id: taskId, // B4：这次转换的 lineage，不是 Task 自己更早的 source_task_id
+      created_method: 'Converted',
+      decision_owner: noteMeta.decision_owner // 不加 || '' 兜底，
+                                               // 保持跟 convertNoteToTask
+                                               // 2026-08-16 修复同一个
+                                               // 理由：让 createNote
+                                               // 内部自己的 fallback
+                                               // 逻辑在没传时正常生效
+    }, chatId || sourceTask.chat_id);
+
+    // ── C3：标记源 Task —— 校验已经在上面全部做完，这一步失败时源
+    //    Task 会停留在原状态、Note 已经独立存在，见函数顶部"失败窗口"
+    //    说明，不在这里用假的 rollback 掩盖 ──────────────────────────
+    TaskEngine.markTaskConvertedToNote_(taskId, note.note_id, chatId || sourceTask.chat_id);
+
+    return { note: note };
+  }
+
   // ============ Note → Task / Project / Goal Candidate ============
 
   function convertNoteToTask(noteId, taskMeta, chatId) {
@@ -222,6 +364,7 @@ var ConversionEngine = (function () {
   return {
     convertTaskToProject:      convertTaskToProject,
     convertProjectToTask:      convertProjectToTask,
+    convertTaskToNote:         convertTaskToNote,
     convertNoteToTask:         convertNoteToTask,
     convertNoteToProject:      convertNoteToProject,
     convertNoteToGoalCandidate: convertNoteToGoalCandidate

@@ -102,6 +102,7 @@ var ProjectionEngine = (function () {
 
     // 【Sprint 3 新增】
     'TASK_CONVERTED_TO_PROJECT':    { entityType: 'TASK',             idField: 'task_id' },
+    'TASK_CONVERTED_TO_NOTE':       { entityType: 'TASK',             idField: 'task_id' },
     'PROJECT_CONVERTED_TO_TASK':    { entityType: 'PROJECT',          idField: 'project_id' },
     'NOTE_CREATED':                 { entityType: 'NOTE',             idField: 'note_id' },
     'NOTE_ARCHIVED':                { entityType: 'NOTE',             idField: 'note_id' },
@@ -140,6 +141,7 @@ var ProjectionEngine = (function () {
 
         // 【Sprint 3 新增】
         case 'TASK_CONVERTED_TO_PROJECT':    projectTaskConvertedToProject_(event);    break;
+      case 'TASK_CONVERTED_TO_NOTE':       projectTaskConvertedToNote_(event);       break;
         case 'PROJECT_CONVERTED_TO_TASK':    projectProjectConvertedToTask_(event);    break;
         case 'NOTE_CREATED':                 projectNoteCreated_(event);               break;
         case 'NOTE_ARCHIVED':                projectNoteArchived_(event);              break;
@@ -476,6 +478,26 @@ var ProjectionEngine = (function () {
     upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, {
       status: 'CONVERTED',
       converted_to_project_id: p.converted_to_project_id
+    });
+    try {
+      deleteRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id);
+    } catch (e) {
+      Logger.log('[ProjectionEngine] ActiveTasks 删除失败: ' + e.message);
+    }
+  }
+
+  // 【Slice 4 Part B, 2026-09-04, ADR-2026-09-02-030】完整镜像上面
+  // `projectTaskConvertedToProject_`——包括从 ACTIVE_TASKS_SHEET 删除
+  // 这一步，不是可选的：不删的话源 Task 转成 Note 之后还会继续出现在
+  // 依赖 ActiveTasks 的 active views（Dashboard 等）里，跟 Carson
+  // 明确要求的"source Task 不会继续被正常 active views 当作未处理
+  // Task"直接矛盾。
+  function projectTaskConvertedToNote_(event) {
+    var p = event.payload || {};
+    if (!p.task_id) return;
+    upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, {
+      status: 'CONVERTED',
+      converted_to_note_id: p.converted_to_note_id
     });
     try {
       deleteRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id);

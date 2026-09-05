@@ -195,11 +195,11 @@
     }
 
     /* ---------- Inline Edit / Forms ---------- */
-    .edit-form, .capture-form, .create-form {
+    .edit-form, .capture-form, .create-form, .confirm-form {
       display: none; margin-top: 10px; padding: 12px; background: var(--bg);
       border: 1px dashed var(--line); border-radius: 6px; gap: 8px; flex-direction: column;
     }
-    .edit-form.visible, .capture-form.visible, .create-form.visible { display: flex; }
+    .edit-form.visible, .capture-form.visible, .create-form.visible, .confirm-form.visible { display: flex; }
     .edit-form input, .edit-form select, .edit-form textarea,
     .capture-form input,
     .create-form input, .create-form select, .create-form textarea {
@@ -938,6 +938,25 @@
             '</div>' +
           '</div>' +
 
+          // Convert to Note confirmation (Slice 4 Part B, 2026-09-04,
+          // ADR-030 D5: Convert to Note → Confirmation → Validate →
+          // Execute. Cancel = 零 mutation，不调用任何 server 端点；
+          // 只有点了 Confirm 才会真的调 ui_convertTaskToNote，Domain
+          // 侧再做实际的 BLOCKED/Validate 判断——这个表单本身不判断
+          // recurring/due_date 之类的业务规则。
+          '<div class="confirm-form confirm-convert-note-form">' +
+            '<div style="font-size:13px; color:var(--ink-dim); line-height:1.5;">' +
+              'Convert this task to a note? The task will be marked converted ' +
+              '(it won\u2019t show up as an active task anymore), and the note\u2019s ' +
+              'text can\u2019t be split back into separate fields afterwards. ' +
+              'This can\u2019t be undone.' +
+            '</div>' +
+            '<div class="form-row">' +
+              '<button class="btn btn-ghost btn-tiny cancel-convert-note-btn">Cancel</button>' +
+              '<button class="btn btn-tiny confirm-convert-note-btn">Convert to Note</button>' +
+            '</div>' +
+          '</div>' +
+
           // Action Buttons (UI-I2, I3, I4, I5)
           '<div class="item-actions">' +
             '<button class="btn btn-success btn-tiny done-btn">Done</button>' +
@@ -945,6 +964,7 @@
             '<button class="btn btn-ghost btn-tiny ask-ai-btn">Ask AI Priority</button>' +
             '<button class="btn btn-ghost btn-tiny edit-btn">Edit</button>' +
             '<button class="btn btn-ghost btn-tiny convert-btn">Convert to Project</button>' +
+            '<button class="btn btn-ghost btn-tiny convert-note-btn">Convert to Note</button>' +
           '</div>';
 
         // Event Listeners
@@ -1103,6 +1123,23 @@
           convertTaskToProject(task.task_id, card, ev.currentTarget);
         });
 
+        // Convert to Note（Slice 4 Part B, 2026-09-04, ADR-030 D5）：
+        // Intent → Confirmation → UIBridge。点 "Convert to Note" 只是
+        // 打开确认框，不调用任何 server 端点；点 Cancel 只是关掉确认
+        // 框，同样零 mutation；只有点确认框里的按钮才真的发请求，
+        // Domain 侧再做 BLOCKED/Validate 判断——这里不判断
+        // recurring/due_date 之类的业务规则。
+        var confirmNoteForm = card.querySelector('.confirm-convert-note-form');
+        card.querySelector('.convert-note-btn').addEventListener('click', function () {
+          confirmNoteForm.classList.add('visible');
+        });
+        card.querySelector('.cancel-convert-note-btn').addEventListener('click', function () {
+          confirmNoteForm.classList.remove('visible');
+        });
+        card.querySelector('.confirm-convert-note-btn').addEventListener('click', function (ev) {
+          convertTaskToNote(task.task_id, card, ev.currentTarget, confirmNoteForm);
+        });
+
         taskListEl.appendChild(card);
       });
     }
@@ -1156,6 +1193,45 @@
           tasksStatus.textContent = 'Error converting task.'; tasksStatus.className = 'status-line err';
         })
         .ui_convertTaskToProject(taskId);
+    }
+
+    /**
+     * Slice 4 Part B, 2026-09-04, ADR-030。调用前用户已经在
+     * confirmFormEl 里点过 Confirm——这里不再重复问一次，直接调
+     * ui_convertTaskToNote，Domain 侧做真正的 BLOCKED/Validate 判断。
+     * 不论结果如何，先把 confirm 表单收起来，避免跟 BLOCKED 提示或
+     * 卡片消失同时出现在页面上。
+     */
+    function convertTaskToNote(taskId, cardEl, btnEl, confirmFormEl) {
+      btnEl.disabled = true;
+      btnEl.textContent = 'Converting\u2026';
+      google.script.run
+        .withSuccessHandler(function (result) {
+          confirmFormEl.classList.remove('visible');
+          if (!result || !result.ok) {
+            btnEl.disabled = false; btnEl.textContent = 'Convert to Note';
+            // BLOCKED（recurring/due_date 等，ADR-030 B2/D1）跟
+            // Convert to Project 同款处理——卡片内联提示，不进
+            // tasksStatus 那条通用错误状态行
+            if (result && result.code === 'BLOCKED') {
+              var reasonEl = cardEl.querySelector('.item-blocked-reason');
+              reasonEl.textContent = result.message;
+              reasonEl.style.display = 'block';
+            } else {
+              tasksStatus.textContent = result ? result.message : 'Error converting task (empty response).';
+              tasksStatus.className = 'status-line err';
+            }
+            return;
+          }
+          removeCard(cardEl, taskListEl, tasksEmptyEl);
+          loadNotes();
+        })
+        .withFailureHandler(function () {
+          confirmFormEl.classList.remove('visible');
+          btnEl.disabled = false; btnEl.textContent = 'Convert to Note';
+          tasksStatus.textContent = 'Error converting task.'; tasksStatus.className = 'status-line err';
+        })
+        .ui_convertTaskToNote(taskId);
     }
 
     // ============================================================
