@@ -13,7 +13,11 @@
  * 存在的直接目的是让 Claude/外部审计在做 Architecture Review 时，看到
  * 这里列出的行为，不要当成 bug 或遗漏去提修复建议。
  *
- * LAST_UPDATED: 2026-09-04 — 新增「七、updateNote() Internal API」，
+ * LAST_UPDATED: 2026-09-05 — 新增「八、convertTaskToProject"先建后查"
+ * 顺序的潜在孤儿 Project 风险」，见该节，Slice 4 Part B 收尾复核时
+ * 发现，未修复，仅记录。
+ *
+ * 2026-09-04 — 新增「七、updateNote() Internal API」，
  * 见该节，同时借此机会修正 Implementation Plan Slice 3 文档里一处
  * 跟本文件头「目的」段落自相矛盾的指向（详见该节末尾说明）。
  *
@@ -365,4 +369,51 @@
  * Command Reference（可 grep 该文件确认），这次不例外，记在这里而不是
  * Command Reference，不是漏做 Implementation Plan 那一步，是那一步的
  * 指向本身跟治理文件自己的分工规则不一致，按治理文件的规则走。
+ */
+
+// ============================================================
+// 八、convertTaskToProject（42_ConversionEngine.gs）"先建目标、后查源
+//    状态"的顺序——潜在孤儿 Project 风险，本次审计发现，未修复
+//    （2026-09-05 记录，Slice 4 Part B 收尾复核时发现）
+// ============================================================
+
+/**
+ * 现状（已核实，不是猜测）：`convertTaskToProject`的顺序是——幂等检查
+ * →（Slice 4 Part A 新增的）due_date 系列 BLOCKED 检查 → **直接调用
+ * `ProjectEngine.createProject`** → 之后才调用
+ * `TaskEngine.markTaskConverted_`标记源。而"只有非终态 Task 才能
+ * 转换"这条前置条件，只在 `markTaskConverted_`**内部**检查（见该
+ * 函数 `terminalStatuses`判断），不在 `convertTaskToProject`自己
+ * 创建 Project 之前检查。
+ *
+ * 风险：如果一个已经是终态（DONE/CANCELLED/NOT_SELECTED）的 Task 被
+ * 传进 `convertTaskToProject`（正常 UI 流程下不应该发生——终态 Task
+ * 的卡片理论上不会展示"Convert to Project"这个可交互状态，但这是 UI
+ * 层的隐性假设，不是 Engine 层自己的强制保证），Project 会先被建出来，
+ * 然后 `markTaskConverted_`才发现 Task 是终态、返回
+ * `{invalid_state:true}`——而 `convertTaskToProject`**没有检查
+ * 这个返回值**，会直接把已经建好的 Project 当作成功结果返回。结果：
+ * 一个孤儿 Project 被创建，源 Task 没有被正确标记为 CONVERTED，两者
+ * 关联关系没有建立。
+ *
+ * 发现时机与范围说明：这不是本窗口任何一次改动引入的新问题——
+ * `convertTaskToProject`这部分代码从 Sprint 3 就是这个顺序，Slice 4
+ * Part A 只在它前面加了一段 BLOCKED 检查，没有改动这个既有顺序。
+ * 发现于 Slice 4 Part B 设计 ADR-2026-09-02-030 时的代码审计（为了
+ * 确保 `convertTaskToNote`不复制同一个顺序缺陷），记在这里是因为
+ * 它本身独立于 Task→Note 存在，不应该只夹在 ADR-030 的 Context 里
+ * 让人不容易查到。
+ *
+ * 本次未修复的原因：Carson 在 Slice 4 Part A/Part B 期间多次明确
+ * 要求"不要做无关重构""不要预防性修改既有代码"，这条修复会改动
+ * `convertTaskToProject`的既有执行顺序，超出当时每一轮被明确授权的
+ * 范围，所以只记录、不动手。
+ *
+ * 建议的修复方向（仅供参考，不是已批准的方案）：把"非终态"检查提到
+ * `convertTaskToProject`创建 Project 之前（跟 Slice 4 Part B 的
+ * `convertTaskToNote`现在的顺序一致），并且在调用
+ * `markTaskConverted_`之后检查其返回值，如果是 `invalid_state`应该
+ * 视为一种需要处理的异常情况，而不是忽略。这个修复需要独立评估
+ * 是否会影响任何依赖现有顺序的既有测试或行为，不应该在其它任务
+ * 的顺带改动里完成。
  */
