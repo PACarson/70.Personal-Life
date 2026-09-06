@@ -535,6 +535,33 @@
       }, 250);
     }
 
+    /**
+     * 【Slice 5, 2026-09-07 新增】乐观 UI 用的临时占位卡片。刻意做成
+     * 非交互的最小展示——不复用 renderTasks/renderProjects/renderNotes
+     * 里那套完整卡片（Done/Edit/Convert/AI 建议等一堆按钮）：那些按钮
+     * 全部需要一个真实的 task_id/project_id/note_id 才能安全操作，这
+     * 个占位卡片此刻还没有真实 ID，接任何按钮都不安全。真实响应回来
+     * 后，调用方用对应的 loadTasks()/loadProjects()/loadNotes() 整份
+     * 重新渲染列表，这个占位卡片作为旧内容的一部分被自然替换掉；如果
+     * 请求失败，调用方用既有的 removeCard() 显式移除它。
+     * @param {string} label      'Task' / 'Project' / 'Note'
+     * @param {string} titleText  用户刚输入的标题/内容，纯展示用
+     * @returns {HTMLElement}
+     */
+    function _buildPendingCardEl_(label, titleText) {
+      var card = document.createElement('div');
+      card.className = 'item-card pending-card';
+      card.style.opacity = '0.55';
+      card.innerHTML =
+        '<div class="item-header-row">' +
+          '<div style="flex:1">' +
+            '<div class="item-title">' + escapeHtml(titleText) + '</div>' +
+            '<div class="item-trace" style="margin-top:6px;"><span class="badge">Saving ' + escapeHtml(label) + '\u2026</span></div>' +
+          '</div>' +
+        '</div>';
+      return card;
+    }
+
     // ---------------- Nav / Panel Switching ----------------
     document.querySelectorAll('.nav-item.enabled').forEach(function (navEl) {
       navEl.addEventListener('click', function () {
@@ -774,19 +801,36 @@
       var content = inputEl.value.trim();
       if (!content) return;
       addBtn.disabled = true;
-      notesStatus.textContent = 'Saving\u2026';
+      notesStatus.textContent = '';
       notesStatus.className = 'status-line';
+
+      // Slice 5, 2026-09-07：乐观 UI——立刻展示占位卡片 + 清空输入框，
+      // 不等真实响应。按钮在真实响应回来之前保持 disabled（下面两个
+      // handler 才会重新启用），防止乐观展示掩盖了双击导致的第二次
+      // 真实请求。成功时不单独移除占位卡片——loadNotes() 本身会整份
+      // 重新渲染列表，占位卡片作为旧内容一并被替换掉；失败时没有
+      // 后续 reload，需要显式移除。失败时不回填输入框内容，保持跟
+      // Plan 字面范围一致，也避免回填覆盖用户等待期间又重新输入的
+      // 新内容。
+      notesEmptyEl.style.display = 'none';
+      var pendingCard = _buildPendingCardEl_('Note', content);
+      noteListEl.insertBefore(pendingCard, noteListEl.firstChild);
+      inputEl.value = '';
+      inputEl.focus();
 
       google.script.run
         .withSuccessHandler(function (result) {
           addBtn.disabled = false;
-          if (!result) { notesStatus.textContent = 'Error saving note (empty response).'; notesStatus.className = 'status-line err'; return; }
-          if (!result.ok) { notesStatus.textContent = result.message; notesStatus.className = 'status-line err'; return; }
-          inputEl.value = '';
+          if (!result) { removeCard(pendingCard, noteListEl, notesEmptyEl); notesStatus.textContent = 'Error saving note (empty response).'; notesStatus.className = 'status-line err'; return; }
+          if (!result.ok) { removeCard(pendingCard, noteListEl, notesEmptyEl); notesStatus.textContent = result.message; notesStatus.className = 'status-line err'; return; }
           notesStatus.textContent = '';
           loadNotes();
         })
-        .withFailureHandler(function () { addBtn.disabled = false; notesStatus.textContent = 'Error saving note.'; notesStatus.className = 'status-line err'; })
+        .withFailureHandler(function () {
+          addBtn.disabled = false;
+          removeCard(pendingCard, noteListEl, notesEmptyEl);
+          notesStatus.textContent = 'Error saving note.'; notesStatus.className = 'status-line err';
+        })
         .ui_createNote(content);
     }
 
@@ -1625,36 +1669,45 @@
 
       var saveBtn = document.getElementById('taskCreateSaveBtn');
       saveBtn.disabled = true;
-      taskCreateStatus.textContent = 'Saving\u2026'; taskCreateStatus.className = 'status-line';
+      taskCreateStatus.textContent = '';
+
+      // Slice 5, 2026-09-07：乐观 UI 落地——之前这一批字段清空 +
+      // refocus 是等真实响应回来才做（见下面 2026-09-01 那条旧注释：
+      // "gated on real timing numbers"）。现在改成点 Save 立刻做，
+      // 同时立刻在主列表插入一张不可交互的占位卡片。是否关闭表单
+      // 面板维持原有行为（仍然是成功后才关），不在这次乐观化范围内
+      // 改动。按钮在真实响应回来之前保持 disabled，防止乐观展示掩盖
+      // 双击导致的第二次真实请求。
+      tasksEmptyEl.style.display = 'none';
+      var pendingCard = _buildPendingCardEl_('Task', title);
+      taskListEl.insertBefore(pendingCard, taskListEl.firstChild);
+      titleInput.value = '';
+      document.getElementById('taskCreateNotes').value = '';
+      document.getElementById('taskCreateTags').value = '';
+      document.getElementById('taskCreateWorkflow').value = '';
+      document.getElementById('taskCreateDueDate').value = '';
+      document.getElementById('taskCreateDueTime').value = '';
+      document.getElementById('taskCreatePriority').value = 'MEDIUM';
+      document.getElementById('taskCreateCategory').value = 'GENERAL';
+      document.getElementById('taskCreateRecurring').value = '';
+      document.getElementById('taskCreateDescription').value = '';
+      document.getElementById('taskCreateContext').value = '';
+      document.getElementById('taskCreateOsDomain').value = 'PersonalLifeOS';
+      titleInput.focus();
 
       google.script.run
         .withSuccessHandler(function (result) {
           saveBtn.disabled = false;
-          if (!result) { taskCreateStatus.textContent = 'Error creating task (empty response).'; taskCreateStatus.className = 'status-line err'; return; }
-          if (!result.ok) { taskCreateStatus.textContent = result.message; taskCreateStatus.className = 'status-line err'; return; }
-          titleInput.value = '';
-          document.getElementById('taskCreateNotes').value = '';
-          document.getElementById('taskCreateTags').value = '';
-          document.getElementById('taskCreateWorkflow').value = '';
-          document.getElementById('taskCreateDueDate').value = '';
-          document.getElementById('taskCreateDueTime').value = '';
-          document.getElementById('taskCreatePriority').value = 'MEDIUM';
-          document.getElementById('taskCreateCategory').value = 'GENERAL';
-          document.getElementById('taskCreateRecurring').value = '';
-          document.getElementById('taskCreateDescription').value = '';
-          document.getElementById('taskCreateContext').value = '';
-          document.getElementById('taskCreateOsDomain').value = 'PersonalLifeOS';
+          if (!result) { removeCard(pendingCard, taskListEl, tasksEmptyEl); taskCreateStatus.textContent = 'Error creating task (empty response).'; taskCreateStatus.className = 'status-line err'; return; }
+          if (!result.ok) { removeCard(pendingCard, taskListEl, tasksEmptyEl); taskCreateStatus.textContent = result.message; taskCreateStatus.className = 'status-line err'; return; }
           taskCreateStatus.textContent = '';
           taskCreateForm.classList.remove('visible');
           loadTasks();
-          // Slice 1, 2026-09-01: refocus so a quick "type -> save -> type
-          // next" flow doesn't need a mouse click in between. This is the
-          // real server response, not an optimistic guess — that fuller
-          // perceived-latency fix is Slice 5, gated on real timing numbers.
           titleInput.focus();
         })
         .withFailureHandler(function () {
           saveBtn.disabled = false;
+          removeCard(pendingCard, taskListEl, tasksEmptyEl);
           taskCreateStatus.textContent = 'Error creating task.'; taskCreateStatus.className = 'status-line err';
         })
         .ui_createTask(title, meta);
@@ -1696,26 +1749,34 @@
 
       var saveBtn = document.getElementById('projectCreateSaveBtn');
       saveBtn.disabled = true;
-      projectCreateStatus.textContent = 'Saving\u2026'; projectCreateStatus.className = 'status-line';
+      projectCreateStatus.textContent = '';
+
+      // Slice 5, 2026-09-07：乐观 UI，处理方式跟 submitCreateTask 一致
+      // （占位卡片 + 立刻清空/重置字段 + 立刻 refocus；是否关闭表单
+      // 面板维持原有行为，仍是成功后才关）。
+      projectsEmptyEl.style.display = 'none';
+      var pendingCard = _buildPendingCardEl_('Project', title);
+      projectListEl.insertBefore(pendingCard, projectListEl.firstChild);
+      titleInput.value = '';
+      document.getElementById('projectCreateDescription').value = '';
+      document.getElementById('projectCreateParent').value = '';
+      document.getElementById('projectCreateExecutionMode').value = '';
+      document.getElementById('projectCreateOsDomain').value = 'PersonalLifeOS';
+      titleInput.focus();
 
       google.script.run
         .withSuccessHandler(function (result) {
           saveBtn.disabled = false;
-          if (!result) { projectCreateStatus.textContent = 'Error creating project (empty response).'; projectCreateStatus.className = 'status-line err'; return; }
-          if (!result.ok) { projectCreateStatus.textContent = result.message; projectCreateStatus.className = 'status-line err'; return; }
-          titleInput.value = '';
-          document.getElementById('projectCreateDescription').value = '';
-          document.getElementById('projectCreateParent').value = '';
-          document.getElementById('projectCreateExecutionMode').value = '';
-          document.getElementById('projectCreateOsDomain').value = 'PersonalLifeOS';
+          if (!result) { removeCard(pendingCard, projectListEl, projectsEmptyEl); projectCreateStatus.textContent = 'Error creating project (empty response).'; projectCreateStatus.className = 'status-line err'; return; }
+          if (!result.ok) { removeCard(pendingCard, projectListEl, projectsEmptyEl); projectCreateStatus.textContent = result.message; projectCreateStatus.className = 'status-line err'; return; }
           projectCreateStatus.textContent = '';
           projectCreateForm.classList.remove('visible');
           loadProjects();
-          // Slice 1, 2026-09-01: same refocus pattern as submitCreateTask.
           titleInput.focus();
         })
         .withFailureHandler(function () {
           saveBtn.disabled = false;
+          removeCard(pendingCard, projectListEl, projectsEmptyEl);
           projectCreateStatus.textContent = 'Error creating project.'; projectCreateStatus.className = 'status-line err';
         })
         .ui_createProject(title, meta);

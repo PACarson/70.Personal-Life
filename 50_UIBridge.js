@@ -107,6 +107,34 @@ function _resolveDecisionOwner_(_testOverrides) {
 }
 
 /**
+ * 【Slice 5, 2026-09-07 新增】纯 Logger.log 计时埋点，不改变任何业务
+ * 逻辑/返回值/异常行为——本函数本身不做任何判断，只写日志。t0 是
+ * 调用方在函数入口处取的 Date.now()，checkpoint 是阶段名（start /
+ * before_existence_check / after_existence_check / before_engine_call /
+ * after_engine_call / end / end_error）。Carson 实跑后在 Apps Script
+ * 执行记录（Executions）或 Stackdriver 里按 "[Perf] " 前缀过滤，即可
+ * 拿到每个阶段相对 t0 的累计耗时（毫秒）。
+ *
+ * 范围说明（已知局限，如实记录）：Dedup 检查发生在 Engine 的
+ * create 系/update 系函数内部（09_IdempotencyManager.js/
+ * 08_DeduplicationEngine.js），
+ * UIBridge 层看不到 Dedup 和 Sheet 写入/Event 发布/Projection 三者
+ * 之间的边界——从这一层看，这是一次不透明的 Engine 调用。按本 Slice
+ * "不改 Domain/Engine 层业务逻辑"的范围限制，本次没有进 Engine 文件
+ * 内部加更细的埋点，所以 before_engine_call → after_engine_call 这
+ * 一段时间是 Dedup+Sheet写入+Event+Projection 四者的合计，不是分离
+ * 的四个数字。如果 Carson 看到这段合计耗时偏高、需要知道具体是哪一
+ * 步慢，需要另外授权在对应 Engine 文件内部加埋点（同样只加日志）。
+ *
+ * @param {string} fnName      调用方函数名，比如 'ui_createTask'
+ * @param {string} checkpoint  阶段名
+ * @param {number} t0          Date.now()，函数入口处取的起始时间
+ */
+function _perfLog_(fnName, checkpoint, t0) {
+  Logger.log('[Perf] ' + fnName + ' | ' + checkpoint + ' | +' + (Date.now() - t0) + 'ms');
+}
+
+/**
  * 把 Engine 抛出的 `Error('CODE: message')` 转成 {ok:false, code, message}。
  * 没有 CODE 前缀的异常（不应该发生，既有 Engine 目前都遵守这个约定）
  * 归为 UNKNOWN_ERROR，不静默吞掉、不裸抛给前端。
@@ -234,23 +262,31 @@ function ui_getOpenNotes(_testOverrides) {
  * 【Slice 3, 2026-09-04】跟 ui_updateProject 同一个模式。
  */
 function ui_updateNote(noteId, changes, _testOverrides) {
+  var __t0 = Date.now();  // Slice 5, 2026-09-07：计时埋点起点
+  _perfLog_('ui_updateNote', 'start', __t0);
   try {
     if (!noteId) {
       return { ok: false, code: 'MISSING_NOTE_ID', message: '缺少 noteId' };
     }
     var chatId = _resolveChatId_(_testOverrides);
 
+    _perfLog_('ui_updateNote', 'before_existence_check', __t0);
     var existing = NoteQueryEngine.getNote(noteId, chatId);
+    _perfLog_('ui_updateNote', 'after_existence_check', __t0);
     if (!existing) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Note（可能已经被删除）' };
     }
 
+    _perfLog_('ui_updateNote', 'before_engine_call', __t0);
     var updated = NoteEngine.updateNote(noteId, changes || {}, chatId);
+    _perfLog_('ui_updateNote', 'after_engine_call', __t0);
     if (!updated) {
       return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
     }
+    _perfLog_('ui_updateNote', 'end', __t0);
     return { ok: true, note: _sanitizeTaskDatesForTransport_(updated) };
   } catch (e) {
+    _perfLog_('ui_updateNote', 'end_error', __t0);
     return _wrapError_(e);
   }
 }
@@ -261,6 +297,8 @@ function ui_updateNote(noteId, changes, _testOverrides) {
  * @returns {{ok:true, note:object}|{ok:false, code, message}}
  */
 function ui_createNote(content, _testOverrides) {
+  var __t0 = Date.now();  // Slice 5, 2026-09-07：计时埋点起点
+  _perfLog_('ui_createNote', 'start', __t0);
   try {
     if (!content || !String(content).trim()) {
       return { ok: false, code: 'EMPTY_CONTENT', message: '内容不能为空' };
@@ -268,6 +306,7 @@ function ui_createNote(content, _testOverrides) {
     var chatId = _resolveChatId_(_testOverrides);
     var decisionOwner = _resolveDecisionOwner_(_testOverrides);
 
+    _perfLog_('ui_createNote', 'before_engine_call', __t0);
     var note = NoteEngine.createNote(String(content).trim(), {
       source_module:  'UIBridge.ui_createNote',
       decision_owner: decisionOwner
@@ -275,9 +314,12 @@ function ui_createNote(content, _testOverrides) {
       // 打字创建，语义上跟既有 Telegram 手动创建的 'Manual' 完全一致，
       // 不需要新增一个 'Web' 之类的值制造不必要的分裂
     }, chatId);
+    _perfLog_('ui_createNote', 'after_engine_call', __t0);
 
+    _perfLog_('ui_createNote', 'end', __t0);
     return { ok: true, note: note };
   } catch (e) {
+    _perfLog_('ui_createNote', 'end_error', __t0);
     return _wrapError_(e);
   }
 }
@@ -644,18 +686,24 @@ function ui_instantiateTemplate(templateId, _testOverrides) {
  *           {ok:false, code:'MISSING_TASK_ID'|'NOT_FOUND'|'NO_CHANGES'|string, message}}
  */
 function ui_updateTask(taskId, changes, _testOverrides) {
+  var __t0 = Date.now();  // Slice 5, 2026-09-07：计时埋点起点
+  _perfLog_('ui_updateTask', 'start', __t0);
   try {
     if (!taskId) {
       return { ok: false, code: 'MISSING_TASK_ID', message: '缺少 taskId' };
     }
     var chatId = _resolveChatId_(_testOverrides);
 
+    _perfLog_('ui_updateTask', 'before_existence_check', __t0);
     var existing = TaskQueryEngine.getTask(taskId, chatId);
+    _perfLog_('ui_updateTask', 'after_existence_check', __t0);
     if (!existing) {
       return { ok: false, code: 'NOT_FOUND', message: '找不到这个 Task（可能已经被删除）' };
     }
 
+    _perfLog_('ui_updateTask', 'before_engine_call', __t0);
     var updated = TaskEngine.updateTask(taskId, changes || {}, chatId);
+    _perfLog_('ui_updateTask', 'after_engine_call', __t0);
     if (!updated) {
       // 已经排除了"不存在"，走到这里只可能是 changes 里没有任何一个
       // UPDATABLE_FIELDS 认得的合法字段/合法值——不是错误，是"提交了但
@@ -663,8 +711,10 @@ function ui_updateTask(taskId, changes, _testOverrides) {
       // 的 code，不是笼统报错。
       return { ok: false, code: 'NO_CHANGES', message: '没有识别出任何可以保存的改动' };
     }
+    _perfLog_('ui_updateTask', 'end', __t0);
     return { ok: true, task: _sanitizeTaskDatesForTransport_(updated) };
   } catch (e) {
+    _perfLog_('ui_updateTask', 'end_error', __t0);
     return _wrapError_(e);
   }
 }
@@ -913,6 +963,8 @@ function ui_cancelProject(projectId, _testOverrides) {
  * @returns {{ok:true, task:object}|{ok:false, code:'EMPTY_TITLE'|string, message}}
  */
 function ui_createTask(title, meta, _testOverrides) {
+  var __t0 = Date.now();  // Slice 5, 2026-09-07：计时埋点起点
+  _perfLog_('ui_createTask', 'start', __t0);
   try {
     if (!title || !String(title).trim()) {
       return { ok: false, code: 'EMPTY_TITLE', message: '标题不能为空' };
@@ -921,6 +973,7 @@ function ui_createTask(title, meta, _testOverrides) {
     var decisionOwner = _resolveDecisionOwner_(_testOverrides);
     meta = meta || {};
 
+    _perfLog_('ui_createTask', 'before_engine_call', __t0);
     var task = TaskEngine.createTask(String(title).trim(), {
       category:       meta.category,
       priority:       meta.priority,
@@ -938,9 +991,12 @@ function ui_createTask(title, meta, _testOverrides) {
       source_module:  'UIBridge.ui_createTask',
       decision_owner: decisionOwner
     }, chatId);
+    _perfLog_('ui_createTask', 'after_engine_call', __t0);
 
+    _perfLog_('ui_createTask', 'end', __t0);
     return { ok: true, task: _sanitizeTaskDatesForTransport_(task) };
   } catch (e) {
+    _perfLog_('ui_createTask', 'end_error', __t0);
     return _wrapError_(e);
   }
 }
@@ -964,6 +1020,8 @@ function ui_createTask(title, meta, _testOverrides) {
  * @returns {{ok:true, project:object}|{ok:false, code:'EMPTY_TITLE'|string, message}}
  */
 function ui_createProject(title, meta, _testOverrides) {
+  var __t0 = Date.now();  // Slice 5, 2026-09-07：计时埋点起点
+  _perfLog_('ui_createProject', 'start', __t0);
   try {
     if (!title || !String(title).trim()) {
       return { ok: false, code: 'EMPTY_TITLE', message: '标题不能为空' };
@@ -972,6 +1030,7 @@ function ui_createProject(title, meta, _testOverrides) {
     var decisionOwner = _resolveDecisionOwner_(_testOverrides);
     meta = meta || {};
 
+    _perfLog_('ui_createProject', 'before_engine_call', __t0);
     var project = ProjectEngine.createProject(String(title).trim(), {
       description:        meta.description,
       execution_mode:      meta.execution_mode,
@@ -980,9 +1039,12 @@ function ui_createProject(title, meta, _testOverrides) {
       source_module:  'UIBridge.ui_createProject',
       decision_owner: decisionOwner
     }, chatId);
+    _perfLog_('ui_createProject', 'after_engine_call', __t0);
 
+    _perfLog_('ui_createProject', 'end', __t0);
     return { ok: true, project: _sanitizeTaskDatesForTransport_(project) };
   } catch (e) {
+    _perfLog_('ui_createProject', 'end_error', __t0);
     return _wrapError_(e);
   }
 }

@@ -1836,3 +1836,136 @@
  * 浏览器手动验证 UI 流程（含第 14 项）。Slice 4 Part A 与 Slices
  * 1/2/3 的 LIVE TEST PENDING 状态本轮未变。
  */
+
+// ============================================================
+// 三十六、Slice 5（Performance）实现交付（2026-09-07）
+// ============================================================
+
+/**
+ * 背景：Carson 本轮外出送外卖，明确指示"不要因为 LIVE TEST PENDING
+ * 而停止独立的架构/开发工作"，要求先做 NEXT WORK DISCOVERY 再动手。
+ * 核查结论（过程见对话记录，不重复于此）：Slice 3/4A/4B 都已代码
+ * 完成，只差 Carson 的 LIVE TEST，没有新代码可写；Known Limitation
+ * 「八」按 Carson 明确指示保持 DEFERRED，不碰；扫描 00_ADR.gs 全部
+ * ADR（001~030）没有发现"已 Accepted 但代码尚未实现"的漏项；
+ * `Personal_Life_OS_UIV2_Implementation_Plan_2026-09-01.md`开头明确
+ * 写"Slice 3（Note Edit）和 Slice 5（Performance）跟其它 Slice 相对
+ * 独立，理论上可以跟 Slice 2/4 并行"——Slice 5 是本轮唯一同时满足
+ * "已被 Plan 文档具体批准"+"不依赖 Carson 实测环境"两个条件的候选，
+ * 不存在需要 Carson 裁决的多候选局面，直接按 Plan 该节的具体文件表
+ * 开工。
+ *
+ * 实现内容（严格对照 Plan 该节的文件表，没有扩大范围）：
+ *
+ * 1. `50_UIBridge.gs`：新增私有辅助函数 `_perfLog_(fnName, checkpoint,
+ *    t0)`，纯 `Logger.log`，不做任何判断、不改变任何返回值。在
+ *    `ui_createTask`/`ui_createProject`/`ui_createNote`/
+ *    `ui_updateTask`/`ui_updateNote` 五个函数里各自打点：start →
+ *    （update 两个函数多一层 before/after_existence_check）→
+ *    before/after_engine_call → end；catch 分支补一个 end_error。
+ *
+ *    **如实记录一处范围局限**：Plan 原文要求"Dedup 检查前后、Engine
+ *    写入前后、Event/Projection 前后"三段分别计时，但这五个函数从
+ *    UIBridge 层看，对 Engine 的 create 系/update 系函数的调用都是
+ *    一次不透明调用——Dedup（09_IdempotencyManager.gs/
+ *    08_DeduplicationEngine.gs）、Sheet 写入、Event 发布、Projection
+ *    全部在 Engine 内部完成，
+ *    UIBridge 看不到三者之间的边界。按 Plan 同一节"这个 Slice 刻意不
+ *    改动任何 Domain/Engine 层业务逻辑"+ Carson 本轮反复强调的"不要
+ *    顺手改无关文件"，本次没有进 Engine 文件内部加更细的埋点，只在
+ *    UIBridge 层能看到的粒度打点。结果是 before_engine_call →
+ *    after_engine_call 这一段是 Dedup+写入+Event+Projection 四者的
+ *    合计耗时，不是分离的三个数字。如果 Carson 实跑后发现这段合计
+ *    耗时是主要瓶颈、需要知道具体是哪一步慢，需要另外明确授权在对应
+ *    Engine 文件内部加埋点（同样只加日志）——这不是本次遗漏，是范围
+ *    边界的必然结果，已在 `_perfLog_` 函数头注释里同样记录。
+ *
+ * 2. `ui_index.html`：新增辅助函数 `_buildPendingCardEl_(label,
+ *    titleText)`，返回一个非交互的最小占位卡片（只有标题文本 + 一个
+ *    "Saving X…" 徽章，没有 Done/Edit/Convert 等任何按钮）。三处
+ *    Create 入口（`addNote`/`submitCreateTask`/`submitCreateProject`）
+ *    改成：点 Save 后立刻——插入占位卡片到列表最前面、清空/重置表单
+ *    全部字段、聚焦标题输入框；按钮保持 disabled 直到真实响应回来
+ *    （成功/失败两个 handler 里才重新启用，双击 Save 的第二次点击在
+ *    按钮重新启用之前不会发出）；成功时不单独移除占位卡片——
+ *    `loadTasks()`/`loadProjects()`/`loadNotes()`本身会整份重新渲染
+ *    列表，占位卡片作为旧内容一并被替换掉，天然满足"用真实数据替换"；
+ *    失败时（含服务端返回 `ok:false`和网络层失败两种情况）用既有的
+ *    `removeCard()`显式移除占位卡片，不会留下幽灵重复行。
+ *
+ *    **如实记录三处判断/取舍，供 Carson 复核**：
+ *
+ *    (a) 乐观 UI 只做了三个 Create 入口，没有碰
+ *    `ui_updateTask`/`ui_updateNote`对应的两个 Edit-in-place 表单。
+ *    理由：Plan 该节"清空表单+聚焦标题"、Test Gate"不留下幽灵重复
+ *    行"这些措辞在语义上对应的是"新增一行"的 Create 场景，Edit 场景
+ *    是"就地修改已存在的一行"，乐观回滚需要缓存修改前的完整字段状态
+ *    才能正确还原，跟 Create 场景的"移除临时行"是不同的机制，Plan
+ *    没有具体描述这套机制，本次没有自行发明。
+ *
+ *    (b) 占位卡片刻意做成非交互的最小展示，没有复用
+ *    `renderTasks`/`renderProjects`/`renderNotes`里那套完整卡片（各自
+ *    带 Done/Edit/Convert/Capture/AI 建议等 8~11 个事件监听器）。
+ *    理由：那些按钮全部需要一个真实的 task_id/project_id/note_id 才能
+ *    安全操作，乐观阶段还没有真实 ID，把这些按钮接到一个临时假 ID 上
+ *    是不安全的（比如点了 Done 会拿假 ID 去调真实的
+ *    `ui_completeTask`）。
+ *
+ *    (c) 失败时不回填表单字段原值（只清空+插占位卡+失败后移除占位
+ *    卡+提示错误，不恢复用户刚输入的内容）。理由：Plan 原文只写"移除
+ *    临时对象+提示错误"，没有要求回填；如果要回填，又要考虑"用户在
+ *    等待期间是否已经在清空后的输入框里重新打字"，回填会覆盖这部分
+ *    新输入——按字面范围做最简单的版本，没有额外发明这层没被要求的
+ *    行为。
+ *
+ *    (d) 【重要，需要 Carson 明确确认】开工前审计代码时，在
+ *    `submitCreateTask`函数里发现一条 Slice 1（2026-09-01）时期留下的
+ *    旧注释，原文大意是"这次 refocus 用的是真实 server 响应，不是
+ *    乐观猜测——更完整的感知延迟修复是 Slice 5，以实测计时数字为
+ *    门槛"，字面意思跟本节开头"再决定优化什么"那句一起看，可以理解成
+ *    "乐观 UI 本身也要等 Carson 拿到实测数字才能做"。本次没有采用这个
+ *    更保守的读法，理由：Plan 该节的文件表对 `ui_index.html`给出的是
+ *    一套具体、完整、自带 Test Gate 的乐观 UI 设计（临时对象/清空表单
+ *    /聚焦标题/成功替换/失败回滚/防双击），不是"等数字出来再设计"的
+ *    占位描述；而且乐观 UI 这个技术本身跟"瓶颈具体在哪"无关——它是
+ *    无论延迟来自哪一步都通用的感知延迟遮蔽手段，"再决定优化什么"
+ *    更可能指的是拿到数字之后可能触发的**后端**优化决策（比如本节
+ *    "哪些文件不能动"提到的 identity→行号旁路索引那类，需要独立 ADR）
+ *    ，不是这次前端优化本身。这条旧注释本身没有被修改或删除（继续
+ *    保留在 `submitCreateTask`里，作为历史记录），但如实记录这处解读
+ *    分歧，如果 Carson 认为应该是更保守的读法，这次的乐观 UI 部分需要
+ *    回退。
+ *
+ * Regression 检查：`09_IdempotencyManager.gs`/
+ * `08_DeduplicationEngine.gs`/`07_IdentityEngine.gs`三个文件本轮
+ * 零改动（grep 确认过没有被 touch）；`_perfLog_`/
+ * `_buildPendingCardEl_`都是新增函数，没有修改任何既有函数的判断
+ * 逻辑或返回值——五个被打点的 UIBridge 函数、三个被乐观化的 Create
+ * 入口，函数体内原有的每一处判断分支/返回结构原样保留，只插入了
+ * Logger.log 调用和（HTML 侧）DOM 操作。全项目 `.js`
+ * node --check 全部通过；`ui_index.html`的 `<script>`部分单独抽出
+ * 再次 node --check 通过。
+ *
+ * Scope Freeze 确认：本轮没有碰 Known Limitation「八」、Drag
+ * Ordering/UI-I6、Project Deadline Contract、source_domain
+ * migration、Quick Add、Note Create category enhancement、Note
+ * category 徽章、Telegram DashboardEngine、也没有做任何"通用
+ * conversion 抽象框架"或跟这次任务无关的重构。
+ *
+ * 验证状态：
+ *   - 全部新增/改动代码：node --check 通过（STATIC VERIFIED）。
+ *   - 计时日志本身是否正确覆盖各阶段边界、乐观 UI 成功/失败/双击场景
+ *     下是否真的按预期表现（尤其是"快速连续两次点击 Save 不会产生两
+ *     条真实重复记录"这条，纯代码审查只能确认按钮 disabled 逻辑没有
+ *     明显漏洞，无法在没有真实浏览器+GAS 部署的情况下模拟真实的两次
+ *     并发 RPC）：**LIVE TEST PENDING**，跟 Slice 3/4A/4B 同一个桶，
+ *     不是 PASS。
+ *   - 上面 (d) 提到的解读分歧：不是"未测试"，是需要 Carson 明确确认
+ *     的一次范围判断，优先级高于 LIVE TEST。
+ *
+ * 下一步：Carson 确认 (d) 的解读是否可接受；部署后跑真实计时（打开
+ * Executions/Stackdriver 看 `[Perf]`前缀日志）、记录真实数字到本文件
+ * 下一节；浏览器验证乐观 UI 三个场景（成功替换/失败回滚/双击不重复）；
+ * 视真实数字决定要不要开一条新 ADR 处理后端优化。Slice 3/4A/4B 与
+ * Slices 1/2 的既有验证状态本轮未变。
+ */
