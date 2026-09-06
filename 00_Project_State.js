@@ -1969,3 +1969,90 @@
  * 视真实数字决定要不要开一条新 ADR 处理后端优化。Slice 3/4A/4B 与
  * Slices 1/2 的既有验证状态本轮未变。
  */
+
+// ============================================================
+// 三十七、Carson 实测 Task→Note Conversion Gate：
+//         发现+修复一处测试数据 bug，记录一处新的结构性发现（2026-09-07）
+// ============================================================
+
+/**
+ * Carson 回家后跑了 `runTaskToNoteConversionGate()`，以及既有的
+ * Sprint 3 Acceptance Gate / UI Vertical Slice 2 Gate / UI-I1~I5
+ * Interactions Gate 三个回归套件。
+ *
+ * **回归结果（好消息）**：后三个既有套件全部 PASS（Sprint 3 的 Note
+ * Lifecycle/Business Rule/Bidirectional Conversion/Reminder Connector；
+ * UI Vertical Slice 2 的 Task↔Project 双向闭环 7 项；UI-I1~I5 的 14
+ * 项服务端契约）——确认 Slice 5 这轮对 `50_UIBridge.gs`/
+ * `ui_index.html`的改动（纯 Logger.log 埋点 + 乐观 UI）没有破坏任何
+ * 既有已验证行为。这几个套件本身不经过 UIBridge 层（直接调 Engine），
+ * 所以也没有覆盖到 Slice 5 自己的埋点/乐观 UI——那部分仍然是
+ * LIVE TEST PENDING，见上一节，本轮未变。
+ *
+ * **`runTaskToNoteConversionGate()`结果**：`testTaskToNote_
+ * BlockedFields_` FAIL 在 `[due_datetime]`这个子用例上——实际发生了
+ * Note 被创建（应该 blocked 而没有）；紧接着 `testTaskToNote_
+ * SuccessfulConversion_`刚开始就 "Execution cancelled"，后面
+ * `testTaskToNote_EventEmittedAndProjected_`/`_ReplayConsistency_`/
+ * `_Idempotent_`三个完全没有跑到，**保持 NOT TESTED，不是通过，也不是
+ * 失败，是完全未知**——不能因为第一个子测试的问题已经诊断清楚，就假设
+ * 后面几个也会过。
+ *
+ * **诊断 1（已 100% 用代码证实，已修复）**：`due_datetime` 子用例本身
+ * 的测试数据有问题，不是 `convertTaskToNote` 的 BLOCKED 逻辑坏了。
+ * `20_TaskEngine.gs`第 167 行 `due_datetime:
+ * _computeDueDatetime_(meta.due_date || '', meta.due_time || '')`——
+ * `due_datetime`永远是从 `due_date`+`due_time`派生的纯计算值，
+ * `createTask`根本不读取调用方直接传入的 `meta.due_datetime`。原用例
+ * 只传 `{ due_datetime: '2026-12-31T09:00:00' }`，没有同时传
+ * `due_date`/`due_time`，实际落地的 `due_datetime`是
+ * `_computeDueDatetime_('', '') = ''`（第 106 行：两个入参有一个空
+ * 就返回空字符串），BLOCKED 检查读到的是空值，四个 FORBIDDEN_FIELDS
+ * 全部落空，Note 被正常创建——这条链路（`FORBIDDEN_FIELDS`常量本身、
+ * `convertTaskToNote`里的检查代码、ADR-030 B2 的设计）**没有问题**，
+ * 问题在测试数据没有反映"due_datetime 是派生字段"这个事实。已在
+ * `54_Tests_TaskToNoteConversion.gs`把这条用例改成同时提供
+ * `due_date`+`due_time`（这条用例现在会同时触发 due_date/due_time/
+ * due_datetime 三者都进 blockedFields，架构上做不到真正的字段隔离），
+ * 并新增 `reasonContains: 'due_datetime'`断言，确认返回的 reason
+ * 里确实包含"due_datetime"这个字段名本身（不然这条用例只是 due_time
+ * 用例的重复，验证不到 FORBIDDEN_FIELDS 里 due_datetime 那一项）。
+ * node --check 通过。**这个修复后，这条子用例预期会变成 PASS，但
+ * 没有真实环境不能自己确认，仍然是 LIVE TEST PENDING，等 Carson 重跑。**
+ *
+ * **诊断 2（Carson 手工核对发现，倒查出一处新的结构性 gap，已记录
+ * 未修复）**：Carson 报告 due_datetime 那次误创建之后，源 Task 行里
+ * 没有 `converted_to_note_id`，Timeline 里也没有对应 entry。倒查
+ * `02_EventBus.gs`/`10_ProjectionEngine.gs`发现：`dispatch()`内部，
+ * 具体 projector（比如 `projectTaskConvertedToNote_`）一旦抛异常，
+ * 会被 `dispatch()`自己的外层 catch 吞掉（只 Logger.log，不重新抛出），
+ * 导致 `publish()`那层的 `event.projection_ok`永远读不到
+ * `false`——`20_TaskEngine.gs`里"projection_ok===false 就走
+ * materializeTaskRow_ 兜底"这个安全网因此永远不会被触发。这一点本身
+ * 是确定的代码事实（如实分级：**已证实**）；但这次具体是不是真的因为
+ * `projectTaskConvertedToNote_`内部抛了异常导致的，还需要 Carson
+ * 去 Apps Script Executions 翻这次运行的完整 Execution Log，找有没有
+ * 一行`[ProjectionEngine] ERROR dispatching TASK_CONVERTED_TO_NOTE:
+ * ...`——这一点目前是**最有解释力但尚未证实的假设**，如果这行日志
+ * 不存在，需要换个方向查（比如是不是核对了错误的 task_id）。已记录
+ * 为 `00_Known_Limitations.gs`「九」，DEFERRED，原因：这不是 Task→Note
+ * 自己的问题，是 `dispatch()`的通用错误处理缺口，switch 里列出的
+ * 每个事件类型理论上都有同样风险，修复涉及全项目共用的核心文件，
+ * 影响面远超本次验收范围，不在这次顺带修——等 Carson 看到后单独排期。
+ *
+ * Regression 检查：本节的修改只碰了
+ * `54_Tests_TaskToNoteConversion.gs`（测试数据）和
+ * `00_Known_Limitations.gs`（记录新发现）两个文件；`02_EventBus.gs`/
+ * `10_ProjectionEngine.gs`/`42_ConversionEngine.gs`/`20_TaskEngine.gs`
+ * 本节零改动（诊断 2 只是读代码找证据，没有动手改）。全部 `.js`
+ * node --check 通过。
+ *
+ * 下一步：(1) Carson 去 Executions 翻当次运行日志，确认「九」的假设
+ * 部分是否成立；(2) Carson 重跑 `runTaskToNoteConversionGate()`，
+ * 这次预期至少 `testTaskToNote_BlockedFields_`应该 PASS，且不要手动
+ * 中断，让 `_SuccessfulConversion_`/`_EventEmittedAndProjected_`/
+ * `_ReplayConsistency_`/`_Idempotent_`四个真正跑完，才能知道 Slice 4
+ * Part B 剩下这几项到底过不过；(3) Carson 决定「九」的优先级/排期。
+ * Slice 4 Part B 整体状态维持 **STATIC VERIFIED（含本次修复）,
+ * LIVE TEST PENDING**，不因为诊断出了原因就自行标成 PASS。
+ */

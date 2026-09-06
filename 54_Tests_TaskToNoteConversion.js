@@ -39,7 +39,23 @@ function testTaskToNote_BlockedFields_() {
   var cases = [
     { field: 'due_date',        meta: { due_date: '2026-12-31' } },
     { field: 'due_time',        meta: { due_date: '2026-12-31', due_time: '09:00' } },
-    { field: 'due_datetime',    meta: { due_datetime: '2026-12-31T09:00:00' } },
+    // 【2026-09-07 修复，Carson 实测发现】due_datetime 是
+    // 20_TaskEngine.gs `_computeDueDatetime_(due_date, due_time)` 的
+    // 纯派生值（第 167 行），createTask 不接受调用方直接传
+    // meta.due_datetime——传了也会被忽略，实际落地值等于
+    // _computeDueDatetime_('', '') = ''。原用例只传
+    // { due_datetime: '...' }，导致源 Task 的 due_date/due_time/
+    // due_datetime 三者全部是空字符串，four_forbidden_fields 检查
+    // 全部落空，Note 被错误地创建出来——这不是 convertTaskToNote 的
+    // BLOCKED 逻辑本身有问题，是这条用例的测试数据没有正确反映
+    // due_datetime 的派生关系。due_datetime 架构上无法脱离
+    // due_date/due_time 单独存在，做不到真正的字段隔离，这里改成
+    // 同时提供 due_date/due_time（这条用例会同时让 due_date/due_time/
+    // due_datetime 三者都进 blockedFields，不是只有 due_datetime）；
+    // 额外用 reasonContains 校验「due_datetime」这个字段名本身确实
+    // 出现在 blocked 原因里，否则这条用例就只是 due_time 用例的重复，
+    // 验证不到 FORBIDDEN_FIELDS 里 due_datetime 那一项本身。
+    { field: 'due_datetime',    meta: { due_date: '2026-12-31', due_time: '10:00' }, reasonContains: 'due_datetime' },
     { field: 'reminder_policy', meta: { reminder_policy: 'ON_TIME' } },
     { field: 'recurring',       meta: { recurring: 'Weekly' } }
   ];
@@ -53,6 +69,12 @@ function testTaskToNote_BlockedFields_() {
 
       if (!result.blocked) {
         Logger.log('❌ [' + c.field + '] 应该 blocked，实际: ' + JSON.stringify(result));
+        pass = false;
+        return;
+      }
+
+      if (c.reasonContains && String(result.reason || '').indexOf(c.reasonContains) === -1) {
+        Logger.log('❌ [' + c.field + '] blocked 了，但 reason 里没有出现 "' + c.reasonContains + '"，实际 reason: ' + result.reason);
         pass = false;
         return;
       }

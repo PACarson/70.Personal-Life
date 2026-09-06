@@ -13,7 +13,12 @@
  * 存在的直接目的是让 Claude/外部审计在做 Architecture Review 时，看到
  * 这里列出的行为，不要当成 bug 或遗漏去提修复建议。
  *
- * LAST_UPDATED: 2026-09-05 — 新增「八、convertTaskToProject"先建后查"
+ * LAST_UPDATED: 2026-09-07 — 新增「九、ProjectionEngine.dispatch()
+ * 内部异常被吞掉，导致 EventBus.publish() 的 projection_ok 不可靠」，
+ * 见该节，Carson 实测 Task→Note Conversion Gate 时的现象倒查代码
+ * 发现，未修复，仅记录。
+ *
+ * 2026-09-05 — 新增「八、convertTaskToProject"先建后查"
  * 顺序的潜在孤儿 Project 风险」，见该节，Slice 4 Part B 收尾复核时
  * 发现，未修复，仅记录。
  *
@@ -416,4 +421,85 @@
  * 视为一种需要处理的异常情况，而不是忽略。这个修复需要独立评估
  * 是否会影响任何依赖现有顺序的既有测试或行为，不应该在其它任务
  * 的顺带改动里完成。
+ */
+
+// ============================================================
+// 九、ProjectionEngine.dispatch() 内部异常被吞掉，
+//    导致 EventBus.publish() 返回的 projection_ok 不可靠
+// ============================================================
+
+/**
+ * 发现契机：Carson 实测运行 `runTaskToNoteConversionGate()`，
+ * `testTaskToNote_BlockedFields_`因为一条无关的测试数据错误（见
+ * `54_Tests_TaskToNoteConversion.gs`「due_datetime」用例，本次已修复，
+ * 详见 00_Project_State.gs 本次交付章节）意外走到了真正创建 Note + 标记
+ * 源 Task 的路径，暴露出：Carson 手工核对时发现源 Task 行没有被写入
+ * `converted_to_note_id`，Timeline 里也没有对应这个 Task 的 entry。
+ * 倒查 `02_EventBus.gs`/`10_ProjectionEngine.gs`代码发现的结构性问题，
+ * 独立于那条测试数据错误，如实记录：
+ *
+ * `10_ProjectionEngine.gs`的 `dispatch(event)`：
+ *   1. 外层有一个 try/catch（约第 120~171 行）。
+ *   2. try 内部先跑 switch，按 event.type 分派到具体的
+ *      `projectXxx_(event)`处理函数（比如
+ *      `projectTaskConvertedToNote_`），然后（不论上面 switch 走了哪个
+ *      case）无条件调用 `_appendTimelineEntry_(event)`——这一行在
+ *      switch **之后**、catch **之前**，本意是"两者要么都成功要么都不
+ *      发生，不会出现 Timeline 记了但主 Read Model 没写的不一致"（见
+ *      代码里 2026-07 的注释）。
+ *   3. 问题在于：如果具体的 `projectXxx_(event)`函数内部抛出异常，会
+ *      直接跳到外层 catch（约第 168~170 行），而这个 catch 只是
+ *      `Logger.log(...)`记录一行，**没有重新抛出**，`dispatch()`本身
+ *      没有返回值，调用方完全看不出这次 dispatch 内部其实失败了。
+ *   4. `02_EventBus.gs`的 `publish()`（约第 201~209 行）调用
+ *      `ProjectionEngine.dispatch(event)`时也包了一层 try/catch，本意
+ *      是"如果 dispatch 抛错，把 event.projection_ok 设成 false，让
+ *      调用方（比如 `20_TaskEngine.gs`的
+ *      `markTaskConvertedToNote_`/`markTaskConverted_`）做兜底直写"。
+ *      但因为上面第 3 点，`dispatch()`内部的异常从来不会真正传到
+ *      `publish()`这层的 try/catch——`event.projection_ok`永远保持
+ *      默认值 `true`，**不论具体 projector 内部是否真的抛了异常**。
+ *   5. 净效果：具体 projector（不只是
+ *      `projectTaskConvertedToNote_`，switch 里列出的每一个 case 都是
+ *      同样的风险）一旦内部抛错，(a) 对应的 Read Model 那次更新丢失，
+ *      (b) Timeline 那一行也不会出现（同一个 try 块，异常发生在
+ *      `_appendTimelineEntry_`之前），(c) 调用方以为
+ *      `projection_ok===true`、认为"没问题，不需要兜底"，`20_TaskEngine.
+ *      gs`里那些"projection_ok===false 就走 materializeTaskRow_ 兜底"
+ *      的安全网**不会被触发**——三重后果叠加在一起，且完全静默（只有
+ *      Logger.log 里一行不显眼的 ERROR，没有任何返回值/异常告诉最外层
+ *      调用方"这次操作其实不完整"）。
+ *
+ * 跟当前这次具体现象的关系（如实分级，不夸大）：
+ *   - **已用代码证实**：上面 1-5 点是`dispatch`/`publish`现在的真实
+ *     实现，不是猜测——即，"projection_ok 在 projector 内部抛错时不会
+ *     变成 false"这件事本身是确定的代码事实。
+ *   - **尚未证实、只是最有解释力的假设**：`projectTaskConvertedToNote_`
+ *     内部的 `upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, {...})`
+ *     这次具体调用是否真的抛了异常、抛的是什么错——这一步需要 Carson
+ *     去 Apps Script Executions 里翻这次跑
+ *     `testTaskToNote_BlockedFields_`时机对应的完整 Execution
+ *     Log（不是只看 Logger.log 摘要面板），找有没有一行
+ *     `[ProjectionEngine] ERROR dispatching TASK_CONVERTED_TO_NOTE: ...`
+ *     ——如果有，这条就是确凿证据，且错误信息会告诉我们
+ *     `upsertRowByKey_`具体为什么失败；如果完全没有这行，说明
+ *     `dispatch`那次实际上没抛错，"converted_to_note_id 缺失/Timeline
+ *     无 entry"这个现象需要往别的方向查（比如核对 Carson 当时看的
+ *     是不是正确的 task_id 那一行）。
+ *
+ * 本次未修复的原因：这不是 Task→Note 转换自己的问题，是
+ * `dispatch()`的通用错误处理结构性缺口，switch 里列出的每一种事件类型
+ * 理论上都有同样风险，修复涉及改动 `02_EventBus.gs`/
+ * `10_ProjectionEngine.gs`这两个被全项目所有 Create/Update/Convert
+ * 路径共用的核心文件，影响面远超本次 Task→Note 的验收范围，按 Carson
+ * 本轮"不做无关重构""独立发现不能顺手改"的一贯要求，只记录、不动手，
+ * 等 Carson 看到这条之后单独决定优先级和排期。
+ *
+ * 建议的修复方向（仅供参考，不是已批准的方案）：`dispatch()`的 catch
+ * 块除了 Logger.log，还应该把这次 dispatch 是否成功的信息真正传出去
+ * ——比如 `dispatch()`改成有返回值（成功/失败 + 错误信息），
+ * `publish()`根据这个返回值而不是"有没有异常逃逸到自己这层"来设置
+ * `projection_ok`。这个改动需要过一遍全部 event type 的既有测试
+ * （尤其是任何依赖"projection 失败时静默、不影响主流程"这个当前行为
+ * 的既有代码/测试），不应该在其它任务的顺带改动里完成。
  */
