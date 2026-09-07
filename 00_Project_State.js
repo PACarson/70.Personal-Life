@@ -2139,3 +2139,82 @@
  * 需要新的诊断，不能假设"补了列就一定全过"。Slice 4 Part B 状态维持
  * **STATIC VERIFIED（含两次修复）, LIVE TEST PENDING**。
  */
+
+// ============================================================
+// 三十九、NEXT SLICE DISCOVERY → 补齐 Slice 4 Part A
+//         (ADR-028) BLOCKED 路径缺失的自动化测试（2026-09-07）
+// ============================================================
+
+/**
+ * 背景：Carson 指示在他回家做 Slice 4B 真实表 migration + 重跑 Gate
+ * 之前，先做 NEXT SLICE DISCOVERY，找一个"Architecture Approved +
+ * Implementation Ready + 不依赖 LIVE TEST"的候选独立推进，并特别要求
+ * 以后任何涉及新字段的 Slice，必须追踪"Schema Definition → Setup/
+ * Migration Registry → Create/Update → Read → Projection → Replay →
+ * Identity → Tests"完整链路，不能只查前几层。
+ *
+ * 发现过程：
+ *   1. 重新扫描 00_ADR.gs 全部 ADR（001~030）——没有发现"已 Accepted
+ *      但代码尚未实现"的缺口（结论跟本文件更早一次扫描一致）。
+ *   2. 按 Carson 的 schema 教训，检查是否有其它字段跟
+ *      `converted_to_note_id`一样"代码写对了，但 Setup/Migration
+ *      Registry 没跟上"：核对`00_Sheets_Structure.gs`的完整 changelog
+ *      （一～十节，覆盖 v5.0/v5.1，加一条 v5.3 的
+ *      converted_to_note_id 补充）跟`15_Setup.gs`/
+ *      `11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs`里全部
+ *      `_ensureSheet_`初始表头 + 全部`_appendMissingColumns_`调用
+ *      （`NEW_TASK_COLUMNS`给 Tasks 系三表，`['identity']`给
+ *      BusinessRules/WorkflowTemplates）——**没有发现除
+ *      converted_to_note_id 之外的第二个同类缺口**。Notes 表已有的
+ *      `converted_to_type`/`converted_to_id`通用字段对（跟 Task 侧
+ *      "每种转换目标一个专属列"是 ADR-030 Context 里明确讨论过的两种
+ *      不同、刻意不同的设计，不是疏漏）。
+ *   3. UI V2 Implementation Plan 的 5 个 Slice 全部有代码了（Slice 5
+ *      是这次会话早些时候交付的）——这个 Plan 范围内没有"下一个
+ *      Slice"了。
+ *   4. `00_Roadmap.gs`（2026-07-13，明显早于整个 UI V2 系列，已经过期
+ *      未更新）里列的候选项（Recurring lifecycle 完善/TaskPriority
+ *      cache/Health Check split/EventDefinitions split/Domain OS
+ *      bridge/Monitoring/wrapper removal/testing coverage）全部带
+ *      "如果这个需求变得具体""如果观察到变贵"这类条件句，没有一条有
+ *      Plan 文档级别的具体文件表/Test Gate——不满足"已有明确
+ *      implementation contract"+"不需要新的产品决策"这两条门槛。
+ *   5. Sprint 4（AI）是 Carson 明确指示暂停的，不是"还没开始"，恢复
+ *      需要 Carson 自己解冻，不算候选。
+ *   6. 找到一个具体、范围小、零产品决策、零架构决策的候选：Slice 4
+ *      Part A（ADR-028）交付时（见本文件「三十二」节）自己记录的
+ *      "no automated test yet covers the new BLOCKED path itself"——
+ *      `36_Tests_Sprint3Acceptance.gs`的`testBidirectionalConversion_`
+ *      只覆盖了"没有 due_date 的 Task 成功转换成 Project"这条既有
+ *      路径（已确认 PASS），ADR-028 这次新加的"带 due_date/due_time
+ *      的 Task 应该被 BLOCKED"这个核心新行为，从交付到现在从来没有
+ *      被任何自动化测试验证过。这个候选唯一符合全部 8 条优先原则：
+ *      已有 Accepted ADR（028）、已有明确 implementation contract
+ *      （BLOCKED 检查的代码本身已经存在且逻辑清楚）、不需要新的产品
+ *      决策、不依赖 Project Deadline/Drag Ordering、不影响 Telegram、
+ *      不需要 source_domain migration、风险和范围都最小（新增一个
+ *      独立测试文件，不改动任何 Domain/Engine 业务逻辑代码）。
+ *
+ * 交付：新建`55_Tests_TaskToProjectBlocked.gs`，
+ * `testTaskToProject_DueDateBlocked_()`覆盖 due_date/due_time 各自
+ * 触发 BLOCKED，并对称于`54_Tests_TaskToNoteConversion.gs`的检查方式
+ * 确认 BLOCKED 后没有 Project 被创建、源 Task 没有被标记 CONVERTED。
+ * 单一入口`runTaskToProjectBlockedGate()`。刻意排除"已转换的 Task 之后
+ * 被打上 due_date、重新调用应该走幂等而不是 BLOCKED"这个更复杂的场景
+ * （42_ConversionEngine.gs 第 66-74 行注释提到的有意设计），因为验证
+ * 它需要先确认`updateTask`对已 CONVERTED 的 Task 是否允许写入，这一点
+ * 本次没有去核实——为了不重复这次 due_datetime 那种"测试假设了一个
+ * 没验证过的行为"的错误，本次只测最直接的触发条件，复杂场景留给
+ * Carson 需要时再单独授权。
+ *
+ * Regression 检查：本节只新增了一个文件，没有改动任何既有文件。
+ * 全部`.js`（含新文件）node --check 通过。
+ *
+ * 验证状态：**STATIC VERIFIED（逻辑审查+node --check），
+ * LIVE TEST PENDING**——需要 Carson 在真实环境跑一次
+ * `runTaskToProjectBlockedGate()`才能确认真的 PASS，不能自行标成
+ * LIVE PASS。
+ *
+ * 下一步：Carson 方便的时候（不必等这次 Slice 4B 的 migration，两者
+ * 互相独立）跑一次`runTaskToProjectBlockedGate()`。
+ */
