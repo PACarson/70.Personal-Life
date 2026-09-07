@@ -470,30 +470,46 @@
  *      Logger.log 里一行不显眼的 ERROR，没有任何返回值/异常告诉最外层
  *      调用方"这次操作其实不完整"）。
  *
- * 跟当前这次具体现象的关系（如实分级，不夸大）：
+ * 跟当前这次具体现象的关系（【2026-09-07 更新】Carson 重跑
+ * `runTaskToNoteConversionGate()`后，`testTaskToNote_
+ * SuccessfulConversion_`/`_EventEmittedAndProjected_`/
+ * `_ReplayConsistency_`/`_Idempotent_`四项全部 FAIL，`_
+ * EventEmittedAndProjected_`打印出的 Task 行 JSON 里连
+ * `converted_to_note_id`这个 key 都不存在——已经找到了更简单、更确定
+ * 的根因，见 00_Project_State.gs 对应章节和
+ * `15_Setup.gs`的`NEW_TASK_COLUMNS`修复：真正原因是`NEW_TASK_COLUMNS`
+ * 数组漏加了`converted_to_note_id`，导致真实 Spreadsheet 的 Tasks 表
+ * 压根没有这一列。**这个更简单的根因已经确认，不再需要下面这段假设
+ * 里说的"翻 Execution Log 找 ERROR dispatching 那一行"这个验证步骤
+ * 了**——保留下面这段是因为 (a) 上面 1-5 点描述的`dispatch()`吞异常
+ * 这件事本身仍然是真实、独立存在的代码事实，跟这次症状的真正原因
+ * 无关，但不代表它不存在；(b) `upsertRowByKey_`对一个不存在的列名
+ * 是**静默跳过、不抛异常**的（`05_SheetUtils.gs`的
+ * `if (headerMap.hasOwnProperty(key))`判断没有 else 分支）——所以这次
+ * 具体症状根本不会走到`dispatch()`的 catch 那一步，下面"已用代码证实"
+ * 那一条依然成立，但"最有解释力的假设"那一条对**这次**症状来说其实
+ * 不是真正机制，只是尚未找到真根因之前最合理的猜测。如实保留原文，
+ * 避免看起来像事后删掉了错误的推理）：
  *   - **已用代码证实**：上面 1-5 点是`dispatch`/`publish`现在的真实
  *     实现，不是猜测——即，"projection_ok 在 projector 内部抛错时不会
- *     变成 false"这件事本身是确定的代码事实。
- *   - **尚未证实、只是最有解释力的假设**：`projectTaskConvertedToNote_`
+ *     变成 false"这件事本身是确定的代码事实，跟这次症状是否是它导致的
+ *     无关，独立成立。
+ *   - **（已被更简单的根因取代，不再是活跃假设）**：`projectTaskConvertedToNote_`
  *     内部的 `upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, {...})`
- *     这次具体调用是否真的抛了异常、抛的是什么错——这一步需要 Carson
- *     去 Apps Script Executions 里翻这次跑
- *     `testTaskToNote_BlockedFields_`时机对应的完整 Execution
- *     Log（不是只看 Logger.log 摘要面板），找有没有一行
- *     `[ProjectionEngine] ERROR dispatching TASK_CONVERTED_TO_NOTE: ...`
- *     ——如果有，这条就是确凿证据，且错误信息会告诉我们
- *     `upsertRowByKey_`具体为什么失败；如果完全没有这行，说明
- *     `dispatch`那次实际上没抛错，"converted_to_note_id 缺失/Timeline
- *     无 entry"这个现象需要往别的方向查（比如核对 Carson 当时看的
- *     是不是正确的 task_id 那一行）。
+ *     这次具体调用是否真的抛了异常——现在已知答案是"不会"，因为该函数
+ *     对不存在的列名是静默跳过，不是抛异常，所以`dispatch()`那层的
+ *     catch 根本没有被触发的机会，`event.projection_ok`保持`true`是
+ *     "正常路径下的正确结果"，不是这次 bug 的成因。
  *
  * 本次未修复的原因：这不是 Task→Note 转换自己的问题，是
  * `dispatch()`的通用错误处理结构性缺口，switch 里列出的每一种事件类型
- * 理论上都有同样风险，修复涉及改动 `02_EventBus.gs`/
- * `10_ProjectionEngine.gs`这两个被全项目所有 Create/Update/Convert
- * 路径共用的核心文件，影响面远超本次 Task→Note 的验收范围，按 Carson
- * 本轮"不做无关重构""独立发现不能顺手改"的一贯要求，只记录、不动手，
- * 等 Carson 看到这条之后单独决定优先级和排期。
+ * 理论上都有同样风险（这个缺口本身仍然真实存在，只是不是这次症状的
+ * 成因——某个 projector 未来真的抛异常时，这个缺口会让`projection_ok`
+ * 误报成功，那是另一个独立的、依然待处理的风险），修复涉及改动
+ * `02_EventBus.gs`/`10_ProjectionEngine.gs`这两个被全项目所有
+ * Create/Update/Convert 路径共用的核心文件，影响面远超本次 Task→Note
+ * 的验收范围，按 Carson 本轮"不做无关重构""独立发现不能顺手改"的一贯
+ * 要求，只记录、不动手，等 Carson 看到这条之后单独决定优先级和排期。
  *
  * 建议的修复方向（仅供参考，不是已批准的方案）：`dispatch()`的 catch
  * 块除了 Logger.log，还应该把这次 dispatch 是否成功的信息真正传出去

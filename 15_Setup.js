@@ -44,7 +44,23 @@ var NEW_TASK_COLUMNS = [
   'converted_to_project_id', 'source_project_id', 'priority_ai_recommended',
   'creator', 'suggested_by', 'source_domain', 'source_module',
   'source_event_id', 'source_task_id', 'created_method', 'created_time',
-  'updated_time', 'decision_owner', 'approval_status'
+  'updated_time', 'decision_owner', 'approval_status',
+  // 【2026-09-07 修复，Carson 实测 Task→Note Gate 4/5 项失败倒查出的
+  // 根因】v5.3（ADR-2026-09-02-030，2026-09-04）在 20_TaskEngine.gs/
+  // 10_ProjectionEngine.gs/00_Sheets_Structure.gs 里都正确加了
+  // converted_to_note_id 这个字段的读写逻辑和 schema 文档，但唯独漏了
+  // 在这个数组（真正驱动 migrateSchemaPersonalLifeOS()/
+  // repairSheetHeaders() 往真实 Spreadsheet 补列的地方）加上它——导致
+  // 代码一直在读写一个真实表里根本不存在的列：upsertRowByKey_ 对不存在
+  // 的列名静默跳过（不报错，见 05_SheetUtils.gs 的 for...in
+  // headerMap.hasOwnProperty 判断），getHeaderMap_ 驱动的读取自然也
+  // 拿不到这个字段——两者叠加，表现为"转换后 status 正确变成
+  // CONVERTED，但 converted_to_note_id 读回来是 undefined"。补上这一
+  // 项之后，Carson 需要在真实环境跑一次 migrateSchemaPersonalLifeOS()
+  // （幂等，只在表尾追加缺失列，不动现有数据）才会真正在 Tasks/
+  // ActiveTasks/ArchiveTasks 三张表尾部补上这一列——这一步只有 Carson
+  // 能做，改这个数组本身不会自动生效在他的真实 Spreadsheet 上。
+  'converted_to_note_id'
 ];
 
 function setupSheets() {

@@ -2056,3 +2056,86 @@
  * Slice 4 Part B 整体状态维持 **STATIC VERIFIED（含本次修复）,
  * LIVE TEST PENDING**，不因为诊断出了原因就自行标成 PASS。
  */
+
+// ============================================================
+// 三十八、根因确认 + 修复：NEW_TASK_COLUMNS 漏了
+//         converted_to_note_id，真实 Spreadsheet 缺这一列（2026-09-07）
+// ============================================================
+
+/**
+ * Carson 按上一节的要求重跑了一次 `runTaskToNoteConversionGate()`，
+ * 没有中断，五个测试全部跑完：
+ *
+ *   ✅ testTaskToNote_BlockedFields_ PASS
+ *      （确认上一节对 due_datetime 测试数据的修复有效）
+ *   ❌ testTaskToNote_SuccessfulConversion_ FAIL
+ *      —— 源 Task 的 converted_to_note_id 应该等于新 Note 的
+ *      note_id，实际 undefined
+ *   ❌ testTaskToNote_EventEmittedAndProjected_ FAIL
+ *      —— 打印出的 Task 行 JSON 里，status 正确变成了 CONVERTED，但
+ *      **JSON 里连 converted_to_note_id 这个 key 都不存在**（对比同一
+ *      行 JSON 里 converted_to_project_id 是存在的，值是空字符串）
+ *   ❌ testTaskToNote_ReplayConsistency_ FAIL
+ *      —— 重放（deriveFromEvent，纯内存计算）算出来的
+ *      converted_to_note_id 跟实时 projection（落盘再读回）的值不一致
+ *   ❌ testTaskToNote_Idempotent_ FAIL
+ *      —— 第二次转换本该走"已经转换成 Note，直接返回既有 Note"分支，
+ *      实际走成了`invalid_state:true`+"已经转换过（转去了
+ *      Project）"——因为 `convertTaskToNote`判断"已经转成 Note 还是
+ *      已经转成 Project"就是靠检查`sourceTask.converted_to_note_id`
+ *      是否有值，读不到就默认判成"转去了 Project"
+ *
+ * **根因确认（不再是假设，四个 FAIL 用同一个原因全部解释）**：
+ * `15_Setup.gs`的`NEW_TASK_COLUMNS`数组（真正驱动
+ * `migrateSchemaPersonalLifeOS()`/`repairSheetHeaders()`往真实
+ * Spreadsheet 补列的唯一权威来源）在 v5.3/ADR-2026-09-02-030
+ * （2026-09-04）那次交付里漏加了`converted_to_note_id`——
+ * `20_TaskEngine.gs`/`10_ProjectionEngine.gs`/`00_Sheets_Structure.gs`
+ * 三个文件都正确写了这个字段的读写逻辑和 schema 文档，唯独这个真正
+ * 落到真实表头上的数组没跟上。后果：Carson 的真实 Tasks/ActiveTasks/
+ * ArchiveTasks 表压根没有这一列。`05_SheetUtils.gs`的
+ * `upsertRowByKey_`对不存在的列名是**静默跳过、不抛异常**（
+ * `for...in` + `headerMap.hasOwnProperty(key)`判断没有 else 分支）——
+ * 这也是为什么`status: 'CONVERTED'`能正确写入（那一列存在）但
+ * `converted_to_note_id`悄无声息地丢失（那一列不存在，既不报错也不
+ * 提醒）。四个 FAIL 全部是这一件事的直接或间接后果，不是四个独立
+ * 问题。
+ *
+ * **对上一节记录的更正**：上一节把这个现象归因假设成
+ * `ProjectionEngine.dispatch()`吞异常导致`projection_ok`不可靠（见
+ * `00_Known_Limitations.gs`「九」），当时明确标注是"尚未证实的假设"。
+ * 现在确认：`upsertRowByKey_`对缺失列是静默跳过而不是抛异常，所以
+ * `dispatch()`的 catch 那条路径这次根本没被触发——「九」描述的
+ * `dispatch()`吞异常这件事本身仍然是真实存在的代码事实（对某个
+ * projector 未来真的抛异常的场景依然成立、依然是独立风险），但**不是
+ * 这次症状的成因**。已经在「九」原文基础上补充更正说明，没有删除
+ * 原文（保留错误假设的记录本身也是这个项目的规范）。
+ *
+ * **修复**：`15_Setup.gs`的`NEW_TASK_COLUMNS`数组末尾追加
+ * `'converted_to_note_id'`。这个数组同时被
+ * `setupSheets()`（全新安装用）、`repairSheetHeaders()`、
+ * `11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs`的
+ * `migrateSchemaPersonalLifeOS()`（已有部署补列用，幂等，只在表尾
+ * 追加缺失列，不动现有数据）共用，改这一处会同时修复全部三条路径。
+ * node --check 通过。
+ *
+ * **⚠️ 这一步改完代码不会自动生效——Carson 需要在真实环境手动跑一次
+ * `migrateSchemaPersonalLifeOS()`**（Apps Script 编辑器里选中这个
+ * 函数执行），确认 Tasks/ActiveTasks/ArchiveTasks 三张表尾部真的多出
+ * 了`converted_to_note_id`这一列，才能重跑 Gate 验证。这一步没有任何
+ * 环境依赖之外的风险（`_appendMissingColumns_`只在表尾追加，不重排/
+ * 不覆写已有列），但只有 Carson 能在真实 Spreadsheet 上执行。
+ *
+ * Regression 检查：本节只改了`15_Setup.gs`（数组追加一项）和
+ * `00_Known_Limitations.gs`（更正说明，非删除），没有改动
+ * `20_TaskEngine.gs`/`10_ProjectionEngine.gs`/`02_EventBus.gs`/
+ * `42_ConversionEngine.gs`/`05_SheetUtils.gs`——这几个文件之前的读写
+ * 逻辑本身是对的，问题只在 schema 补列这一步缺了一项。全部`.js`
+ * node --check 通过。
+ *
+ * 下一步：Carson 跑一次`migrateSchemaPersonalLifeOS()`补列，确认列
+ * 已经出现，然后重跑`runTaskToNoteConversionGate()`——这次预期
+ * 五项应该全部 PASS；如果补列之后还有失败，说明还有其它未知问题，
+ * 需要新的诊断，不能假设"补了列就一定全过"。Slice 4 Part B 状态维持
+ * **STATIC VERIFIED（含两次修复）, LIVE TEST PENDING**。
+ */
