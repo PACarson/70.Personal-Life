@@ -381,6 +381,11 @@
 //    状态"的顺序——潜在孤儿 Project 风险，本次审计发现，未修复
 //    （2026-09-05 记录，Slice 4 Part B 收尾复核时发现）
 // ============================================================
+//
+// 【STATUS UPDATE, 2026-09-08：RESOLVED（代码层面；LIVE verification
+//  PENDING，见本节末尾单独记录，不改动下面 2026-09-05 写的原始分析，
+//  那部分保留作为问题本身的历史记录）】
+//
 
 /**
  * 现状（已核实，不是猜测）：`convertTaskToProject`的顺序是——幂等检查
@@ -421,6 +426,27 @@
  * 视为一种需要处理的异常情况，而不是忽略。这个修复需要独立评估
  * 是否会影响任何依赖现有顺序的既有测试或行为，不应该在其它任务
  * 的顺带改动里完成。
+ *
+ * ── RESOLUTION, 2026-09-08（Carson 明确授权的独立修复窗口，不是
+ *    顺带完成）──────────────────────────────────────────────────
+ * Known Limitation 8
+ * Status: RESOLVED（代码层面）
+ * Change: `convertTaskToProject`按上面"建议的修复方向"原样实施——
+ *   已转换成 Note 的 Task、终态 Task，现在都在创建 Project 之前就被
+ *   挡下来（照抄 `convertTaskToNote` 的 pre-check 结构），并接住
+ *   `markTaskConverted_`的返回值作为防御性兜底。完整 Before/After
+ *   分析、逐条 regression 核对见 `00_Project_State.gs` 对应交付章节，
+ *   不在这里重复。
+ * Reason: 消除本节上面描述的孤儿 Project / 重复创建风险（含分析阶段
+ *   另外发现的"已转 Note 又被转 Project"这一同根同构场景）。
+ * Verification:
+ *   Static: PASS（node --check 通过，既有 Task→Project 测试逐条静态
+ *     核对过不受影响，见 Project_State）
+ *   LIVE: PENDING（Carson 本轮在外，没有真实 GAS/Sheets/browser 环境，
+ *     不能自行标成 LIVE VERIFIED）
+ * 只要 LIVE verification 没做完，`convertTaskToProject`整体状态就是
+ * **STATIC VERIFIED / LIVE TEST PENDING**，跟其它任何一次代码交付
+ * 同一套纪律，不因为"是修复"就特殊处理。
  */
 
 // ============================================================

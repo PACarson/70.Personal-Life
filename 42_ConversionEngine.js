@@ -47,7 +47,12 @@ var ConversionEngine = (function () {
    *                                execution_mode }
    * @param {string} chatId
    * @returns {{project:object, already_converted?:boolean}|{not_found:true}|
-   *           {blocked:true, reason:string}}
+   *           {blocked:true, reason:string}|
+   *           {invalid_state:true, current_status:string, reason:string, project?:object}}
+   *   【2026-09-08，Known Limitation 8 修复】新增 invalid_state 分支：
+   *   已转换成 Note、或终态 Task 会在创建 Project 之前被挡下来返回
+   *   这个形态；`project` 字段只在极罕见的并发防御性分支里才会跟
+   *   invalid_state 一起出现（见函数体内注释）。
    *   【2026-09-04 更正】此前这里写的是 {invalid_state:true,...}——查了一遍
    *   代码，这个函数从来没有返回过 invalid_state，是文档跟代码从一开始
    *   就没对上，不是这次改动引入的偏差。新增的 blocked 是这次 Slice 4
@@ -57,10 +62,34 @@ var ConversionEngine = (function () {
     var sourceTask = TaskQueryEngine.getTask(taskId, chatId);
     if (!sourceTask) return { not_found: true };
 
+    var currentStatus = String(sourceTask.status || '').toUpperCase();
+
     // 幂等：已经转换过，直接返回既有目标（不重复创建）
-    if (String(sourceTask.status || '').toUpperCase() === 'CONVERTED' && sourceTask.converted_to_project_id) {
-      var existingProject = ProjectQueryEngine.getProject(sourceTask.converted_to_project_id);
-      return { project: existingProject, already_converted: true };
+    if (currentStatus === 'CONVERTED') {
+      if (sourceTask.converted_to_project_id) {
+        var existingProject = ProjectQueryEngine.getProject(sourceTask.converted_to_project_id);
+        return { project: existingProject, already_converted: true };
+      }
+      // 【Known Limitation 8 修复, 2026-09-08，见 00_Known_Limitations.gs
+      // 「八」】已经转换过、但不是转成 Project（这份代码库里"已转换"
+      // 只有 Task→Project 或 Task→Note 两条路，status 都共用同一个
+      // 'CONVERTED'，靠各自的 converted_to_X_id 区分是哪一种）——照抄
+      // `convertTaskToNote` 190-196 行同一个结构，在这里提前挡住，不是
+      // 等 Project 建出来以后才让 `markTaskConverted_` 发现矛盾。
+      return { invalid_state: true, current_status: currentStatus,
+        reason: 'Task 已经转换过（转去了 Note），不能再转换成 Project' };
+    }
+
+    // 【Known Limitation 8 修复, 2026-09-08】"只有非终态 Task 才能转换"
+    // 这条前置条件，此前只在 `markTaskConverted_` 内部检查、且发生在
+    // Project 已经创建之后——跟 `markTaskConverted_`（本文件下面
+    // 471 行起）、`convertTaskToNote`（本文件 202-206 行）同一份
+    // terminalStatuses 清单，原样搬到这里，创建 Project 之前先挡住，
+    // 不等 Project 建出来才发现不该建。
+    var terminalStatuses = ['DONE', 'CANCELLED', 'NOT_SELECTED'];
+    if (terminalStatuses.indexOf(currentStatus) !== -1) {
+      return { invalid_state: true, current_status: currentStatus,
+        reason: '只有非终态的 Task 才能转换为 Project' };
     }
 
     // 【Slice 4 Part A, 2026-09-04，ADR-2026-09-02-028 + Business_Rules
@@ -82,11 +111,13 @@ var ConversionEngine = (function () {
 
     projectMeta = projectMeta || {};
 
-    // 【失败恢复策略，见 00_Business_Rules.gs「一」】先创建不可逆的
-    // 目标 Project，再标记源 Task 为 CONVERTED——如果第二步失败，
-    // 源 Task 仍然完好，不会出现"源丢了目标也没建成"的情况；下次
-    // 幂等检查会发现 Project 已存在（走上面的分支），只需要补一次
-    // markTaskConverted_ 即可收敛。
+    // 【失败恢复策略，见 00_Business_Rules.gs「一」，本次未改动这个
+    // 既有顺序本身】先创建不可逆的目标 Project，再标记源 Task 为
+    // CONVERTED——如果第二步失败，源 Task 仍然完好，不会出现"源丢了
+    // 目标也没建成"的情况；下次重试时，`ProjectEngine.createProject`
+    // 自己的 identity/去重会认出这是同一次转换，不会建出第二个
+    // Project。上面两条新增的 pre-check 只是在"要不要开始建"这一步
+    // 之前多挡两层，不影响这里的失败恢复策略。
     var project = ProjectEngine.createProject(sourceTask.title, {
       description:       projectMeta.description || sourceTask.notes || '',
       parent_project_id: projectMeta.parent_project_id || '',
@@ -104,7 +135,20 @@ var ConversionEngine = (function () {
                                                        // 自己会 fallback 成 chatId）。
     }, chatId || sourceTask.chat_id);
 
-    TaskEngine.markTaskConverted_(taskId, project.project_id, chatId || sourceTask.chat_id);
+    var markResult = TaskEngine.markTaskConverted_(taskId, project.project_id, chatId || sourceTask.chat_id);
+
+    // 【Known Limitation 8 修复, 2026-09-08】上面两条 pre-check 理论上
+    // 已经排除了 `markTaskConverted_` 会返回 `invalid_state` 的全部
+    // 已知场景；这里接住返回值纯粹是防御性的（比如两次读取之间源
+    // Task 被并发改动这种边缘情况——`markTaskConverted_` 自己会重新
+    // 读一遍最新状态，不是信任这里的旧快照）。真的发生时，把已经建出来
+    // 的 Project 一起带出去、明确标成 invalid_state，不假装成功，也不
+    // 在这里发明新的 rollback/取消逻辑——按「八」"建议的修复方向"原文，
+    // 只是"视为需要处理的异常情况"，不是要自动撤销已经创建的 Project。
+    if (markResult && markResult.invalid_state) {
+      return { invalid_state: true, current_status: markResult.current_status,
+        reason: markResult.reason, project: project };
+    }
 
     return { project: project };
   }

@@ -2297,3 +2297,161 @@
  * migration、Task→Project Blocked Gate 都互相独立，顺序不重要）。
  * **STATIC VERIFIED，LIVE TEST PENDING，没有自行标成 PASS。**
  */
+
+// ============================================================
+// 四十、NEXT SLICE DISCOVERY（第三轮）：系统扫描后确认 Case C，
+//       没有可以直接实施的候选，停在 Decision Gate（2026-09-07）
+// ============================================================
+
+/**
+ * Carson 明确要求"不要因为 Note Edit 还没 LIVE TEST 就停下来"，继续做
+ * 下一轮 NEXT SLICE DISCOVERY。这次比前两轮（分别找到 Slice 4A BLOCKED
+ * 测试缺口、Note Edit 测试缺口）扫得更systematic，结论是**这次真的
+ * 没有找到可以直接实施的候选——Case C，不是 Case A/B**。扫描过程
+ * 如实记录，避免未来窗口重复做同样的搜索：
+ *
+ *   1. 全部 30 条 ADR（001-030）Status 重新逐条核对：除 006
+ *      （Superseded）、026（Proposed，Drag Ordering，冻结中）之外，
+ *      全部是 Accepted，且逐一确认对应实现都已经存在于当前代码里——
+ *      没有"Accepted 但代码没写"的漏项。028 的 Status 备注里还留着
+ *      "对应的代码尚未实现"这句话，那是 ADR 刚写完、Slice 4A 还没
+ *      开工时的历史记录，现在已经过时（Slice 4A 早就 LIVE VERIFIED
+ *      了）——这只是一处文字没跟上的小瑕疵，不构成"未实现"，按 Carson
+ *      本轮"不要顺手扩大 scope"的要求，没有去改这一处文字。
+ *   2. `00_File_Map.js`：grep 了 TODO/未完成/待实现/Not Yet/尚未/待补
+ *      等关键词，零匹配。
+ *   3. `00_Roadmap.js`：内容还是 2026-07-13 的旧快照，列的全部是"如果
+ *      某个需求变得具体"这类条件句（Recurring lifecycle 收尾、
+ *      TaskPriority 缓存、Health Check 拆分等），不满足"scope 已经
+ *      明确、不需要新产品判断"这条门槛，不算候选。
+ *   4. UI V2 Implementation Plan 的 5 个 Slice：全部代码完成，Slice
+ *      1/2/4A/4B 已经 LIVE VERIFIED（4B 差 confirmation-cancel 这一项
+ *      纯前端行为待人工验证），Slice 3/5 STATIC VERIFIED/LIVE TEST
+ *      PENDING——**没有第 6 个 Slice，Plan 本身已经用完**。
+ *   5. 逐一核对`50_UIBridge.gs`全部 21 个`ui_*`函数有没有被任何测试
+ *      文件引用过：发现`ui_getTaskDashboard`/`ui_convertTaskToNote`
+ *      看起来是 0——但核实后这不是真的缺口，是这个项目一直以来的
+ *      测试哲学：`54_/55_/56_`这几个 Gate 文件全部只测 Engine 层（
+ *      `ConversionEngine.convertTaskToNote`/`NoteEngine.updateNote`
+ *      本身），UIBridge 那一层薄封装统一交给人工浏览器验证，不是
+ *      自动化测试的责任——这是既有的、一致的设计选择，不是本次发现的
+ *      新缺口，所以没有为`ui_*`这一层补测试。
+ *   6. Known Limitations「一」~「九」逐条重新过了一遍：一~七是描述性
+ *      的"刻意不做/暂未暴露"边界，不是可实施的工作项；八、九都是
+ *      需要 Carson 决定优先级/是否修的风险记录，本身不能直接实施。
+ *
+ * **结论**：不存在同时满足"Architecture Approved + Implementation
+ * Ready + Independent + No new decision required"的候选。现在往前推进
+ * 的每一条路径，都会碰到需要 Carson 做产品/架构判断的节点——具体是
+ * 哪几条、缺哪个决定，见本文件之外这次给 Carson 的 Decision Gate
+ * 报告（八、九、Drag Ordering ADR-026、Project Deadline Contract
+ * 四项，逐项列了现有证据/选项/取舍），不在这里重复。
+ *
+ * 本节没有产生任何代码改动——按 Carson"没有合适的成熟 Slice 就不要
+ * 为了继续而创造工作"的明确要求，纯粹是扫描+记录结论，停在
+ * Decision Gate。
+ */
+
+// ============================================================
+// 四十一、Known Limitation 8 修复交付（受控的小范围修复，
+//         不是新 Slice discovery）（2026-09-08）
+// ============================================================
+
+/**
+ * Carson 在 Decision Gate 之后明确选定「八」，给了一套非常严格的
+ * 受控修复流程（PRE-CHANGE ANALYSIS → Minimum Safe Change →
+ * Idempotency/Duplicate Safety 验证 → 明确的 Scope Lock/STOP
+ * CONDITIONS）。完整 Pre-Change Analysis（A-E）已经在对话里输出过，
+ * 这里记录结论和实施细节，不重复整段分析。
+ *
+ * **Current behavior（修复前）**：`convertTaskToProject`顺序是
+ * not_found → 幂等（一行合并判断 `status==='CONVERTED' &&
+ * converted_to_project_id`）→ BLOCKED（due_date 系列）→ 创建
+ * Project → `markTaskConverted_`（内部才检查"已转别处"和"终态"，
+ * 返回 invalid_state）→ 直接返回 `{project}`，不检查
+ * `markTaskConverted_`的返回值。
+ *
+ * **分析阶段发现的第二个同根场景（原始「八」文字没有明确写，但是
+ * 同一个缺陷形状，如实记录，没有自行发明新问题）**：现有幂等检查是
+ * `&&`合并判断——如果 Task 已经转换成了 Note（status='CONVERTED'，
+ * converted_to_project_id 是空），这一行判断为 false，会穿透到创建
+ * Project 那一步，建出第二个孤儿 Project（这次是"跟另一种转换类型
+ * 冲突"，不是「八」原文的"终态"场景，但触发机制和后果完全一样）。
+ *
+ * **Change Made**：
+ *   1. 把原来一行式幂等判断拆成两支（照抄`convertTaskToNote`
+ *      190-196 行结构）：CONVERTED 且有 converted_to_project_id →
+ *      原样返回既有 Project；CONVERTED 但没有（说明转去了 Note）→
+ *      新增分支，创建前直接返回 invalid_state。
+ *   2. 紧接着新增终态检查，复用`markTaskConverted_`/
+ *      `convertTaskToNote`已经在用的同一份
+ *      `['DONE','CANCELLED','NOT_SELECTED']`，创建 Project 之前先
+ *      挡住。
+ *   3. 接住`markTaskConverted_`的返回值，真的收到 invalid_state 时
+ *      （只可能是两次读取之间源 Task 被并发改动这种边缘情况）把已经
+ *      建出来的 Project 一起带出去，不假装成功，不发明 rollback。
+ *   4. 更新了函数头 JSDoc 的 `@returns`，补上新增的 invalid_state
+ *      分支（避免重复此前"文档跟代码没对上"的问题）。
+ *   create→mark 这个既有顺序、`00_Business_Rules.gs`「一」的失败恢复
+ *   策略本身，都没有改动——两条新 pre-check 只是在"要不要开始建"这
+ *   一步之前多加了两层判断。
+ *
+ * **Files Changed**：
+ *   - `42_ConversionEngine.js`（convertTaskToProject 函数体 + JSDoc）
+ *   - `57_Tests_TaskToProjectPrecheck.js`（新建）
+ *   - `00_Known_Limitations.js`（「八」status update，append，未重写
+ *     原有历史分析）
+ *   - `00_Project_State.js`（本节）
+ *
+ * **Files NOT Changed（明确确认）**：`02_EventBus.js`、
+ * `10_ProjectionEngine.js`、dispatch() 错误处理、projection_ok
+ * 契约、Project schema、Project Deadline Contract、due_date/
+ * due_time/due_datetime 语义、ADR-026、Drag Ordering/UI-I6、
+ * `convertTaskToNote`本身（只读参照，没有改它）、Task→Note
+ * conversion contract、Known Limitation 9（本轮保持原状）、任何其它
+ * 已经 LIVE VERIFIED 的 Slice、UI V2 architecture。
+ *
+ * **Tests（Static/逐条重读代码核对，不是真实执行）**：
+ *   - 新增 `57_Tests_TaskToProjectPrecheck.js` 三个测试：终态 Task
+ *     被挡且零孤儿 Project（用
+ *     `ProjectQueryEngine.getProjects(chatId,{source_task_id})`
+ *     直接查，不是只看返回值）、已转 Note 的 Task 被挡且零孤儿
+ *     Project 且原有 converted_to_note_id 不被覆盖、正常路径最小
+ *     复核。node --check 通过。
+ *   - 既有 `36_Tests_Sprint3Acceptance.testBidirectionalConversion_`
+ *     的首次转换 + 重复转换幂等断言：逐行核对过，重复调用会在
+ *     （没有移动位置的）既有幂等检查那一步短路返回，根本不会走到
+ *     新加的两条 pre-check，结论不受影响。
+ *   - 既有 `38_Tests_UIBridge.js`的
+ *     `testUIBridge_ConvertTaskToProject_Success_`/
+ *     `_InvalidOrMissingId_`/`_NoDuplicateOnRetry_`：同一个理由，
+ *     全部逐条核对过不受影响。
+ *   - 既有 `55_Tests_TaskToProjectBlocked.js`：用的是全新、非终态、
+ *     未转换过的测试 Task，会先经过两条新 pre-check（都通过）再到
+ *     BLOCKED 检查，结论不受影响。
+ *   - **以上全部是这次对话里的静态代码重读，不是真实跑过——Carson
+ *     要求的"Existing Task→Project tests 全部跑"这一步，实际执行
+ *     需要 Carson 在真实 GAS 环境完成，见下面 LIVE 部分。**
+ *
+ * **Verification Status**：**STATIC VERIFIED / LIVE TEST PENDING**。
+ * 没有自行标成 LIVE VERIFIED。
+ *
+ * **Remaining Known Limitations**：Known Limitation 9 保持原状，
+ * 未处理。ADR-026（Drag Ordering）保持 Proposed，本轮未变。Project
+ * Deadline Contract 保持等待产品决策，本轮未变。
+ *
+ * **Scope Integrity**：这次修改有没有碰任何无关的 architecture/
+ * contract？**没有**——只碰了`42_ConversionEngine.gs`一个函数体+
+ * 一个新测试文件+两个 governance 文档的必要 append/status update。
+ *
+ * 下一步（Carson 回到真实环境后）：按顺序跑
+ * `runTaskToProjectPrecheckGate()`（新测试）→
+ * `testBidirectionalConversion_`/`38_Tests_UIBridge`相关三个/
+ * `runTaskToProjectBlockedGate()`（既有回归）→ 全部 PASS 才能把
+ * Known Limitation 8 和这次改动本身标成 LIVE VERIFIED；任何一项
+ * FAIL 都应该标 BLOCKED 并说明 failed gate/actual/expected/是否
+ * 需要 rollback，不能自行判断"应该没问题"。
+ *
+ * 完成 Known Limitation 8 这一项到此为止——按 Carson 的 FINAL RULE，
+ * 本节不主动寻找或实施下一个问题，停在这里等待下一步决策。
+ */
