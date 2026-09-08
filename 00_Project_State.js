@@ -2218,3 +2218,82 @@
  * 下一步：Carson 方便的时候（不必等这次 Slice 4B 的 migration，两者
  * 互相独立）跑一次`runTaskToProjectBlockedGate()`。
  */
+
+// ============================================================
+// 三十九、Migration 完成 + 两个 Gate 全过 + 三个回归套件全过
+//         + 发现并补齐 Slice 3 的同款测试覆盖缺口（2026-09-07）
+// ============================================================
+
+/**
+ * Carson 跑了`migrateSchemaPersonalLifeOS()`，日志确认 Tasks/
+ * ActiveTasks/ArchiveTasks 三张表都追加成功了`converted_to_note_id`
+ * 这一列，人工在表头肉眼确认过。随后：
+ *
+ *   ✅ `runTaskToNoteConversionGate()` —— 5 项全部 PASS（Blocked
+ *      Fields / Successful Conversion / Event Emitted And Projected /
+ *      Replay Consistency / Idempotent Re-conversion）。三十八节的
+ *      根因诊断（NEW_TASK_COLUMNS 漏列）到此完全验证正确——补列之后
+ *      之前失败的 4 项全部转 PASS，没有出现"补列之后还有别的问题"的
+ *      情况。
+ *   ✅ `runTaskToProjectBlockedGate()` —— 新写的 55_
+ *      Tests_TaskToProjectBlocked.gs 也 PASS。
+ *   ✅ `runSprint3AcceptanceGate()` / `runUIBridgeSlice3Gate()` /
+ *      `runUIBridgeInteractionsGate()` —— 三个既有回归套件全部 PASS。
+ *
+ * **状态更新**：
+ *   - Slice 4B（Task→Note）：除第 14 项（confirmation cancel 零
+ *     mutation，纯前端行为，Gate 自己的开场白就说明了不在覆盖范围内，
+ *     需要人工浏览器验证）之外，**转为 LIVE VERIFIED**。
+ *   - Slice 4A 的 BLOCKED 路径（这次新补的测试）：**转为 LIVE
+ *     VERIFIED**。
+ *   - Slice 5（Performance）：状态不变，仍然 LIVE TEST PENDING——
+ *     以上全部 Gate 都是直接调 Engine，不经过 UIBridge 的
+ *     create/update 入口，测不到 Slice 5 自己的埋点/乐观 UI。
+ *
+ * **重要澄清，避免以后混淆（如实记录一次自己的核实过程）**：收到
+ * "runUIBridgeSlice3Gate 全部通过"的消息后，第一反应是这是不是意味着
+ * "UI V2 Implementation Plan 的 Slice 3（Note Edit）"也验证过了——
+ * 去看了`38_Tests_UIBridge.gs`里这个函数的真实内容，发现完全不是：
+ * 这个"Slice 3"是另一条更早的、不同的编号体系（"UI Vertical Slice"
+ * 系列，跟"UI Vertical Slice 2 Gate"是同一条线索），测的是
+ * BusinessRule/WorkflowTemplate/Workflow Instance 三层模型的
+ * Capture Project as Template / Instantiate Template 闭环，**完全
+ * 不涉及`updateNote`/Note Edit**。已经用 grep 核实：全项目没有任何
+ * 文件（包括这三个刚跑过的回归套件）出现过`updateNote`或
+ * `ui_updateNote`——**Slice 3（Note Edit）到目前为止没有被这次或任何
+ * 一次测试触碰过，状态依然是 STATIC VERIFIED, LIVE TEST PENDING，
+ * 没有任何变化**。这条澄清记在这里，是为了防止未来的窗口看到
+ * "Slice 3 Gate 全部通过"这几个字就想当然地把 Note Edit 标成
+ * LIVE VERIFIED——两个"Slice 3"是同名不同物，本文件里以后提到
+ * "UI Vertical Slice 3 Gate"specifically 都指 WorkflowTemplate 那条,
+ * "UI V2 Plan Slice 3"specifically 指 Note Edit，不能只看编号。
+ *
+ * **发现的新缺口（跟 Slice 4A 那次一模一样的模式，独立发现，同样方式
+ * 补上）**：既然"Slice 3 Gate"这个名字造成了一次真实的混淆，顺着
+ * 去核实了一下 Note Edit 到底有没有专门的自动化测试——grep 全项目，
+ * `updateNote`/`ui_updateNote`在任何一个测试文件里都没出现过。跟
+ * Slice 4A 的 BLOCKED 路径完全同一种情况：代码 2026-09-04 就交付了，
+ * 但从来没有专门的验收测试覆盖过。已比照`55_Tests_
+ * TaskToProjectBlocked.gs`的模式补上`56_Tests_NoteEdit.gs`，覆盖
+ * `29_NoteEngine.updateNote`的全部分支：合法 content/category 更新
+ * （含 identity 重算）、FORBIDDEN_FIELDS 混合请求整体拒绝不部分应用、
+ * 无效 category 且无其它改动返回 null、noteId 不存在返回 null、
+ * 以及一项特意不信任`updateNote()`自己返回值、用独立
+ * `NoteQueryEngine.getNote()`重新读一遍核对真实持久化状态的完整性
+ * 检查——这最后一项是直接受三十八节 NEW_TASK_COLUMNS 事故启发加的，
+ * 目的是以后类似"代码看着对、真实表没跟上"的问题能在自动化测试这层
+ * 就被拦下来，不用等到 Carson 实跑才发现。
+ *
+ * 全链路核对（Carson 要求的新规矩，如实记录）：本次没有引入任何新
+ * 字段，`content`/`category`/`identity`三个都在`15_Setup.gs`「Notes」
+ * 的一次性建表列清单里（Notes 不像 Tasks 有`NEW_TASK_COLUMNS`那种
+ * 后补数组，是一次性列全的），已确认存在，不存在漏列风险。
+ *
+ * Regression：`56_Tests_NoteEdit.gs`是全新文件，零改动
+ * `29_NoteEngine.gs`/`50_UIBridge.gs`/任何既有文件。全部`.js`
+ * node --check 通过。
+ *
+ * 下一步：Carson 方便的时候跑一次`runNoteEditGate()`（跟 Slice 4B
+ * migration、Task→Project Blocked Gate 都互相独立，顺序不重要）。
+ * **STATIC VERIFIED，LIVE TEST PENDING，没有自行标成 PASS。**
+ */
