@@ -2455,3 +2455,58 @@
  * 完成 Known Limitation 8 这一项到此为止——按 Carson 的 FINAL RULE，
  * 本节不主动寻找或实施下一个问题，停在这里等待下一步决策。
  */
+
+// ============================================================
+// 四十二、环境事故：SecureConfig is not defined，
+//         两个新 Gate 的 LIVE 尝试都被同一个环境问题挡住（2026-09-08）
+// ============================================================
+
+/**
+ * Carson 跑`runNoteEditGate()`和`runTaskToProjectPrecheckGate()`都
+ * FAIL，报错都是`SecureConfig is not defined`，日志里还有一条容易
+ * 误导的`[DeduplicationEngine] Sheet 不存在: Notes/Tasks`——Carson
+ * 自己已经诊断清楚：那条 Sheet-不存在的日志是假象，真正原因是
+ * `05_SheetUtils.gs`的`getSheet_`第一步调用
+ * `SecureConfig.getKey('SPREADSHEET_ID')`时就抛了
+ * `ReferenceError`，被`DeduplicationEngine._findRowByIdentity_`的
+ * catch 不分异常类型地吞掉、错误记成了"Sheet 不存在"。
+ *
+ * **这不是这次交付的代码本身的缺陷**：`56_Tests_NoteEdit.gs`（测
+ * Note Edit）和`57_Tests_TaskToProjectPrecheck.gs`（测 Known
+ * Limitation 8 修复）是两份完全不相关的测试，覆盖两个不同的函数，
+ * 却在同一个位置（`getSheet_`→`SecureConfig`）用同一种方式失败——
+ * 这个特征本身就指向"环境里 SecureConfig 不可用"，不是"这两次代码
+ * 交付各自都写错了"。Carson 提出的最可能物理原因（在 Apps Script
+ * 网页编辑器粘贴新文件时，左侧文件列表选错、误覆盖了
+ * `01_SecureConfig.gs`）是本容器这边没有办法验证或修复的——这件事
+ * 发生在 Carson 的真实 GAS 项目里，不在这次对话能接触到的代码副本上；
+ * 本容器里的`01_SecureConfig.js`本身语法正常、`SecureConfig`正常
+ * 声明为一个 IIFE，没有问题。
+ *
+ * **核实了 Carson 顺带提到的一个诊断细节，确认属实**：
+ * `15_Setup.gs`的`runPreflightCheck()`（第 472-522 行）检查列表从
+ * `02_EventBus.gs`开始，一路到`45_CanonicalRepresentation.gs`，
+ * **确实没有任何一项检查`00_*`治理文件或`01_SecureConfig.gs`**——
+ * 如果`SecureConfig`本身损坏，这个本来就是为了"文件没更新就报一堆
+ * 猜不到根因的错误"而设计的工具，反而会对这一种情况完全失明。这是
+ * 一个真实、范围很小、独立于 Known Limitation 8 的诊断工具盲点，
+ * 只记录+跟 Carson 确认要不要补，本节没有主动去改
+ * `runPreflightCheck()`（不确定 Carson 是否希望现在处理这一项，
+ * 没有得到明确授权前不动手，跟这次对话里其它场景同一个原则）。
+ *
+ * **状态影响**：Known Limitation 8 修复、Slice 3 Note Edit 测试
+ * 本身的正确性都**没有**因为这次 LIVE 尝试而得到任何新证据（既没有
+ * 被证明对，也没有被证明错——这次失败的性质是"验证过程被一个跟被
+ * 测代码无关的环境问题挡住了"，不是"被测代码这次验证 FAIL 了"）。
+ * 两者继续维持 **STATIC VERIFIED / LIVE TEST PENDING**，不标 BLOCKED
+ * ——BLOCKED 应该留给"真的跑起来了、结果跟预期不一致"这种情况，跟
+ * 这次"根本没跑到被测代码那一步就先炸在环境依赖上"是两件不同的事，
+ * 不能混用同一个状态词。
+ *
+ * 下一步（Carson 那边）：确认真实 GAS 项目里`01_SecureConfig.gs`
+ * 这个文件本身——内容是不是还是原来的`SecureConfig`实现、文件名/
+ * 扩展名有没有被改动；如果确实被覆盖或损坏，用原始内容整份替换
+ * （不是追加），然后随便跑一个最简单的、之前确认过能通过的 Gate
+ * （比如`runSprint3AcceptanceGate()`）验证 SecureConfig 恢复正常，
+ * 再重跑这两个新 Gate。
+ */
