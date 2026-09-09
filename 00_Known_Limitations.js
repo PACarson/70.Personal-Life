@@ -382,9 +382,10 @@
 //    （2026-09-05 记录，Slice 4 Part B 收尾复核时发现）
 // ============================================================
 //
-// 【STATUS UPDATE, 2026-09-08：RESOLVED（代码层面；LIVE verification
-//  PENDING，见本节末尾单独记录，不改动下面 2026-09-05 写的原始分析，
-//  那部分保留作为问题本身的历史记录）】
+// 【STATUS UPDATE，最初 2026-09-08 记为代码层面 RESOLVED，
+//  2026-09-09 真实 regression 全过后正式收尾：RESOLVED — LIVE
+//  VERIFIED，见本节末尾单独记录，不改动下面 2026-09-05 写的原始分析，
+//  那部分保留作为问题本身的历史记录】
 //
 
 /**
@@ -430,7 +431,8 @@
  * ── RESOLUTION, 2026-09-08（Carson 明确授权的独立修复窗口，不是
  *    顺带完成）──────────────────────────────────────────────────
  * Known Limitation 8
- * Status: RESOLVED（代码层面）
+ * Status: **RESOLVED — LIVE VERIFIED**（2026-09-09 真实 regression
+ *   execution 后正式收尾，不是静态代码审查）
  * Change: `convertTaskToProject`按上面"建议的修复方向"原样实施——
  *   已转换成 Note 的 Task、终态 Task，现在都在创建 Project 之前就被
  *   挡下来（照抄 `convertTaskToNote` 的 pre-check 结构），并接住
@@ -440,13 +442,19 @@
  * Reason: 消除本节上面描述的孤儿 Project / 重复创建风险（含分析阶段
  *   另外发现的"已转 Note 又被转 Project"这一同根同构场景）。
  * Verification:
- *   Static: PASS（node --check 通过，既有 Task→Project 测试逐条静态
- *     核对过不受影响，见 Project_State）
- *   LIVE: PENDING（Carson 本轮在外，没有真实 GAS/Sheets/browser 环境，
- *     不能自行标成 LIVE VERIFIED）
- * 只要 LIVE verification 没做完，`convertTaskToProject`整体状态就是
- * **STATIC VERIFIED / LIVE TEST PENDING**，跟其它任何一次代码交付
- * 同一套纪律，不因为"是修复"就特殊处理。
+ *   Static: PASS（node --check 通过）
+ *   LIVE: **PASS**（Carson 真实执行，2026-09-09）——
+ *     `runTaskToProjectPrecheckGate()`新 pre-check 3/3 PASS（上一轮）；
+ *     本轮 `testBidirectionalConversion_`（经
+ *     `runSprint3AcceptanceGate()`）PASS；`38_Tests_UIBridge.gs`的
+ *     `testUIBridge_ConvertTaskToProject_Success_`/
+ *     `_InvalidOrMissingId_`/`_NoDuplicateOnRetry_`三个（经
+ *     `runUIBridgeSlice2Gate()`）PASS；`runTaskToProjectBlockedGate()`
+ *     PASS；额外的 `runUIBridgeSlice1Gate()`/`runUIBridgeSlice3Gate()`
+ *     也全部 PASS（不在 Carson 要求的三组以内，作为额外回归信号）。
+ *     没有观察到新的 Task→Project regression，没有观察到孤儿 Project。
+ * `convertTaskToProject`/Known Limitation 8 整体状态：**LIVE
+ * VERIFIED**。
  */
 
 // ============================================================

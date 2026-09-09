@@ -2510,3 +2510,107 @@
  * （比如`runSprint3AcceptanceGate()`）验证 SecureConfig 恢复正常，
  * 再重跑这两个新 Gate。
  */
+
+// ============================================================
+// 四十三、环境恢复，两个新 Gate 重跑全部 PASS（2026-09-08）
+// ============================================================
+
+/**
+ * Carson 修好真实项目里的`01_SecureConfig.gs`之后，重跑了这两个新
+ * Gate，这次两次执行都完整跑完（分别 6:32-6:33、6:33-6:34），没有
+ * 再出现`SecureConfig is not defined`：
+ *
+ *   ✅ `runNoteEditGate()` —— 6 项全部 PASS（Update Content/Update
+ *      Category/Forbidden Field No Partial Apply/Invalid Category
+ *      Only No Change/Note Not Found/Event Emitted And Projected）。
+ *   ✅ `runTaskToProjectPrecheckGate()` —— 3 项全部 PASS（Terminal
+ *      Blocked No Orphan/Already-Converted-to-Note No Orphan/Normal
+ *      Conversion Still Works）。
+ *
+ * **状态更新（精确到"这次 Gate 具体证明了什么"，不笼统扩大）**：
+ *   - **Slice 3（Note Edit）Engine 层**（`29_NoteEngine.updateNote`）
+ *     ——**转为 LIVE VERIFIED**。`ui_updateNote`这一层 UIBridge 包装
+ *     + 浏览器里 Edit 表单的真实交互，`runNoteEditGate()`自己的开场
+ *     白就说明不在这个 Gate 覆盖范围内——**这部分仍然是 STATIC
+ *     VERIFIED / LIVE TEST PENDING**，跟 Slice 4B 的 confirmation-
+ *     cancel 那一项是同一种"Engine 层过了、UI 层还没人工走一遍"的
+ *     状态分层，不能因为 Engine 层过了就把整个 Slice 3 标全绿。
+ *   - **Known Limitation 8 的新 pre-check 逻辑本身**——**转为 LIVE
+ *     VERIFIED**：终态 Task 被挡、已转 Note 的 Task 被挡、两种情况
+ *     都确认零孤儿 Project，正常路径不受影响。
+ *   - **但 Known Limitation 8 / `convertTaskToProject`整体**——
+ *     **还不能标 LIVE VERIFIED**：这次 Gate 只证明了新加的两条
+ *     pre-check 本身按预期工作，`runTaskToProjectPrecheckGate()`
+ *     自己的结尾也明确写了"下一步：真实环境重跑既有 Task→Project
+ *     测试（`testBidirectionalConversion_`/`38_Tests_UIBridge`的三个/
+ *     `runTaskToProjectBlockedGate`），确认这次改动没有破坏任何既有
+ *     行为"——这一步 Carson 还没有做/还没有报告结果。之前的静态
+ *     逐行核对（见三十九节）判断这些既有测试"不会被这次改动影响"，
+ *     但那是代码审查，不是真的跑过；在拿到这几个既有 Gate 的真实
+ *     PASS 之前，`convertTaskToProject`整体、Known Limitation 8
+ *     整体，都维持 **STATIC VERIFIED / LIVE TEST PENDING**。
+ *
+ * 下一步：Carson 方便的时候跑一遍既有回归（
+ * `runSprint3AcceptanceGate()`里的 Bidirectional Conversion Test、
+ * `38_Tests_UIBridge.js`相关三个、`runTaskToProjectBlockedGate()`），
+ * 全部 PASS 之后 Known Limitation 8 才能真正转 LIVE VERIFIED；Slice 3
+ * 什么时候方便再人工走一遍浏览器 Edit 表单即可，不阻塞其它工作。
+ */
+
+// ============================================================
+// 四十四、Known Limitation 8 正式收尾——基于真实 regression
+//         execution，不是静态代码审查（2026-09-09）
+// ============================================================
+
+/**
+ * Carson 贴回了本轮要求的三组既有回归 + 若干额外套件的真实 Execution
+ * Log，逐一对照上一轮列出的 PASS CRITERIA：
+ *
+ *   - Regression A（`testBidirectionalConversion_`）—— 在
+ *     `runSprint3AcceptanceGate()`结果汇总里以"✅ Bidirectional
+ *     Conversion Test"出现 → **PASS**
+ *   - Regression B（`38_Tests_UIBridge.gs`三个相关测试）—— 在
+ *     `runUIBridgeSlice2Gate()`结果汇总里以"✅ Positive: Convert Task
+ *     to Project Success"/"✅ Negative: Task→Project Invalid/Missing
+ *     ID"/"✅ Integrity: No Duplicate Project on Retry"三条分别出现，
+ *     对应`testUIBridge_ConvertTaskToProject_Success_`/
+ *     `_InvalidOrMissingId_`/`_NoDuplicateOnRetry_` → **三项全部
+ *     PASS**
+ *   - Regression C（`runTaskToProjectBlockedGate()`）—— "✅✅✅
+ *     全部通过" → **PASS**
+ *   - 额外信号（不在 Carson 要求的三组以内，但同一批日志里一起跑了）：
+ *     `runUIBridgeSlice1Gate()`（Note↔Task 闭环 8 项）、
+ *     `runUIBridgeSlice3Gate()`（WorkflowTemplate Capture/
+ *     Instantiate 7 项，跟"UI V2 Plan 的 Slice 3 Note Edit"是完全
+ *     不同的东西，见三十九节的澄清）—— **全部 PASS**，没有观察到
+ *     任何新的回归。Preflight Check（24 个既有文件）也全部确认是
+ *     最新版本。
+ *
+ * PASS CRITERIA 全部成立，没有任何一项 FAIL/NOT RUN。按 Carson 的
+ * closure 规则正式收尾：
+ *
+ * **Known Limitation 8**
+ * **Status: RESOLVED — LIVE VERIFIED**
+ *
+ * Fix: `convertTaskToProject`现在在创建 Project 之前执行必要的
+ * pre-check（已转换成 Note 的 Task、终态 Task，两种情况都会被挡下来，
+ * 不会再产生孤儿 Project）。
+ *
+ * Verification（全部基于真实 execution，不是静态代码审查或推断）：
+ *   - Pre-check Gate: PASS
+ *   - testBidirectionalConversion_: PASS
+ *   - 38_Tests_UIBridge 相关三项: PASS
+ *   - runTaskToProjectBlockedGate: PASS
+ *   - 没有观察到孤儿 Project，没有观察到新的 Task→Project regression
+ *
+ * Scope Integrity：本次 closure 过程零代码改动，只是核对贴回来的
+ * Execution Log 跟 PASS CRITERIA 逐条对应关系，然后更新
+ * `00_Known_Limitations.gs`「八」的 Verification 记录。`02_EventBus.gs`/
+ * `10_ProjectionEngine.gs`/Deadline Contract/ADR-026/Slice 3 UI/
+ * Known Limitation 9：本节全部 unchanged。
+ *
+ * Known Limitation 8 到此正式关闭。按 Carson 的 FINAL INSTRUCTION，
+ * 不在本节之后自动开始 Known Limitation 9、Deadline Contract、
+ * ADR-026、Drag Ordering、Slice 3 浏览器验证，或任何新 Slice
+ * discovery——下一步由 Carson 单独决定。
+ */
