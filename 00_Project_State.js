@@ -2614,3 +2614,27 @@
  * ADR-026、Drag Ordering、Slice 3 浏览器验证，或任何新 Slice
  * discovery——下一步由 Carson 单独决定。
  */
+
+// ============================================================
+// 四十五、ADR-026 Phase 1 分析持久化 + 本窗口在此暂停 coding
+//         （2026-09-10）
+// ============================================================
+
+/**
+ * Carson 要求做 ADR-026（Drag Ordering/UI-I6）Phase 1（架构判断，
+ * 不写代码）。分析本身（Sort 交互/UX Contract/失败处理，A-H 原本
+ * 完全没写）已经在对话里给出，本节记录：**这份分析现在已经写进
+ * `00_Drag_Ordering_ADR.gs`新增的「I」节，以及`00_ADR.gs`
+ * ADR-2026-08-26-026 条目的 Notes 追加**——不是只停留在这次对话/
+ * checkpoint 里。ADR-026 的 **Status 依然是 Proposed，没有被这次
+ * 新增分析升级成 Accepted**——新分析不构成批准，UI-I6 依然
+ * BLOCKED_PENDING_ARCHITECTURE_DECISION。完整结论、三个待决问题
+ * （Phase 2 范围/Filter+拖动策略/mobile 手势）见
+ * `00_Drag_Ordering_ADR.gs`「I」节，不在这里重复。
+ *
+ * 本节之后，Carson 要求立即暂停 coding，对本窗口做完整核对+产出新的
+ * session handoff checkpoint 文件——本轮到此为止，没有新的代码/测试/
+ * schema 改动。完整的"已完成/未完成/blocked/被取代"分类见新产出的
+ * `00_Session_Handoff_Checkpoint_2026-09-10.js`，那份文件是本窗口
+ * 对外的主要交接依据，本节只做一次指针式记录，不重复整理。
+ */

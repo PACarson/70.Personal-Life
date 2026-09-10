@@ -6,6 +6,13 @@
  * 保持 BLOCKED_PENDING_ARCHITECTURE_DECISION——这份 ADR 提出推荐方案，
  * 不等于批准；Track 2 的 UI-I1~I5 不依赖、也不会因为这份 ADR 是否
  * 批准而被阻塞。
+ *
+ * 【2026-09-10 更新】A-H 节（Model 3/ownership/persistence/identity/
+ * event-projection）逐条核对，依然全部成立。新增 I 节，补上 A-H 完全
+ * 没写的 Sort 交互/UX Contract/失败处理分析。整份文档（A-I）状态仍是
+ * DECISION REQUIRED——不是 IMPLEMENTATION READY，见 I 节结尾。三个
+ * 具体待决问题：Phase 2 范围（只做 Inbox 还是等 Project 详情视图）、
+ * Filter+拖动的处理策略、mobile 拖拽手势。
  */
 
 // ============================================================
@@ -468,4 +475,88 @@
  * 本 ADR 的推荐意见本身不构成批准——按 Carson 原话："不要把 ADR
  * 推荐当成批准"。UI-I1~I5、Track 1A、Track 1B 均不因本 ADR 的状态
  * 而受影响，四条线继续独立，见 00_Project_State.gs「十六」。
+ */
+
+// ============================================================
+// I. Phase 1 补充分析——Sort 交互 / UX Contract / 失败处理
+//    （2026-09-10，Carson 要求补的部分，本文件 A-H 完全没有覆盖）
+// ============================================================
+
+/**
+ * 状态：**本节是分析，不是决定**。UI-I6 状态不变，仍然是
+ * BLOCKED_PENDING_ARCHITECTURE_DECISION。本节新增/修订的任何结论都
+ * 需要 Carson 单独批准才能进入 implementation，跟 A-H 原有内容遵守
+ * 同一条规则（「H」最后一句：分析完成不等于批准）。
+ *
+ * 背景：A-H 写于 2026-08-24/26，Track 2（UI-I1~I5 Sort/Filter）
+ * 2026-08-23 才刚交付一天——这份 ADR 完整分析了 ownership/持久化模型/
+ * identity/event/projection（见 A-H，本次逐条核对仍然成立，见本文件
+ * 顶部 2026-09-10 状态说明），但完全没有分析"手动排序具体怎么跟已经
+ * 上线的 4 种算法排序共存"这个交互层问题，也没有 UX contract/失败
+ * 处理的分析。以下是这部分的补充，直接读了`ui_index.html`当前实际
+ * 代码，不是推测。
+ *
+ * **I.1 现状（`ui_index.html`）**：`sortTasks(tasks, criteria)`是纯
+ * 客户端函数，`criteria`只有四个值：newest/priority/due_date/title，
+ * 没有"manual"或"不排序"选项。`taskSortSelect`下拉框改变时只是重新
+ * 跑一次`renderTasks(rawTasksCache)`，不重新拉数据；Filter（category/
+ * priority）改变时才会真正重新请求服务端（`loadTasks()`→
+ * `ui_getConvertibleTasks(filters)`），拿到新的`rawTasksCache`后再
+ * 跑一次排序渲染。
+ *
+ * **I.2 Sort 关系模型**：Carson 给的模型 A（排序模式的一种）和模型 B
+ * （持久化、被其它排序临时覆盖）**不是互斥选项**——持久化在服务端、
+ * 跟"当前显示用哪种排序"完全解耦，只要把 A（`sortTasks()`加第 5 个
+ * `criteria === 'manual'`分支，读取每个 task 上服务端联查出来的
+ * `order_index`）实现对，切到 Priority 再切回 Manual 会自动拿到上次
+ * 拖拽的结果——B 描述的性质是 A 做对之后免费获得的。**建议**：模型
+ * A+B 组合，作为下拉框第 5 个选项落地。
+ *
+ * **I.3 Filter + 拖动（现有文档完全没有答案，是本节最不确定的一点）**：
+ * 拖动只能重排"当前可见（已被 filter 过）的子集"，但底层
+ * `ordered_task_ids`的覆写不能是"可见列表 0..N-1 直接覆盖整个
+ * context_key"——那会把被 filter 隐藏的条目挤到不可预测的位置，
+ * 产生一个"用户没有主动移动、但顺序变了"的条目。正确做法需要一次
+ * merge：只重新排列当前可见的这些 task_id，同时保持被隐藏 task_id
+ * 相对于可见 task_id 的原有位置关系不变。这个 merge 算法本节没有
+ * 给出具体规格——需要 Carson 决定要不要在 Phase 2 就做这个复杂度，
+ * 还是先用一条更简单但能力更弱的规则（比如"有 filter 时禁止拖拽，
+ * 提示先清空 filter"）。**DECISION REQUIRED，不自行选择**。
+ *
+ * **I.4 失败/事务行为**：应该沿用本项目已经在用的
+ * validate→persist→verify 纪律（No-Silent-Loss 同一个精神），不能
+ * 走`upsertRowByKey_`对失败静默降级那种写法——`NEW_TASK_COLUMNS`和
+ * `dispatch()`吞异常两次事故已经说明"静默失败"在这个项目里代价很大
+ * （见 00_Known_Limitations.gs「八」RESOLUTION 记录、「九」）。
+ * 持久化失败时 UI 应该回退到最后一次已确认的顺序并提示错误，不能
+ * 留在一个跟服务端不一致的乐观状态——跟 Slice 5 乐观 UI 已经确立的
+ * "失败就移除/回退，不假装成功"是同一个原则（见
+ * 00_Project_State.gs 三十六节）。
+ *
+ * **I.5 最小 UI Contract 建议（标注哪些需要 Carson 确认，不是定案）**：
+ *   - 哪些 view 能拖：现在只有 Tasks 面板真正上线（nav 里只有
+ *     Dashboard/Notes/Tasks/Projects，Project/Workflow/Review 详情
+ *     视图还没有专门面板）——**实际 Phase 2 范围现实上只有
+ *     Inbox/'ALL_OPEN_TASKS' 一个 context**，跟 H.2 分析的四个候选
+ *     context 不是同一个问题（这是排期现实，不是架构结论）。
+ *     DECISION REQUIRED：要不要等 Project 详情视图一起做。
+ *   - 哪些状态能拖：只有当前渲染出来的非终态 Task。
+ *   - Drag handle vs 整行可拖、手机长按 vs 专门 handle：纯 UX 判断，
+ *     现有代码/文档都没有先例，需要 Carson 的产品判断。
+ *     DECISION REQUIRED。
+ *   - Reload 后顺序：服务端持久化，自然拿到上次保存的结果，不需要
+ *     额外设计。
+ *
+ * **I.6 跟 Known Limitation 9 的关联（不是要求现在修，只是记录）**：
+ * 新增`VIEW_ORDER_UPDATED`事件之后，「九」描述的
+ * `dispatch()`吞异常风险面会多一个事件类型——不影响这次判断，等
+ * Carson 决定「九」的优先级时可以把这个也算进去。
+ *
+ * 本节结论：数据模型这一半（A-H，Model 3/ownership/event/projection
+ * 形状）分析完整且依然成立；I.1-I.6 是新分析，但还有三个真实的产品
+ * 判断没有被回答（I.3 的 filter+拖动策略、I.5 的 Phase 2 范围、I.5
+ * 的 mobile 手势）——整体状态是 **DECISION REQUIRED**，不是
+ * IMPLEMENTATION READY，也不是 REJECT/DEFER。UI-I6 维持
+ * BLOCKED_PENDING_ARCHITECTURE_DECISION，本节没有引入任何
+ * TaskViewOrder 或其它对应代码。
  */
