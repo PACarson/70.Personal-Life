@@ -560,3 +560,196 @@
  * BLOCKED_PENDING_ARCHITECTURE_DECISION，本节没有引入任何
  * TaskViewOrder 或其它对应代码。
  */
+
+// ============================================================
+// J. Decision Gate Resolution + Implementation Gate（2026-09-11，
+//    Carson 对「I.3」「I.5」的三个 DECISION REQUIRED 逐一批准）
+// ============================================================
+
+/**
+ * 状态：**ACCEPTED / IMPLEMENTATION READY**，且本节记录的实现已经在
+ * 本次窗口完成（STATIC/AUTOMATED 验证通过，见 58_Tests_DragOrdering.gs；
+ * LIVE 验证仍然 PENDING，需要 Carson 在真实浏览器/真实 Spreadsheet 里
+ * 跑，见「J.6」）。UI-I6 不再是 BLOCKED_PENDING_ARCHITECTURE_DECISION
+ * ——「H」「I」结尾两处状态声明到此为止被本节取代，不倒着改那两处原文
+ * （历史记录保留，见 00_Project_State.gs 一贯的"新增小节记录变化，不
+ * 重写旧小节"惯例）。
+ *
+ * J.1 Decision 1（Phase 2 Scope，对应「I.5」第一个 DECISION REQUIRED）
+ *
+ *   APPROVED：Phase 2 只做 Inbox/'ALL_OPEN_TASKS'，不等 Project/
+ *   Workflow/Review 详情视图。理由（Carson 原话要点）：当前真正上线的
+ *   Task UI 就是 Tasks 面板本身，现有 Slice 1-5 都围绕这个实际可用 UI；
+ *   先验证完整 ordering lifecycle，再扩展其它 context；不为了"架构
+ *   完整"提前扩大 UI scope。「H.2」分析过的 Inbox/Project/Workflow/
+ *   Review 四个候选 context 继续作为未来可扩展的架构（Owner/Storage/
+ *   Identity 形状不变），但本次 implementation 只落地 'ALL_OPEN_TASKS'
+ *   一个——这是排期决定，不是「H.2」的架构判断被推翻。
+ *
+ * J.2 Decision 2（Filter + Drag，对应「I.3」）
+ *
+ *   APPROVED：选「I.3」列出的两个选项里更简单的那个——有 active Filter
+ *   （category 或 priority 任一非空）时禁止 Drag，不做 filtered-subset
+ *   merge 算法。规则：Manual + 无 Filter → Drag enabled；Manual + 有
+ *   Filter → Drag disabled，UI 必须明确告诉用户为什么（见
+ *   ui_index.html updateDragHandlesState() 的 title 文案，不能让用户
+ *   以为功能坏了）。用户想调整全局顺序：Clear Filter → Manual → Drag。
+ *   理由：避免 filtered subset 重排导致隐藏 Task 位置产生用户没有主动
+ *   移动过的意外变化；避免复杂 merge 算法；降低 persistence/regression
+ *   风险；第一版优先正确性和可解释性。如果实际使用后发现确实需要，
+ *   再单独提出 Filter-aware Ordering enhancement，不在本次范围内
+ *   （见「J.5」Future Scope）。
+ *
+ * J.3 Decision 3（Mobile / Desktop Drag UX，对应「I.5」第二个
+ *     DECISION REQUIRED）
+ *
+ *   APPROVED：专门的 drag handle，不是整行可拖。每个 draggable Task
+ *   row 有明确的 drag handle；desktop 用鼠标/指针操作 handle，mobile
+ *   直接操作同一个 handle，不要求整行长按；Edit/Done/Cancel/row click
+ *   都不是 drag target。理由：drag handle 是唯一 drag initiation
+ *   target，避免跟这几个既有交互冲突。实现上（见「J.4」）desktop/
+ *   mobile 用同一套 Pointer Events 逻辑，不是两套平行实现。
+ *
+ * J.4 架构澄清（Carson 明确要求写清楚，不是新决定，是把「G」「H.3」
+ *     已经隐含的边界显式化）
+ *
+ *   **Task Business State 仍然属于 Task Domain**——status/title/
+ *   priority/category 等字段的读写规则、identity 计算规则，全部不受
+ *   本次影响，Tasks/ActiveTasks/ArchiveTasks 三张表的 schema 逐字不变
+ *   （见 58_Tests_DragOrdering.testUpdateTaskOrder_DoesNotTouchTaskOwnFields_
+ *   的逐字段核对，不是只看"没抛异常"）。
+ *
+ *   **TaskViewOrder 是 Domain-owned 的 persisted ordering state**，
+ *   独立于 Task 之外——它 persisted 这件事本身不代表它是 Task entity
+ *   的字段：Identity 是它自己的复合键 (context_key, task_id)，跟 Task
+ *   的 Canonical Identity（07_IdentityEngine.gs）完全是两套系统，互不
+ *   引用（「H.3」"Identity"一条原文已经这样写，这里只是把"不要因为
+ *   persisted 就自动解释成 Task entity field"这句话显式点出来，避免
+ *   未来任何人拿"这个字段现在也持久化了"当理由把它挪进 Tasks 表）。
+ *   因此本次实现：不修改 Tasks，不修改 ActiveTasks，不修改
+ *   ArchiveTasks，不修改 Project schema，不修改 Task Identity——五条
+ *   都是约束的直接推论，不是分别决定的五件事。
+ *
+ * J.5 Event 设计澄清（Carson 明确要求写清楚 VIEW_ORDER_UPDATED 为什么
+ *     需要是一个 Event）
+ *
+ *   不是因为"任何 UI 行为都必须产生 Event"这个不存在的通用规则——这个
+ *   项目里大量纯前端状态（比如哪个 Edit 表单当前展开、AI Suggestion
+ *   box 是否可见）从来不产生 Event，也不应该。VIEW_ORDER_UPDATED 需要
+ *   是 Event，因为它满足这个项目"什么状态需要经过 EventBus"的既有
+ *   标准（跟 Projects/Workflows/Notes 等六张 Sprint 1/3 新表当时的判断
+ *   标准一致，见 00_Data_Ownership.gs「一」）：TaskViewOrder 是一份
+ *   需要**持久化、可恢复（Everything Rebuildable，见
+ *   rebuildTaskViewOrderProjection()）、可审计**的 Domain-owned 状态
+ *   ——真相来源必须是 Events 表，不能让 Read Model（TaskViewOrder 本身）
+ *   变成事实上的第二个 Write Model。
+ *
+ *   Event 粒度：**一次用户 Drag 操作 = 一次 ordering update = 一个
+ *   VIEW_ORDER_UPDATED 事件**，payload 是该 context 的完整新顺序
+ *   一次性提交（{context_key, ordered_task_ids, chat_id}）。不是每
+ *   移动一个 pixel、也不是每挪动一个 Task 的位置就发一个事件——前端
+ *   在 pointerup（松手）那一刻才提交一次，拖拽过程中的中间视觉状态
+ *   （ui_index.html 的 onMove_）全部是本地 DOM 操作，不触发任何
+ *   google.script.run 调用，见 ui_index.html startDrag_()。这条粒度
+ *   规则「H.3」"Event semantics"一条已经这样设计，这里是确认实现跟
+ *   设计一致，不是新约束。
+ *
+ * J.6 实现记录（Implementation Gate——本节记录实际改动了什么，供
+ *     Carson 核对，不是重新做一遍设计分析）
+ *
+ *   Schema      : 15_Setup.gs setupSheets()/repairSheetHeaders()/
+ *                 runDiagnostics() 新增 TaskViewOrder（chat_id,
+ *                 context_key, task_id, order_index, updated_time）。
+ *                 **核实修正「H.3」原文一处措辞**：原文建议对
+ *                 context_key/task_id 显式调
+ *                 `_setPlainTextFormatForNewColumns_`——实际核对
+ *                 15_Setup.gs 的 `_ensureSheet_()` 后发现，那是给"已有
+ *                 数据的表追加新列"这种场景用的工具函数（比如
+ *                 NEW_TASK_COLUMNS/due_time 那类迁移）；TaskViewOrder
+ *                 是全新表，`_ensureSheet_()` 对全新表本身就会把整个
+ *                 数据区设成 Plain-Text（同 Sprint 1 那七张新表的既有
+ *                 先例），不需要也不应该额外调那个工具函数——这是
+ *                 "each session re-checks actual current code over
+ *                 prior narrative"这条既有惯例的一次实例，不是否定
+ *                 「H.3」的架构判断本身（复合键/Owner/Storage 形状
+ *                 完全不变）。
+ *   Migration   : 不需要新的迁移步骤——`migrateSchemaPersonalLifeOS()`
+ *                 末尾已有的 `setupSheets()` 调用（本身是既有的、给
+ *                 Sprint 1 七张新表用的机制）会自动带上 TaskViewOrder，
+ *                 证明见 11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs
+ *                 该函数注释"七张新表全部是全新表...直接调用既有
+ *                 setupSheets()...就够了"——这句话本来就没有把"七张"
+ *                 焊死，TaskViewOrder 满足同一个前提（全新表，无存量
+ *                 数据），同一个证明直接适用，不是重新论证一遍。
+ *   Create/Update: 20_TaskEngine.gs 新增 updateTaskOrder(contextKey,
+ *                 orderedTaskIds, chatId)。故意没有照抄
+ *                 updateTask/completeTask/cancelTask 的
+ *                 `event.projection_ok===false` 兜底模式——
+ *                 00_Known_Limitations.gs「九」已证实这个信号不可靠，
+ *                 改用不依赖它的独立读回校验（见「J.6 Verification」）。
+ *   Read        : 12_TaskQueryEngine.gs 新增 getTaskViewOrder(chatId,
+ *                 contextKey)，架构铁律登记表新增这张表的读取权（本
+ *                 模块）。
+ *   Projection  : 10_ProjectionEngine.gs dispatch() 新增 case
+ *                 VIEW_ORDER_UPDATED → projectViewOrderUpdated_()，
+ *                 整体覆盖式重写（见该函数注释），私有工具
+ *                 _replaceTaskViewOrderRows_ 处理"一批行按复合键替换"
+ *                 这个既有 05_SheetUtils.gs 工具函数没覆盖的形状，不
+ *                 改动 05_SheetUtils.gs 本身。**故意不加入
+ *                 TIMELINE_ENTITY_MAP**（跟既有 REMINDER_SENT 同一类
+ *                 先例——拖拽排序不是用户会去 Timeline 回顾的业务
+ *                 里程碑）。
+ *   Replay      : 新增 11_ProjectionRebuilder__UI_I6_ADDITIONS.gs 的
+ *                 rebuildTaskViewOrderProjection()，跟既有
+ *                 __SPRINT1_ADDITIONS.gs/__DUE_DATE_VALUE_MIGRATION.gs
+ *                 同一种"补丁文件，请粘贴进主文件"约定，不直接改动
+ *                 27KB 的 11_ProjectionRebuilder.gs 本身。**如实记录一处
+ *                 side-finding**：核对时发现该文件当前的
+ *                 `rebuildAllProjections()` 似乎还没有追加 Sprint 1
+ *                 那次 `rebuildProjectsProjection()`/
+ *                 `rebuildWorkflowsProjection()` 的调用——不是本次
+ *                 range，只如实记录，见该新文件文件头。
+ *   Identity    : 不受影响，见「J.4」+
+ *                 testUpdateTaskOrder_DoesNotTouchTaskOwnFields_ 的
+ *                 逐字段核对。
+ *   UIBridge    : 50_UIBridge.gs 新增 ui_updateTaskOrder(orderedTaskIds)
+ *                 （Phase 2 硬编码 context_key='ALL_OPEN_TASKS'，见
+ *                 「J.1」）；ui_getConvertibleTasks 联查
+ *                 getTaskViewOrder，附加只读字段 view_order_index
+ *                 （故意跟真实字段用 `view_` 前缀区分，呼应「J.4」）。
+ *   UI          : ui_index.html——taskSortSelect 新增"Manual"选项
+ *                 （sortTasks() 第 5 个 criteria 分支，读
+ *                 view_order_index，见「I.2」模型 A+B）；每张卡片新增
+ *                 专门 drag handle（「J.3」）；Pointer Events 实现
+ *                 desktop/mobile 同一套拖拽逻辑（pointerdown 只在
+ *                 handle 上、pointermove 时本地 DOM reorder、
+ *                 pointerup 才提交一次「J.5」）；Filter 激活或非
+ *                 Manual 排序时 handle disabled + title 提示原因
+ *                 （「J.2」）；失败时 restoreOrder_() 回退到拖之前的
+ *                 顺序并提示错误（「I.4」，跟 Slice 5 乐观 UI 同一个
+ *                 "失败就回滚，不假装成功"原则，见
+ *                 00_Project_State.gs 三十六节）。
+ *   Verification: **独立读回校验**（updateTaskOrder 内部，不依赖
+ *                 event.projection_ok，见上）+ 58_Tests_DragOrdering.gs
+ *                 七个测试（persist/overwrite-no-orphan/字段隔离/
+ *                 输入校验/复合键隔离/UIBridge round trip/replay 一致
+ *                 性）。**明确记录未覆盖的部分**：真实浏览器拖拽交互
+ *                 （见该测试文件文件头，跟 UI-I1 Sort 当年的既有测试
+ *                 边界一样，GAS 测试看不到浏览器 DOM/事件）；"读回校验
+ *                 真的能抓住一次持久化失败"这个失败路径本身（正常
+ *                 调用下不会失败，无法在不碰「九」的前提下干净地
+ *                 模拟这个场景）。
+ *
+ * J.7 Future Scope（明确排除在本次 implementation 之外，不是遗漏）
+ *
+ *   - Project/Workflow/Review 详情视图的 ordering——「H.2」的架构
+ *     （Owner/Storage/Identity 形状）继续有效、可直接复用，只是本次
+ *     不落地对应 UI/UIBridge/context_key。
+ *   - Filter-aware ordering（filtered-subset merge 算法，「I.3」的
+ *     另一个选项）——本次选了更简单的规则（「J.2」），merge 算法本身
+ *     没有被设计，需要的话是一次独立的、新的 enhancement 提案。
+ *   - generic ordering abstraction（把 TaskViewOrder 的形状抽象成
+ *     一个所有未来 Domain OS 都能复用的通用组件）——「E」已经指出的
+ *     "模式可以复用，数据不可以共享"原则继续适用，抽象成通用组件是
+ *     另一件事，不在这次范围。
+ */

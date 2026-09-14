@@ -37,17 +37,27 @@
  *   Responsibilities      : Task 业务对象的核心生命周期操作
  *                           （create/update/complete/cancel）+ Sprint 1
  *                           新增的 Project/Workflow 关联维护、Branch
- *                           支持
+ *                           支持 + 2026-09-11 新增的 View Order 命令
+ *                           （UI-I6，见 updateTaskOrder）——后者是
+ *                           Domain-owned 排序状态，不是 Task 字段本身
+ *                           的生命周期操作，见该函数头注释
  *   Owns                  : Task 字段校验规则、identity 何时需要重算的
  *                           判断（IDENTITY_AFFECTING_FIELDS）、
  *                           NOT_SELECTED 只能由 markTaskNotSelected_
- *                           设置这条规则
- *   Reads                 : 单个 task（通过 TaskQueryEngine.getTask）
+ *                           设置这条规则；updateTaskOrder 的独立读回
+ *                           校验（不依赖 event.projection_ok，见该
+ *                           函数头注释，00_Known_Limitations.gs「九」）
+ *   Reads                 : 单个 task（通过 TaskQueryEngine.getTask）；
+ *                           updateTaskOrder 额外读 TaskQueryEngine.
+ *                           getTaskViewOrder（持久化后的独立校验）
  *   Writes                : Events（通过 EventBus.publish）；仅在
  *                           event.projection_ok===false 时额外写一次
- *                           Tasks/ActiveTasks（安全兜底）
+ *                           Tasks/ActiveTasks（安全兜底）——
+ *                           updateTaskOrder 是唯一的例外，故意不用这条
+ *                           兜底模式，见该函数头注释
  *   Public API            : createTask, updateTask, completeTask,
  *                           cancelTask, getPendingTasks,
+ *                           updateTaskOrder（2026-09-11 新增，UI-I6）,
  *                           markTaskNotSelected_（Sprint 1 新增，仅
  *                           28_WorkflowEngine.gs 调用）
  *   Dependencies           : 09_IdempotencyManager.gs、
@@ -57,7 +67,10 @@
  *   Forbidden Dependencies  : 06_TaskIntentParser.gs（不得反向依赖呈现层）
  *   Pure Function            : NO
  *   Thread Safety             : 依赖 09_IdempotencyManager 的 Soft Lock
- *                           （仅创建路径需要）
+ *                           （仅创建路径需要）——updateTaskOrder 不经过
+ *                           IdempotencyManager（不是"创建"语义，是
+ *                           upsert 式的位置覆写，重复提交同一顺序是
+ *                           无害的幂等操作，不需要去重锁）
  *   Side Effects              : YES
  */
 
@@ -415,6 +428,75 @@ var TaskEngine = (function () {
     return {};
   }
 
+  // ============ View Order（2026-09-11 新增，UI-I6 Drag Ordering，
+  //              ADR-2026-08-26-026，Decision Gate 已批准）============
+
+  /**
+   * 持久化一个 context（Phase 2 目前只有 'ALL_OPEN_TASKS'）拖拽后的完整
+   * 新顺序。这不是 Task 的 Conversion 或字段更新——TaskViewOrder 是
+   * 独立的 Domain-owned 排序 Read Model 表，跟 Task 自己的 Canonical
+   * Identity、business 字段完全无关（不读写 Tasks/ActiveTasks/
+   * ArchiveTasks，不触发 identity 重算，见
+   * 00_Drag_Ordering_ADR.gs「G」「H.3」「J」）。
+   *
+   * 一次调用 = 一次 VIEW_ORDER_UPDATED 事件 = 该 context 的全量新顺序
+   * 一次性提交（不是增量 patch），项目层面事件语义见 ADR「H.3」
+   * "Event semantics"。
+   *
+   * 【为什么这里没有照抄 updateTask/completeTask/cancelTask 那种
+   * `if (event.projection_ok === false) 走 materializeXxx_ 兜底`
+   * 模式，这是有意的架构决定，不是遗漏】：00_Known_Limitations.gs
+   * 「九」已经证实 `event.projection_ok` 在 projector 内部真的抛异常时
+   * 不会变成 false（`dispatch()`吞异常，`publish()`那层的 try/catch
+   * 永远不会被触发）——继续照抄这个模式，只是把一个已知不可靠的信号
+   * 原样搬到新代码里，并不能真正提供保护。这里改用不依赖
+   * `projection_ok`的独立读回校验（下面的 verify 步骤）：不管
+   * `event.projection_ok`说什么，都直接重新查一遍 TaskViewOrder
+   * 实际落盘的内容，跟这次提交的顺序逐项比对，任何不一致都会在这里
+   * 直接抛错——这比继续信任一个已知会误报成功的信号更可靠，也不需要
+   * 在本文件里再复制一份 TaskViewOrder 的写入逻辑（重复实现两处写入
+   * 反而增加"两处逻辑长期不同步"的风险）。这不是修「九」本身（那两个
+   * 文件本次没有改动），只是这一条新写入路径不选择依赖它。
+   *
+   * @param {string} contextKey       Phase 2 目前唯一取值 'ALL_OPEN_TASKS'
+   * @param {string[]} orderedTaskIds 拖拽后的完整新顺序（全量 task_id 数组）
+   * @param {string} chatId
+   * @returns {{context_key:string, ordered_task_ids:string[]}}
+   * @throws {Error} 参数缺失，或独立读回校验发现持久化结果跟提交内容不一致
+   */
+  function updateTaskOrder(contextKey, orderedTaskIds, chatId) {
+    if (!contextKey) {
+      throw new Error('updateTaskOrder: 缺少 contextKey');
+    }
+    if (!orderedTaskIds || !Array.isArray(orderedTaskIds) || orderedTaskIds.length === 0) {
+      throw new Error('updateTaskOrder: orderedTaskIds 必须是非空数组');
+    }
+    if (!chatId) {
+      throw new Error('updateTaskOrder: 缺少 chatId');
+    }
+
+    EventBus.publish('VIEW_ORDER_UPDATED', {
+      context_key: contextKey,
+      ordered_task_ids: orderedTaskIds,
+      chat_id: chatId
+    }, chatId, 'TaskEngine');
+
+    // 独立读回校验（不依赖 event.projection_ok，理由见函数头注释）——
+    // 这同时是 Carson 要求的 Verification Discipline 里"独立持久化
+    // 校验"这一步，也是"D. Data Integrity"报告要证明的那件事本身。
+    var persisted = TaskQueryEngine.getTaskViewOrder(chatId, contextKey);
+    for (var i = 0; i < orderedTaskIds.length; i++) {
+      var taskId = orderedTaskIds[i];
+      if (persisted[taskId] !== i) {
+        throw new Error('ORDER_PERSIST_VERIFICATION_FAILED: task_id=' + taskId +
+          ' 期望 order_index=' + i + '，实际读回=' +
+          (persisted.hasOwnProperty(taskId) ? persisted[taskId] : '(不存在)'));
+      }
+    }
+
+    return { context_key: contextKey, ordered_task_ids: orderedTaskIds };
+  }
+
   // ============ Not Selected（Sprint 1 新增，仅供 WorkflowEngine 调用）=====
 
   /**
@@ -689,6 +771,7 @@ var TaskEngine = (function () {
     updateTask:           updateTask,
     completeTask:          completeTask,
     cancelTask:            cancelTask,
+    updateTaskOrder:        updateTaskOrder,
     markTaskNotSelected_:   markTaskNotSelected_,
     markTaskConverted_:      markTaskConverted_,
     markTaskConvertedToNote_: markTaskConvertedToNote_,

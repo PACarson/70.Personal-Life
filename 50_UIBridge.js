@@ -40,7 +40,8 @@
  *   Owns                  : {ok,code,message} 错误信封格式；Web Identity
  *                           解析规则
  *   Reads                 : 17_NoteQueryEngine, 12_TaskQueryEngine（非
- *                           终态过滤）, 14_ProjectQueryEngine, 22_PriorityEngine
+ *                           终态过滤；2026-09-11 起还读 getTaskViewOrder，
+ *                           UI-I6）, 14_ProjectQueryEngine, 22_PriorityEngine
  *                           （UI-I3，只读 suggestPriorityWithAI_，不产生
  *                           独立 Event——见「UI-I1~I5」一节）
  *   Writes                : none（自己不发 Event，全部通过既有 Command）
@@ -59,7 +60,10 @@
  *                           ui_createTask(title, meta), ui_createProject(title, meta)
  *                           （2026-08-24 新增 UI Create Capability——见文件末尾，
  *                           两者内部只调用既有 TaskEngine.createTask /
- *                           ProjectEngine.createProject，不新开持久化路径）
+ *                           ProjectEngine.createProject，不新开持久化路径），
+ *                           ui_updateTaskOrder(orderedTaskIds)（2026-09-11
+ *                           新增，UI-I6，Phase 2 硬编码 context_key=
+ *                           'ALL_OPEN_TASKS'，见该函数注释）
  *                           （除 ui_captureProjectAsTemplate 外都带一个
  *                           仅测试用的 _testOverrides 参数，永远是最后一个
  *                           参数，前端永远不传；capture 不需要，见该函数
@@ -408,6 +412,18 @@ function ui_getTaskDashboard(_testOverrides) {
  * 不接受 status 作为 filters 键——面板本身的定义就是"非终态"，允许
  * 调用方传 status 会跟这条已有约束混淆语义，真要看终态 Task 应该是
  * 另一个独立视图，不是这个面板加一个参数就能兼顾的。
+ *
+ * 【2026-09-11 新增，UI-I6 Drag Ordering，ADR-2026-08-26-026】每个返回
+ * 的 task 对象上额外附加 view_order_index 字段——这不是 Task 自己的
+ * schema 字段（Tasks/ActiveTasks/ArchiveTasks 完全没有改动，见
+ * 00_Drag_Ordering_ADR.gs「J」的架构澄清），只是这次 transport 时从
+ * TaskViewOrder 联查、临时拼接上去的只读标注，供前端 Manual Sort 使用；
+ * 故意用 `view_` 前缀跟真实 Task 字段区分，避免被误当成持久化在 Task
+ * 上的字段。没有对应 TaskViewOrder 行的 task（还没被拖拽过）得到 null，
+ * 不是 0——0 是"排在第一位"的合法 order_index，不能用它表示"没有"。
+ * context_key 硬编码 'ALL_OPEN_TASKS'，跟 ui_updateTaskOrder 保持一致
+ * ——Phase 2 范围只有这一个 context（Carson 2026-09-11 Decision 1），
+ * 不接受调用方传入其它 context_key。
  * @param {object} [filters]  {category, priority}，均可省略
  * @param {object} [_testOverrides]
  */
@@ -424,6 +440,12 @@ function ui_getConvertibleTasks(filters, _testOverrides) {
     var tasks = TaskQueryEngine.getTasks(chatId, queryFilters).filter(function (t) {
       return NONTERMINAL.indexOf(String(t.status || '').toUpperCase()) !== -1;
     });
+
+    var orderMap = TaskQueryEngine.getTaskViewOrder(chatId, 'ALL_OPEN_TASKS');
+    tasks.forEach(function (t) {
+      t.view_order_index = orderMap.hasOwnProperty(t.task_id) ? orderMap[t.task_id] : null;
+    });
+
     return { ok: true, tasks: _sanitizeTaskDatesForTransport_(tasks) };
   } catch (e) {
     return _wrapError_(e);
@@ -857,6 +879,37 @@ function ui_cancelTask(taskId, _testOverrides) {
       return { ok: false, code: 'INVALID_STATE', message: '这个 Task 已经是 ' + result.current_status + '，没法取消' };
     }
     return { ok: true, already_cancelled: !!result.already_cancelled };
+  } catch (e) {
+    return _wrapError_(e);
+  }
+}
+
+/**
+ * UI-I6（Drag Ordering，ADR-2026-08-26-026，Phase 2 — Decision Gate
+ * 已批准，2026-09-11）。Phase 2 范围只有 Inbox/'ALL_OPEN_TASKS' 一个
+ * context（Carson Decision 1），这里硬编码 context_key，不接受调用方
+ * 传入——未来如果范围扩大到 Project/Workflow/Review 详情视图，需要新增
+ * 参数，不是本次范围（见 00_Drag_Ordering_ADR.gs「J」Future Scope）。
+ *
+ * 跟其它 ui_* 命令一样：本函数只做参数校验 + 委派 + 把 Engine 抛出的
+ * 异常翻译成 {ok:false}，不实现任何业务逻辑（TaskEngine.updateTaskOrder
+ * 内部已经做了独立持久化校验，见该函数头注释——这里的 try/catch 只是
+ * 接住那次校验失败抛出的异常，翻译成前端能读的错误信息，不是重复校验）。
+ *
+ * @param {string[]} orderedTaskIds  拖拽后的完整新顺序（全量 task_id
+ *                                    数组，不是增量），空数组/非数组会
+ *                                    被拒绝
+ * @param {object} [_testOverrides]
+ * @returns {{ok:true}|{ok:false, code:'MISSING_ORDERED_TASK_IDS'|string, message}}
+ */
+function ui_updateTaskOrder(orderedTaskIds, _testOverrides) {
+  try {
+    if (!orderedTaskIds || !Array.isArray(orderedTaskIds) || orderedTaskIds.length === 0) {
+      return { ok: false, code: 'MISSING_ORDERED_TASK_IDS', message: '缺少有效的任务顺序列表' };
+    }
+    var chatId = _resolveChatId_(_testOverrides);
+    TaskEngine.updateTaskOrder('ALL_OPEN_TASKS', orderedTaskIds, chatId);
+    return { ok: true };
   } catch (e) {
     return _wrapError_(e);
   }

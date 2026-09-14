@@ -144,9 +144,21 @@
  *   00_Drag_Ordering_ADR.js                                            【新增，
  *                              2026-08-23，UI-I6 架构决策分析，推荐
  *                              模型 3（Context-scoped ordering
- *                              entity），尚待 Carson 批准，UI-I6
- *                              保持 BLOCKED_PENDING_ARCHITECTURE_
- *                              DECISION】
+ *                              entity）。2026-09-10 补上 I 节（Sort/
+ *                              Filter/UX/失败处理分析）。2026-09-11
+ *                              新增 J 节：Carson 批准三个 Decision
+ *                              Gate，Status ACCEPTED / IMPLEMENTATION
+ *                              READY，implementation 已完成（STATIC/
+ *                              AUTOMATED VERIFIED，LIVE TEST PENDING），
+ *                              见 00_ADR.gs ADR-026 条目】
+ *   11_ProjectionRebuilder__UI_I6_ADDITIONS.js                         【新增，
+ *                              2026-09-11，UI-I6/ADR-026，
+ *                              rebuildTaskViewOrderProjection()，同一种
+ *                              "补丁文件粘贴进主文件"约定】
+ *   58_Tests_DragOrdering.js                                           【新增，
+ *                              2026-09-11，UI-I6/ADR-026 验收测试，单一
+ *                              入口 runDragOrderingGate()。编号紧跟在
+ *                              57_Tests_TaskToProjectPrecheck.js 后面】
  */
 
 // ============================================================

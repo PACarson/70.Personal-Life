@@ -37,6 +37,13 @@
  *   LIFE_NOTES                     | 10_ProjectionEngine.gs（扩展）       | 新增
  *   LIFE_REVIEWS                     | 10_ProjectionEngine.gs（扩展）        | 新增
  *   LIFE_BUSINESS_RULES                | 10_ProjectionEngine.gs（扩展）         | 新增
+ *   TaskViewOrder                        | 10_ProjectionEngine.gs（扩展）          | 新增，
+ *                        |                                |2026-09-11，
+ *                        |                                |UI-I6/ADR-026，
+ *                        |                                |Domain-owned
+ *                        |                                |排序状态，不是
+ *                        |                                |Task 字段（见
+ *                        |                                |ADR「J.4」）
  *
  * 铁律不变："真相来源永远是 Events 表；上面十张 Read Model 表都是
  * Projection，理论上可以从 Events 表全量重放重建（Everything

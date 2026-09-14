@@ -194,6 +194,16 @@
       border-top: 1px solid var(--line); justify-content: flex-end; align-items: center;
     }
 
+    /* ---------- UI-I6 Drag Handle (ADR-2026-08-26-026) ---------- */
+    .drag-handle {
+      display: flex; align-items: center; justify-content: center;
+      width: 18px; align-self: stretch; color: var(--ink-faint);
+      cursor: grab; touch-action: none; flex-shrink: 0;
+    }
+    .drag-handle:hover { color: var(--ink-dim); }
+    .drag-handle.disabled { color: var(--ink-faint); opacity: 0.35; cursor: not-allowed; }
+    .item-card.dragging { border-color: var(--accent-dim); box-shadow: 0 4px 14px rgba(0,0,0,0.3); cursor: grabbing; }
+
     /* ---------- Inline Edit / Forms ---------- */
     .edit-form, .capture-form, .create-form, .confirm-form {
       display: none; margin-top: 10px; padding: 12px; background: var(--bg);
@@ -405,6 +415,7 @@
               <option value="priority">Priority (High→Low)</option>
               <option value="due_date">Due Date</option>
               <option value="title">Title (A-Z)</option>
+              <option value="manual">Manual (drag to reorder)</option>
             </select>
           </div>
           <div>
@@ -886,6 +897,17 @@
         });
       } else if (criteria === 'title') {
         copy.sort(function(a, b) { return (a.title || '').localeCompare(b.title || ''); });
+      } else if (criteria === 'manual') {
+        // UI-I6（ADR-2026-08-26-026，Phase 2）。view_order_index 是
+        // ui_getConvertibleTasks 联查 TaskViewOrder 附加的只读字段（见
+        // 50_UIBridge.gs 注释），不是 Task 自己的字段。没有被拖拽过的
+        // task 值是 null，排到没有 null 的后面；null 之间保持原有相对
+        // 顺序（Array.sort 对相等 key 的稳定性，现代浏览器都满足）。
+        copy.sort(function(a, b) {
+          var ao = (a.view_order_index === null || a.view_order_index === undefined) ? Infinity : a.view_order_index;
+          var bo = (b.view_order_index === null || b.view_order_index === undefined) ? Infinity : b.view_order_index;
+          return ao - bo;
+        });
       }
       return copy;
     }
@@ -900,6 +922,7 @@
       sorted.forEach(function (task) {
         var card = document.createElement('div');
         card.className = 'item-card';
+        card.dataset.taskId = task.task_id; // UI-I6: 拖拽后靠这个从 DOM 读回新顺序
 
         var pClass = 'badge-priority-' + (task.priority || 'MEDIUM');
         var dueBadge = task.due_date ? '<span class="badge">' + escapeHtml(task.due_date + (task.due_time ? ' ' + task.due_time : '')) + '</span>' : '';
@@ -907,6 +930,14 @@
 
         card.innerHTML =
           '<div class="item-header-row">' +
+            // UI-I6（ADR-2026-08-26-026 Decision 3）：专门的 drag handle，
+            // 不是整行可拖——避免跟 Edit/Done/Cancel/row click 冲突，见
+            // attachDragHandle()。禁用态（Filter 激活 / 非 Manual 排序）
+            // 由 updateDragHandlesState() 统一设置 class + title，不在
+            // 这里写死。
+            '<span class="drag-handle" title="">' +
+              '<svg width="10" height="16" viewBox="0 0 10 16" fill="none"><circle cx="2" cy="2" r="1.5" fill="currentColor"/><circle cx="8" cy="2" r="1.5" fill="currentColor"/><circle cx="2" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="2" cy="14" r="1.5" fill="currentColor"/><circle cx="8" cy="14" r="1.5" fill="currentColor"/></svg>' +
+            '</span>' +
             '<div style="flex:1">' +
               '<div class="item-title">' + escapeHtml(task.title) + '</div>' +
               '<div class="item-trace" style="margin-top:6px;">' +
@@ -1184,8 +1215,12 @@
           convertTaskToNote(task.task_id, card, ev.currentTarget, confirmNoteForm);
         });
 
+        attachDragHandle(card, task); // UI-I6
+
         taskListEl.appendChild(card);
       });
+
+      updateDragHandlesState(); // UI-I6：按当前 Sort/Filter 状态刷新 handle 可用性
     }
 
     function loadTasks() {
@@ -1208,6 +1243,136 @@
     taskSortSelect.addEventListener('change', function() { renderTasks(rawTasksCache); });
     taskCategoryFilter.addEventListener('change', loadTasks);
     taskPriorityFilter.addEventListener('change', loadTasks);
+
+    // ============================================================
+    // UI-I6 Drag Ordering（ADR-2026-08-26-026，Phase 2 —
+    // 'ALL_OPEN_TASKS' 唯一 context，2026-09-11 Decision Gate 已批准）
+    // ============================================================
+    //
+    // Decision 1（Phase 2 范围）：只有这个 Tasks 面板本身，不等 Project/
+    // Workflow/Review 详情视图。
+    // Decision 2（Filter+拖动）：有 active Filter 时禁止拖动（不做
+    // filtered-subset merge），必须先 Clear Filter。
+    // Decision 3（Drag UX）：专门的 drag handle 是唯一 drag initiation
+    // target，不是整行可拖，desktop/mobile 同一套 Pointer Events 逻辑
+    // （不用 HTML5 native drag-and-drop——那套 API 在触屏上没有原生
+    // 支持，Pointer Events 是 mouse/touch/pen 统一的同一套事件，天然
+    // 满足"desktop/mobile 尽量保持同一个 interaction model"这条要求）。
+
+    function isManualSortActive_() { return taskSortSelect.value === 'manual'; }
+    function isTaskFilterActive_() { return !!(taskCategoryFilter.value || taskPriorityFilter.value); }
+    function dragAllowed_() { return isManualSortActive_() && !isTaskFilterActive_(); }
+
+    function updateDragHandlesState() {
+      var allowed = dragAllowed_();
+      var handles = taskListEl.querySelectorAll('.drag-handle');
+      for (var i = 0; i < handles.length; i++) {
+        handles[i].classList.toggle('disabled', !allowed);
+        handles[i].title = allowed
+          ? 'Drag to reorder'
+          : (isTaskFilterActive_() ? 'Clear filters to reorder manually' : 'Switch Sort to "Manual" to reorder');
+      }
+    }
+
+    function attachDragHandle(card, task) {
+      var handle = card.querySelector('.drag-handle');
+      if (!handle) return;
+      handle.addEventListener('pointerdown', function (ev) {
+        if (!dragAllowed_()) return; // Decision 2/3：禁用态下 handle 本身不响应
+        if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+        ev.preventDefault();
+        startDrag_(card, handle, ev);
+      });
+    }
+
+    function startDrag_(card, handle, downEv) {
+      var lastGoodOrderIds = Array.prototype.slice.call(taskListEl.children).map(function (c) { return c.dataset.taskId; });
+      card.classList.add('dragging');
+      try { handle.setPointerCapture(downEv.pointerId); } catch (e) { /* 不支持也不影响功能，只是丢失自动 capture */ }
+
+      function onMove(moveEv) {
+        var y = moveEv.clientY;
+        var siblings = Array.prototype.slice.call(taskListEl.children).filter(function (c) { return c !== card; });
+        var target = null;
+        for (var i = 0; i < siblings.length; i++) {
+          var rect = siblings[i].getBoundingClientRect();
+          if (y < rect.top + rect.height / 2) { target = siblings[i]; break; }
+        }
+        if (target) {
+          taskListEl.insertBefore(card, target);
+        } else {
+          taskListEl.appendChild(card);
+        }
+      }
+
+      function finishDrag() {
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onCancel);
+        card.classList.remove('dragging');
+        try { handle.releasePointerCapture(downEv.pointerId); } catch (e) { /* 忽略 */ }
+      }
+
+      function onUp() {
+        finishDrag();
+        var newOrderIds = Array.prototype.slice.call(taskListEl.children).map(function (c) { return c.dataset.taskId; });
+        var changed = newOrderIds.length !== lastGoodOrderIds.length ||
+          newOrderIds.some(function (id, idx) { return id !== lastGoodOrderIds[idx]; });
+        if (changed) commitOrder_(newOrderIds, lastGoodOrderIds);
+      }
+
+      function onCancel() {
+        finishDrag();
+        restoreOrder_(lastGoodOrderIds); // pointercancel（比如被系统手势打断）——回到拖之前的顺序，不半途提交
+      }
+
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onCancel);
+    }
+
+    function restoreOrder_(orderIds) {
+      orderIds.forEach(function (id) {
+        var el = taskListEl.querySelector('[data-task-id="' + id + '"]');
+        if (el) taskListEl.appendChild(el);
+      });
+    }
+
+    function commitOrder_(newOrderIds, lastGoodOrderIds) {
+      tasksStatus.textContent = 'Saving order…';
+      tasksStatus.className = 'status-line';
+      google.script.run
+        .withSuccessHandler(function (result) {
+          if (!result || !result.ok) {
+            // I.4／Carson 的 Failure 要求："回退到最后一次已确认的顺序并
+            // 提示错误，不能留在一个跟服务端不一致的乐观状态"——跟
+            // Slice 5 乐观 UI 失败回滚同一个原则，不是新发明的行为。
+            tasksStatus.textContent = (result && result.message) || 'Failed to save order.';
+            tasksStatus.className = 'status-line err';
+            restoreOrder_(lastGoodOrderIds);
+            return;
+          }
+          tasksStatus.textContent = '';
+          // 权威数据来源永远是下一次 loadTasks()；这里只是让 rawTasksCache
+          // 里的 view_order_index 立刻反映刚保存的结果，这样"不刷新页面、
+          // 切到别的 Sort 再切回 Manual"这种同一会话内的操作不会短暂显示
+          // 旧顺序。
+          newOrderIds.forEach(function (id, idx) {
+            for (var i = 0; i < rawTasksCache.length; i++) {
+              if (String(rawTasksCache[i].task_id) === String(id)) {
+                rawTasksCache[i].view_order_index = idx;
+                break;
+              }
+            }
+          });
+        })
+        .withFailureHandler(function () {
+          tasksStatus.textContent = 'Network error saving order.';
+          tasksStatus.className = 'status-line err';
+          restoreOrder_(lastGoodOrderIds);
+        })
+        .ui_updateTaskOrder(newOrderIds);
+    }
 
     function convertTaskToProject(taskId, cardEl, btnEl) {
       btnEl.disabled = true;

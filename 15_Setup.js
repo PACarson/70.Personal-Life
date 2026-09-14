@@ -163,11 +163,26 @@ function setupSheets() {
     'updated_time', 'decision_owner', 'approval_status', 'identity'
   ]);
 
+  // ============ 【2026-09-11 新增，UI-I6 Drag Ordering，ADR-2026-08-26-026
+  //                Decision Gate 批准后，Implementation Gate】============
+  // TaskViewOrder：Domain-owned 持久化排序状态，不是 Task entity field
+  // （不修改 Tasks/ActiveTasks/ArchiveTasks 任何一张表的 schema，见
+  // 00_Drag_Ordering_ADR.gs「G」「H.3」「J」）。跟上面七张新表同一种
+  // "全新表，没有存量数据"情况——_ensureSheet_ 对全新表本身就会把整个
+  // 数据区设成 Plain-Text（见本文件 _ensureSheet_ 实现），不需要额外调
+  // _setPlainTextFormatForNewColumns_（那个工具函数是给"已有数据的表
+  // 追加新列"这种场景用的，比如上面 NEW_TASK_COLUMNS/due_time/
+  // reminder_policy 的迁移，跟这里"建一张全新表"不是同一个场景，见
+  // 00_Drag_Ordering_ADR.gs「J」的核实说明）。
+  _ensureSheet_(ss, 'TaskViewOrder', [
+    'chat_id', 'context_key', 'task_id', 'order_index', 'updated_time'
+  ]);
+
   Logger.log('✅ Sheets 就位: Events, Tasks, ActiveTasks, ArchiveTasks, TaskStatistics, TaskFilters,');
   Logger.log('   Projects, Workflows, Timeline, Notes, Reviews,');
-  Logger.log('   BusinessRules, WorkflowTemplates');
+  Logger.log('   BusinessRules, WorkflowTemplates, TaskViewOrder');
   Logger.log('   （Events 表如果 Core 项目已经建过，上面这行只是确认存在，不会动它的数据）');
-  Logger.log('下一步: 如果 Tasks 已有旧数据（v5.1 之前的部署）→ migrateSchemaPersonalLifeOS()（11_ProjectionRebuilder.gs）；然后 createTriggers()');
+  Logger.log('下一步: 如果 Tasks 已有旧数据（v5.1 之前的部署）→ migrateSchemaPersonalLifeOS()（11_ProjectionRebuilder.gs，会自动带上 TaskViewOrder 这张新表，见该函数说明）；然后 createTriggers()');
 }
 
 function _ensureSheet_(ss, name, headers) {
@@ -279,6 +294,11 @@ function repairSheetHeaders() {
     'source_event_id', 'source_task_id', 'created_method', 'created_time',
     'updated_time', 'decision_owner', 'approval_status', 'identity'
   ]);
+
+  // 【2026-09-11 新增，UI-I6/ADR-026】
+  _repairOneSheetHeader_('TaskViewOrder', [
+    'chat_id', 'context_key', 'task_id', 'order_index', 'updated_time'
+  ]);
 }
 
 /**
@@ -354,7 +374,8 @@ function runDiagnostics() {
   [
     'Events', 'Tasks', 'ActiveTasks', 'ArchiveTasks', 'TaskStatistics', 'TaskFilters',
     'Projects', 'Workflows', 'Timeline',
-    'Notes', 'Reviews', 'BusinessRules', 'WorkflowTemplates'
+    'Notes', 'Reviews', 'BusinessRules', 'WorkflowTemplates',
+    'TaskViewOrder' // 【2026-09-11 新增，UI-I6/ADR-026】
   ].forEach(function (name) {
     if (!ss) return;
     var sheet = ss.getSheetByName(name);
@@ -482,14 +503,14 @@ function runPreflightCheck() {
     { file: '09_IdempotencyManager.gs（需含 Sprint 3 的 createNoteIfNotExists）', test: function () { return typeof IdempotencyManager !== 'undefined' && typeof IdempotencyManager.createNoteIfNotExists === 'function' && typeof IdempotencyManager.createBusinessRuleIfNotExists === 'function'; } },
     { file: '10_ProjectionEngine.gs（需含 Sprint 3 dispatch，含 Projects/Workflows 等新表名）', test: function () { return typeof ProjectionEngine !== 'undefined' && typeof ProjectionEngine.dispatch === 'function'; } },
     { file: '11_ProjectionRebuilder.gs 追加的函数（含 renameSheetsToPascalCase）', test: function () { return typeof migrateSchemaPersonalLifeOS === 'function' && typeof renameSheetsToPascalCase === 'function' && typeof rebuildProjectsProjection === 'function' && typeof rebuildWorkflowsProjection === 'function'; } },
-    { file: '12_TaskQueryEngine.gs（需含 getTasksByProject/getTasksByWorkflow）', test: function () { return typeof TaskQueryEngine !== 'undefined' && typeof TaskQueryEngine.getTasksByProject === 'function' && typeof TaskQueryEngine.getTasksByWorkflow === 'function'; } },
+    { file: '12_TaskQueryEngine.gs（需含 getTasksByProject/getTasksByWorkflow，2026-09-11 起还需含 UI-I6 的 getTaskViewOrder）', test: function () { return typeof TaskQueryEngine !== 'undefined' && typeof TaskQueryEngine.getTasksByProject === 'function' && typeof TaskQueryEngine.getTasksByWorkflow === 'function' && typeof TaskQueryEngine.getTaskViewOrder === 'function'; } },
     { file: '14_ProjectQueryEngine.gs', test: function () { return typeof ProjectQueryEngine !== 'undefined' && typeof ProjectQueryEngine.getProject === 'function'; } },
     { file: '15_Setup.gs（本文件自己，需含 NEW_TASK_COLUMNS）', test: function () { return typeof NEW_TASK_COLUMNS !== 'undefined' && NEW_TASK_COLUMNS.length > 0; } },
     { file: '16_WorkflowQueryEngine.gs', test: function () { return typeof WorkflowQueryEngine !== 'undefined' && typeof WorkflowQueryEngine.getWorkflow === 'function'; } },
     { file: '17_NoteQueryEngine.gs', test: function () { return typeof NoteQueryEngine !== 'undefined'; } },
     { file: '18_ReviewQueryEngine.gs', test: function () { return typeof ReviewQueryEngine !== 'undefined'; } },
     { file: '19_BusinessRuleQueryEngine.gs', test: function () { return typeof BusinessRuleQueryEngine !== 'undefined'; } },
-    { file: '20_TaskEngine.gs（需含 Sprint 3 的 markTaskConverted_）', test: function () { return typeof TaskEngine !== 'undefined' && typeof TaskEngine.markTaskConverted_ === 'function' && typeof TaskEngine.markTaskNotSelected_ === 'function' && typeof TaskEngine.createTaskFromConversion_ === 'function'; } },
+    { file: '20_TaskEngine.gs（需含 Sprint 3 的 markTaskConverted_，2026-09-11 起还需含 UI-I6 的 updateTaskOrder）', test: function () { return typeof TaskEngine !== 'undefined' && typeof TaskEngine.markTaskConverted_ === 'function' && typeof TaskEngine.markTaskNotSelected_ === 'function' && typeof TaskEngine.createTaskFromConversion_ === 'function' && typeof TaskEngine.updateTaskOrder === 'function'; } },
     { file: '27_ProjectEngine.gs（需含 Sprint 3 的 checkEligibleForTaskDemotion_）', test: function () { return typeof ProjectEngine !== 'undefined' && typeof ProjectEngine.checkEligibleForTaskDemotion_ === 'function' && typeof ProjectEngine.markProjectConvertedToTask_ === 'function'; } },
     { file: '28_WorkflowEngine.gs', test: function () { return typeof WorkflowEngine !== 'undefined' && typeof WorkflowEngine.handleBranchResolution_ === 'function'; } },
     { file: '29_NoteEngine.gs', test: function () { return typeof NoteEngine !== 'undefined'; } },

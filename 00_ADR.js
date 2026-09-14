@@ -1252,17 +1252,32 @@
 
 // ============================================================
 // ADR-2026-08-26-026：Context-Scoped Ordering Entity（Drag Ordering
-//                      Model 3）—— PROPOSED，等待 Carson 批准
+//                      Model 3）—— ACCEPTED / IMPLEMENTATION READY
+//                      （implemented 2026-09-11，LIVE test pending）
 // ============================================================
 
 /**
  * ADR Number      : ADR-2026-08-26-026
- * Status          : Proposed（不是 Accepted——记录本身不构成批准）
- * Decision Date   : (pending — 等待 Carson 明确批准后填写)
+ * Status          : **Accepted**（2026-09-11——Carson 对「I.3」「I.5」
+ *                   三个 DECISION REQUIRED 逐一批准，见
+ *                   00_Drag_Ordering_ADR.gs「J.1」「J.2」「J.3」）
+ * Decision Date   : 2026-09-11
  * Supersedes      : (none)
  * Superseded By   : (none)
- * Affected Modules: 无代码改动——本条目前只是分析/记录，UI-I6 保持
- *                   BLOCKED_PENDING_ARCHITECTURE_DECISION
+ * Affected Modules: 15_Setup.gs（TaskViewOrder 建表/表头修复/诊断清单）、
+ *                   12_TaskQueryEngine.gs（getTaskViewOrder）、
+ *                   20_TaskEngine.gs（updateTaskOrder）、
+ *                   10_ProjectionEngine.gs（VIEW_ORDER_UPDATED case +
+ *                   projectViewOrderUpdated_ + _replaceTaskViewOrderRows_）、
+ *                   11_ProjectionRebuilder__UI_I6_ADDITIONS.gs（新增，
+ *                   rebuildTaskViewOrderProjection）、50_UIBridge.gs
+ *                   （ui_updateTaskOrder + ui_getConvertibleTasks 的
+ *                   view_order_index 联查）、ui_index.html（Manual sort/
+ *                   drag handle/Pointer Events）、
+ *                   58_Tests_DragOrdering.gs（新增）、
+ *                   00_Data_Ownership.gs「一」（TaskViewOrder 登记）。
+ *                   全部实现细节、逐文件改动理由见
+ *                   00_Drag_Ordering_ADR.gs「J.6」。
  * Related ADR     : (none——本条是本项目第一次正式讨论 View 层排序
  *                   数据的 ownership)
  *
@@ -1275,42 +1290,49 @@
  *   （Model 1/2/3）、Model 3 的 Ownership 逐 context 结论，见
  *   00_Drag_Ordering_ADR.gs 全文，尤其 Section G。
  *
- * Decision（本条记录的是"提议"，不是"已决定"）
- *   提议采用 Model 3——Context-Scoped Ordering Entity（独立的
- *   TaskViewOrder 实体，{context_key, task_id, order_index}），而非
- *   Model 1（Task-owned scalar）或 Model 2（Project-owned array）。
- *   完整 identity/owner/storage/lifecycle/event semantics/projection
- *   behavior/cross-device behavior/deletion behavior/orphan behavior
- *   规格见 00_Drag_Ordering_ADR.gs Section G。
+ * Decision
+ *   采用 Model 3——Context-Scoped Ordering Entity（独立的
+ *   TaskViewOrder 实体，{chat_id, context_key, task_id, order_index,
+ *   updated_time}），而非 Model 1（Task-owned scalar）或 Model 2
+ *   （Project-owned array）。完整 identity/owner/storage/lifecycle/
+ *   event semantics/projection behavior/cross-device behavior/
+ *   deletion behavior/orphan behavior 规格见 Section G/H.3；三个
+ *   Phase 2 产品判断（Phase 2 范围/Filter+拖动策略/mobile 手势）的
+ *   批准结果见「J.1」「J.2」「J.3」。
  *
- * Consequences（如果被批准，预期的影响——目前是预测，不是既定事实）
+ * Consequences（实际结果，不再是预测）
  *   正面：排序数据不需要在 Task/Project 之间来回搬迁；同一套模式可以
  *   被本项目未来的 Domain-local context 复用，也可以被 Life Execution
  *   OS 用同样的形状（不同的表）复用于 Today/Weekly/Goal 这类跨 Domain
- *   context。
- *   代价：新增一张表、一个新的写权限归属（10_ProjectionEngine.gs
- *   扩展）、新增一类事件（VIEW_ORDER_UPDATED）。
+ *   context；Task 自己的 schema/Identity 逐字未变（见「J.4」+对应测试）。
+ *   代价：新增一张表（TaskViewOrder）、写权限归属
+ *   10_ProjectionEngine.gs（扩展）、新增一类事件（VIEW_ORDER_UPDATED，
+ *   故意不进 Timeline，见「J.5」+ 10_ProjectionEngine.gs 该地图注释）。
  *
  * Boundary
- *   本条批准与否，不影响、不阻塞 Track 2（UI-I1~I5 / UI Create
+ *   本条批准与实现，不影响、不阻塞 Track 2（UI-I1~I5 / UI Create
  *   Capability）——四条线独立推进是 Carson 本窗口明确要求的治理约定。
- *   在 Carson 明确批准这条 ADR 之前：UI-I6 保持
- *   BLOCKED_PENDING_ARCHITECTURE_DECISION，不实现任何排序相关代码，
- *   即使 Model 3 分析已经写完、即使这份分析本身看起来完整——"分析
- *   完成"不等于"决定批准"，两者在本项目治理体系里必须分开陈述。
+ *   本次 implementation 严格限于 Phase 2 范围（「J.1」），Project/
+ *   Workflow/Review 详情视图的 ordering、Filter-aware merge 算法均
+ *   明确排除在外（见「J.7」Future Scope），不是遗漏。
  *
  * Notes
- *   本条目是本次 checkpoint 新增的记录动作，目的是让这个待决项目在
- *   ADR Log 里可查、可追踪，而不是只活在独立的 00_Drag_Ordering_ADR.gs
- *   文件里、在 Log 层面无迹可寻。记录本身不改变这个决定的批准状态。
- *   Carson 批准或否决后，本条目需要相应更新 Status/Decision Date，
- *   并在 00_Project_State.gs 相应章节同步。
+ *   本条目最初是 2026-09-10 checkpoint 新增的记录动作，目的是让这个
+ *   待决项目在 ADR Log 里可查、可追踪。
  *
  *   【2026-09-10 追加】00_Drag_Ordering_ADR.gs 新增 I 节，补上 Sort
  *   交互/UX Contract/失败处理分析（A-H 原本完全没写这部分）。三个
  *   具体待决问题：Phase 2 范围/Filter+拖动策略/mobile 手势。本条目
- *   Status 不变，仍是 **Proposed**——新增分析不构成批准，跟本条目
- *   原文最后一句"分析完成不等于决定批准"是同一条纪律。
+ *   Status 当时不变，仍是 Proposed——新增分析不构成批准。
+ *
+ *   【2026-09-11 追加，本次】Carson 对上述三个待决问题逐一批准（见
+ *   00_Drag_Ordering_ADR.gs「J.1」「J.2」「J.3」），Status 升级为
+ *   **Accepted**，同一窗口内完成 implementation（「J.6」）并跑通
+ *   STATIC/AUTOMATED 验证（58_Tests_DragOrdering.runDragOrderingGate()）
+ *   ——LIVE 验证（真实浏览器拖拽 + 真实 Spreadsheet）仍然 PENDING，
+ *   需要 Carson 执行，最小 LIVE Gate 清单见对话记录 F 节，不在本文件
+ *   重复。UI-I6 整体状态：**ACCEPTED / IMPLEMENTATION READY，
+ *   STATIC/AUTOMATED VERIFIED，LIVE TEST PENDING**。
  */
 
 // ============================================================

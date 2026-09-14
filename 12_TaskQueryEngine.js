@@ -61,7 +61,12 @@
  *
  * 架构铁律（00_Project_Constitution.gs P6 铁律5）：
  *  - 本模块是本项目唯一允许直接读 Tasks/ActiveTasks/TaskStatistics/
- *    TaskFilters 这几张 Sheet 的模块。
+ *    TaskFilters 这几张 Sheet 的模块。【2026-09-11 新增】TaskViewOrder
+ *    加入这份名单——跟前四张表同一条规则："写入权"在
+ *    10_ProjectionEngine.gs（见 00_Data_Ownership.gs「一」新增行），
+ *    "读取权"在本模块，不新开一个专门的 Query 模块（见
+ *    00_Drag_Ordering_ADR.gs「H.3」"而不是开一个新模块"这条对写入侧的
+ *    要求，读取侧比照同一个经济性原则）。
  *  - 绝对禁止读 Events 表 / 调 EventBus / 调 deriveTaskState_。
  *  - 每次查询只批量读一次 Sheet（_readAllTasks_），读出来的数组转交给
  *    22_PriorityEngine / 23_SearchEngine / 24_ViewEngine / 25_DashboardEngine /
@@ -84,8 +89,10 @@
  *                           读 ActiveTasks（只用于"只关注非终态任务"的
  *                           高频视图查询，见文件头 V4.8 修复说明——这个
  *                           权限本来就在架构铁律里，V4.8 只是第一次真正
- *                           用到它）；其余三张只读表由对应 Engine 各自的
- *                           职责覆盖，本身不重复读
+ *                           用到它）；TaskViewOrder（2026-09-11 新增，
+ *                           UI-I6，只做 chat_id+context_key 精确匹配读，
+ *                           不排序不过滤）；其余三张只读表由对应 Engine
+ *                           各自的职责覆盖，本身不重复读
  *   Writes                : none
  *   Public API            : getTask, getTasks, getPendingTasks,
  *                           getCompletedTasks, getTodayTasks,
@@ -95,7 +102,8 @@
  *                           getArchivedTasksInline, getArchivedTasks,
  *                           getPriorityTasks, searchTasks, getDashboard,
  *                           getStatistics, getTasksByProject（Sprint 1
- *                           新增）, getTasksByWorkflow（Sprint 1 新增）
+ *                           新增）, getTasksByWorkflow（Sprint 1 新增）,
+ *                           getTaskViewOrder（2026-09-11 新增，UI-I6）
  *   Dependencies          : 05_SheetUtils.gs（getSheet_/getHeaderMap_）、
  *                           22_PriorityEngine / 23_SearchEngine /
  *                           24_ViewEngine / 25_DashboardEngine /
@@ -122,6 +130,7 @@ var TaskQueryEngine = (function () {
   var TASKS_SHEET        = 'Tasks';
   var ACTIVE_TASKS_SHEET = 'ActiveTasks'; // V4.8新增，见文件头修复说明
   var TASK_STATS_SHEET   = 'TaskStatistics';
+  var TASK_VIEW_ORDER_SHEET = 'TaskViewOrder'; // 【2026-09-11新增，UI-I6/ADR-026】
 
   // ============ 内部：批量读整张 Sheet（本模块唯一的 Sheet I/O 入口） ============
 
@@ -249,6 +258,33 @@ var TaskQueryEngine = (function () {
     return _readAllRows_(TASKS_SHEET).filter(function (t) {
       return String(t.workflow_id || '') === String(workflowId);
     });
+  }
+
+  /**
+   * 【2026-09-11 新增，UI-I6 Drag Ordering，ADR-2026-08-26-026】
+   * 读 TaskViewOrder——不是 Task 的字段，是独立的 Domain-owned 排序
+   * Read Model 表（见 00_Drag_Ordering_ADR.gs「G」「H.3」「J」），复合
+   * 键 (chat_id, context_key, task_id)。本函数只做 chat_id+context_key
+   * 两列的精确匹配读取，不涉及任何排序/过滤逻辑本身——"怎么用这份
+   * order_index 数据排序"仍然是前端 sortTasks() 的职责（跟既有 UI-I1
+   * "Sort 逻辑在浏览器端"的既有约定一致，见 00_Known_Limitations.gs
+   * 「五」，这里只是多了一个可供排序参考的字段来源，排序逻辑本身没有
+   * 挪动位置）。
+   * @param {string} chatId
+   * @param {string} contextKey  Phase 2 目前唯一取值 'ALL_OPEN_TASKS'
+   * @returns {Object<string,number>}  {task_id: order_index}，找不到的
+   *   task_id 不会出现在返回对象里（调用方按 hasOwnProperty 判断，不是
+   *   按 undefined 判断，避免跟"值恰好是 0"混淆）
+   */
+  function getTaskViewOrder(chatId, contextKey) {
+    var rows = _readAllRows_(TASK_VIEW_ORDER_SHEET).filter(function (r) {
+      return String(r.chat_id) === String(chatId) && String(r.context_key) === String(contextKey);
+    });
+    var map = {};
+    rows.forEach(function (r) {
+      map[r.task_id] = Number(r.order_index);
+    });
+    return map;
   }
 
   /**
@@ -451,6 +487,7 @@ var TaskQueryEngine = (function () {
     getTasks:            getTasks,
     getTasksByProject:   getTasksByProject,
     getTasksByWorkflow:  getTasksByWorkflow,
+    getTaskViewOrder:    getTaskViewOrder,
     getPendingTasks:     getPendingTasks,
     getCompletedTasks:   getCompletedTasks,
     getTodayTasks:       getTodayTasks,

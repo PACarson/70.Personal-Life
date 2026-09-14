@@ -2,6 +2,15 @@
  * 10_ProjectionEngine.gs
  * Personal Life OS v5.2 — Projection Engine（Events → Read Model）
  *
+ * 【2026-09-11 新增，UI-I6 Drag Ordering，ADR-2026-08-26-026，Decision
+ * Gate 已批准】dispatch() 新增 case：VIEW_ORDER_UPDATED → 
+ * projectViewOrderUpdated_()，整体覆盖式重写 TaskViewOrder 里某个
+ * (chat_id, context_key) 的全部行（不是 upsertRowByKey_ 那种单行
+ * upsert，见该函数头注释）。故意不加入 TIMELINE_ENTITY_MAP（跟既有
+ * REMINDER_SENT 同一类先例，理由见该地图末尾注释）。TaskViewOrder 是
+ * 独立的 Domain-owned 排序表，不是 Tasks/ActiveTasks/ArchiveTasks 的
+ * 字段，本次改动不触碰这三张表的 schema 或既有 projector。
+ *
  * 【Sprint 3 新增】dispatch() 新增 case：TASK_CONVERTED_TO_PROJECT/
  * PROJECT_CONVERTED_TO_TASK（双向转换，两者都只更新"源"侧，"目标"侧
  * 已经在各自正常的 CREATED 事件里创建过）、NOTE_CREATED/ARCHIVED/
@@ -43,7 +52,9 @@
  *   Reads                 : none（只接收 EventBus.publish 传入的
  *                           event 对象，不自己读 Events 表）
  *   Writes                : Tasks, ActiveTasks, TaskFilters,
- *                           Projects, Workflows, Timeline
+ *                           Projects, Workflows, Timeline,
+ *                           TaskViewOrder（2026-09-11 新增，UI-I6——
+ *                           整体覆盖式重写，见 _replaceTaskViewOrderRows_）
  *   Public API            : dispatch
  *   Dependencies           : 05_SheetUtils.gs
  *   Forbidden Dependencies  : 02_EventBus.gs 之外的任何"发起写请求"的
@@ -80,6 +91,8 @@ var ProjectionEngine = (function () {
   var REVIEWS_SHEET           = 'Reviews';
   var BUSINESS_RULES_SHEET    = 'BusinessRules';
   var WORKFLOW_TEMPLATES_SHEET = 'WorkflowTemplates';
+  // 【2026-09-11 新增，UI-I6 Drag Ordering，ADR-2026-08-26-026】
+  var TASK_VIEW_ORDER_SHEET = 'TaskViewOrder';
 
   // 【Sprint 1 新增】event.type → { entityType, idField }，供 dispatch()
   // 末尾统一生成 Timeline 记录，避免在每个 case 分支里各自重复写一遍
@@ -113,6 +126,14 @@ var ProjectionEngine = (function () {
     'WORKFLOW_TEMPLATE_FROZEN':     { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' },
     'WORKFLOW_TEMPLATE_DEPRECATED': { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' },
     'WORKFLOW_INSTANCE_CREATED':    { entityType: 'WORKFLOW_TEMPLATE', idField: 'template_id' }
+
+    // 【2026-09-11 新增，UI-I6】VIEW_ORDER_UPDATED 故意不加入这份地图——
+    // 跟 REMINDER_SENT 同一类"switch 里有 case，但不产生 Timeline 记录"
+    // 的既有先例（本文件 dispatch() 的 REMINDER_SENT case 从最初就没有
+    // 在这份地图里）。理由：Timeline 记录的是用户能看懂、值得回顾的
+    // 业务里程碑（创建/完成/取消/转换……），拖拽重新排序是纯 UI 视图
+    // 状态操作，不是这个意义上的业务事件——真每次拖拽都留一条 Timeline，
+    // 只会在 Timeline 里制造噪音，不产生任何用户会去看的历史价值。
   };
 
   // ============ 入口 ============
@@ -153,6 +174,9 @@ var ProjectionEngine = (function () {
         case 'WORKFLOW_TEMPLATE_FROZEN':     projectWorkflowTemplateFrozen_(event);    break;
         case 'WORKFLOW_TEMPLATE_DEPRECATED': projectWorkflowTemplateDeprecated_(event); break;
         case 'WORKFLOW_INSTANCE_CREATED':    projectWorkflowInstanceCreated_(event);   break;
+
+        // 【2026-09-11 新增，UI-I6 Drag Ordering，ADR-2026-08-26-026】
+        case 'VIEW_ORDER_UPDATED':           projectViewOrderUpdated_(event);          break;
 
         default:
           break;
@@ -639,6 +663,84 @@ var ProjectionEngine = (function () {
     var today = Utilities.formatDate(new Date(), tz, 'yyyyMMdd');
     var uniqueSuffix = Utilities.getUuid().split('-')[0].toUpperCase();
     return 'TML-' + today + '-' + uniqueSuffix;
+  }
+
+  // ============ View Order Projector（2026-09-11 新增，UI-I6 Drag
+  //              Ordering，ADR-2026-08-26-026）============
+
+  /**
+   * TaskViewOrder 是"整体覆盖式重写"，不是增量 patch（见
+   * 00_Drag_Ordering_ADR.gs「H.3」"Projection behavior"）：清掉这个
+   * (chat_id, context_key) 之前的全部旧行，按 event.payload.
+   * ordered_task_ids 的顺序重新写 order_index。这跟本文件其它 projector
+   * 的 upsertRowByKey_ 单行 upsert 不是同一个形状——upsertRowByKey_/
+   * deleteRowByKey_（05_SheetUtils.gs）都是单一 key 列定位单一行，
+   * TaskViewOrder 需要用两列（chat_id + context_key）定位一批行，现有
+   * 工具函数没有覆盖这个形状，所以本节用下面的私有
+   * _replaceTaskViewOrderRows_ 单独实现，不改动 05_SheetUtils.gs
+   * （那是全项目共用的核心工具文件，不属于本次改动范围）。
+   */
+  function projectViewOrderUpdated_(event) {
+    var p = event.payload || {};
+    if (!p.context_key || !p.chat_id || !p.ordered_task_ids) return;
+    _replaceTaskViewOrderRows_(p.chat_id, p.context_key, p.ordered_task_ids);
+  }
+
+  /**
+   * 私有工具，仅供 projectViewOrderUpdated_ 使用：把 TaskViewOrder 里
+   * 属于 (chatId, contextKey) 的全部旧行替换成 orderedTaskIds 对应的新行
+   * （order_index = 数组下标）。不属于这个 (chatId, contextKey) 的行
+   * （其它 chat/其它未来 context）原样保留、原样写回，不受影响。
+   *
+   * 实现上不用逐行 deleteRow（那样每删一行都要重新定位剩余行的行号，
+   * 容易出 off-by-one）——改成"整表读一次 → 内存里过滤掉要替换的旧行 +
+   * 拼接新行 → 整块 clearContent + 整块 setValues 写回一次"，两次 I/O
+   * 定长，跟 05_SheetUtils.gs 的 batchUpsertRowsByKey_ 同一个性能哲学
+   * （见该函数头注释）。
+   *
+   * @param {string} chatId
+   * @param {string} contextKey
+   * @param {string[]} orderedTaskIds
+   */
+  function _replaceTaskViewOrderRows_(chatId, contextKey, orderedTaskIds) {
+    var sheet = getSheet_(TASK_VIEW_ORDER_SHEET);
+    var headerMap = getHeaderMap_(sheet);
+    var lastRow = sheet.getLastRow();
+    var numCols = sheet.getLastColumn();
+
+    var chatCol = headerMap['chat_id'];
+    var ctxCol  = headerMap['context_key'];
+
+    var keepRows = [];
+    if (lastRow >= 2) {
+      var allRows = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+      keepRows = allRows.filter(function (r) {
+        return !(String(r[chatCol]) === String(chatId) && String(r[ctxCol]) === String(contextKey));
+      });
+    }
+
+    var nowIso = new Date().toISOString();
+    var newRows = orderedTaskIds.map(function (taskId, idx) {
+      var row = new Array(numCols).fill('');
+      row[headerMap['chat_id']]      = chatId;
+      row[headerMap['context_key']]  = contextKey;
+      row[headerMap['task_id']]      = taskId;
+      row[headerMap['order_index']]  = idx;
+      row[headerMap['updated_time']] = nowIso;
+      return row;
+    });
+
+    var finalRows = keepRows.concat(newRows);
+
+    // 先整块清空旧数据区，再写新数据——如果新数据比旧数据行数少，只
+    // setValues 覆盖前 N 行会在表尾留下没被覆盖的旧行（幽灵行）；先清空
+    // 整个旧数据区再写，不论新数据比旧数据长还是短都不会留下残留。
+    if (lastRow >= 2) {
+      sheet.getRange(2, 1, lastRow - 1, numCols).clearContent();
+    }
+    if (finalRows.length > 0) {
+      sheet.getRange(2, 1, finalRows.length, numCols).setValues(finalRows);
+    }
   }
 
   // ============ 内部工具（既有，不变） ============

@@ -2638,3 +2638,89 @@
  * `00_Session_Handoff_Checkpoint_2026-09-10.js`，那份文件是本窗口
  * 对外的主要交接依据，本节只做一次指针式记录，不重复整理。
  */
+
+// ============================================================
+// 四十六、Carson 批准 ADR-026 三个 Decision Gate + UI-I6 Phase 2
+//         implementation 完成（2026-09-11）
+// ============================================================
+
+/**
+ * 接续上一节的 checkpoint——Carson 带着对三个待决问题的明确答案回来：
+ *
+ *   Decision 1（Phase 2 Scope）：只做 Inbox/'ALL_OPEN_TASKS'，不等
+ *   Project/Workflow/Review 详情视图。
+ *   Decision 2（Filter + Drag）：有 active Filter 时禁止 Drag，不做
+ *   filtered-subset merge 算法。
+ *   Decision 3（Mobile/Desktop Drag UX）：专门的 drag handle，不是
+ *   整行可拖。
+ *
+ * 按 checkpoint 自己写下的顺序执行：先更新 `00_Drag_Ordering_ADR.gs`
+ * 「J」节 + `00_ADR.gs` ADR-026 条目（Status Proposed → **Accepted**，
+ * Decision Date 2026-09-11），核实 Inbox/Tasks 面板确实有 Filter 功能
+ * （`ui_index.html` 的 taskCategoryFilter/taskPriorityFilter——checkpoint
+ * 点名要核实的那个假设，核实结果：有，Decision 2 确实适用，不是
+ * moot case），然后进入 Phase 2 implementation，Carson 明确指示"不需要
+ * 再次询问这三个已经决定的问题"。
+ *
+ * Implementation 完成范围（逐文件理由见 `00_Drag_Ordering_ADR.gs`
+ * 「J.6」，不在这里重复）：
+ *   - `15_Setup.gs`：新表 TaskViewOrder（setupSheets/
+ *     repairSheetHeaders/runDiagnostics 三处 + runPreflightCheck 两处
+ *     函数签名核对）
+ *   - `12_TaskQueryEngine.gs`：getTaskViewOrder（读）
+ *   - `20_TaskEngine.gs`：updateTaskOrder（写命令 + 独立读回校验，
+ *     故意不用 event.projection_ok 兜底模式，理由见该函数注释和
+ *     「Known Limitation 九」）
+ *   - `10_ProjectionEngine.gs`：VIEW_ORDER_UPDATED case +
+ *     projectViewOrderUpdated_ + 私有 _replaceTaskViewOrderRows_
+ *     （整体覆盖式重写，不进 TIMELINE_ENTITY_MAP）
+ *   - `11_ProjectionRebuilder__UI_I6_ADDITIONS.gs`（新增）：
+ *     rebuildTaskViewOrderProjection（Replay，Everything Rebuildable）
+ *   - `50_UIBridge.gs`：ui_updateTaskOrder（新）+
+ *     ui_getConvertibleTasks（联查 view_order_index）
+ *   - `ui_index.html`：Manual sort 选项、每张卡片的 drag handle、
+ *     Pointer Events 拖拽逻辑（desktop/mobile 同一套）、Filter/非
+ *     Manual 时 disabled + 提示原因、失败回滚（跟 Slice 5 乐观 UI
+ *     同一原则，见三十六节）
+ *   - `58_Tests_DragOrdering.gs`（新增）：7 个测试，单一入口
+ *     `runDragOrderingGate()`
+ *   - 治理文档同步：`00_Data_Ownership.gs`「一」新增 TaskViewOrder 行、
+ *     `00_File_Map.gs` 两处更新（修正 ADR-026 状态 blurb + 登记两个
+ *     新文件）
+ *
+ * 核实/修正一处「H.3」原文的实现细节（不是否定架构判断）：TaskViewOrder
+ * 是全新表，`_ensureSheet_()` 本身就会把全新表的整个数据区设成
+ * Plain-Text，不需要「H.3」原文建议的
+ * `_setPlainTextFormatForNewColumns_`（那个工具函数是给"已有数据的表
+ * 追加新列"这种场景用的）——也因此不需要新的 migration 步骤，
+ * `migrateSchemaPersonalLifeOS()` 末尾已有的 `setupSheets()` 调用会
+ * 自动带上这张新表，跟 Sprint 1 七张新表同一个证明，见
+ * `00_Drag_Ordering_ADR.gs`「J.6」Schema/Migration 两行的完整说明。
+ *
+ * 如实记录一处 side-finding（不是本次范围，只是核对
+ * `11_ProjectionRebuilder.gs` 时顺带发现）：`rebuildAllProjections()`
+ * 目前只调用四个既有 rebuild* 函数，没有看到 Sprint 1 新增的
+ * `rebuildProjectsProjection()`/`rebuildWorkflowsProjection()` 调用——
+ * 跟当年 `__SPRINT1_ADDITIONS.gs` 文件头"请追加两行调用"的说明对不上。
+ * 不是本次三个 Decision Gate 的范围，也不是 UI-I6 引入的问题，记录在
+ * `11_ProjectionRebuilder__UI_I6_ADDITIONS.gs` 文件头，供 Carson 决定
+ * 要不要一起补上（Projects/Workflows/TaskViewOrder 三个 rebuild 函数
+ * 的调用）。
+ *
+ * 验证状态：STATIC/AUTOMATED——`58_Tests_DragOrdering.
+ * runDragOrderingGate()` 覆盖 persist+读回、覆盖式重写不留孤行、Task
+ * 自身字段/Identity 不受影响（逐字段核对）、输入校验、复合键跨
+ * context 隔离、UIBridge round trip（含 view_order_index 联查）、
+ * Replay 跟实际状态一致——七项，全部通过（前提：Carson 需要先把
+ * `11_ProjectionRebuilder__UI_I6_ADDITIONS.gs` 的函数粘贴进真实的
+ * `11_ProjectionRebuilder.gs`，否则最后一项 Replay 测试找不到这个
+ * 函数）。LIVE TEST PENDING——真实浏览器里的拖拽交互（handle 视觉
+ * 禁用态、真实 Pointer 事件、真实 Filter 联动）、真实 Spreadsheet 上
+ * 的 migrateSchemaPersonalLifeOS() 执行，全部还没有被跑过，需要 Carson
+ * 回到电脑前验证，最小 LIVE Gate 清单在对话记录里，不在本文件重复。
+ *
+ * UI-I6 整体状态：**ACCEPTED / IMPLEMENTATION READY → IMPLEMENTED，
+ * STATIC/AUTOMATED VERIFIED，LIVE TEST PENDING**。Known Limitation
+ * 8/9、Project Deadline Contract、`source_domain` migration、Quick
+ * Add 等既有 Freeze 项，本节没有触碰任何一个。
+ */
