@@ -553,3 +553,46 @@
  * （尤其是任何依赖"projection 失败时静默、不影响主流程"这个当前行为
  * 的既有代码/测试），不应该在其它任务的顺带改动里完成。
  */
+
+// 十、rebuildAllProjections() Recovery Coverage — 六张表没有任何 rebuild
+//     实现（2026-09-15，Decision 3 审计发现，记录不修）
+
+/**
+ * 背景：`rebuildAllProjections()` 曾经只调用 Tasks 相关四个 rebuild*
+ * 函数，漏掉了已经存在的 `rebuildProjectsProjection`/
+ * `rebuildWorkflowsProjection`（Sprint 1）和
+ * `rebuildTaskViewOrderProjection`（UI-I6）——这个具体缺口已经在
+ * 2026-09-15 修复（三个函数迁移进 `11_ProjectionRebuilder.gs` 本体，
+ * `rebuildAllProjections()` 现在正确调用全部七个，见
+ * `00_Project_State.gs`「四十八」）。
+ *
+ * 但同一次审计（"Phase 1 Recovery Completeness Audit"，逐表核对
+ * Projection → Rebuild Function → 顶层调用覆盖）还发现，以下六张
+ * Read Model 表**完全没有对应的 rebuild 函数**（不是"存在但没被调用"，
+ * 是"压根没写过"）：
+ *
+ *   - ArchiveTasks（只有 schema 迁移逻辑，从未出现在任何
+ *     rebuild*Projection 里）
+ *   - Timeline（`10_ProjectionEngine.gs` 的 `_appendTimelineEntry_`
+ *     只在事件发生的当下追加一条，没有对应的"从 Events 全量重放重建
+ *     Timeline"能力）
+ *   - Notes、Reviews、BusinessRules、WorkflowTemplates（Sprint 3
+ *     新增的四张表，创建时只写了 Engine/Query/Projection 三层，没有
+ *     配套写 rebuild 函数）
+ *
+ * 这六张表如果 Read Model 跟 Events 出现不一致（比如某次
+ * `ProjectionEngine.dispatch` 因为「九」描述的异常吞掉问题静默失败），
+ * 目前没有任何"重放 Events 修复它"的手段——只能手动订正 Sheet 数据，
+ * 跟"Everything Rebuildable"这条既有原则不符。
+ *
+ * 这次任务的范围明确是"让已有 rebuild 函数被正确调用"，不是"给还没有
+ * rebuild 函数的表设计新的 rebuild 架构"（Carson 本轮任务说明原话），
+ * 所以这六个只记录、不动手实现。如果未来要补，Timeline 需要额外想清楚
+ * "重放时要不要先清空已有 Timeline 记录再重建"这个问题（Timeline 是
+ * 面向用户的历史记录展示，跟 Projects/Workflows 那种"每个 entity 一行"
+ * 的重放形状不完全一样，直接照抄可能会产生重复记录）；Notes/Reviews/
+ * BusinessRules/WorkflowTemplates 大概率可以照抄
+ * `rebuildProjectsProjection` 的模式（各自的 Engine 应该已经有
+ * `deriveFromEvent`/`materializeXxxRow_`，需要逐个核实，本次未核实）。
+ */
+

@@ -482,13 +482,169 @@ function rebuildTaskFiltersProjection() {
 }
 
 /**
+ * 【2026-09-15 迁移合并，Recovery Completeness Fix】以下三个函数原本
+ * 分别活在 11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs（
+ * rebuildProjectsProjection/rebuildWorkflowsProjection，Sprint 1 时新增）
+ * 和 11_ProjectionRebuilder__UI_I6_ADDITIONS.gs（rebuildTaskViewOrderProjection，
+ * UI-I6 时新增）——两份文件当时都明确要求"请把这些函数粘贴进
+ * rebuildAllProjections()"，但那次粘贴动作实际上从未发生，
+ * rebuildAllProjections() 一直只调用下面 Task 相关的四个，这是本次
+ * 修复的起因（见对话记录 Decision 3）。现在把三个函数逐字迁移到这里
+ * （只搬运位置，函数体一个字节都没有改），并从那两份 __ADDITIONS 文件里
+ * 删除对应定义（避免同名函数在两个文件里各存一份，粘贴进真实 GAS 项目后
+ * 后加载的文件会静默覆盖先加载的同名声明——见 05_SheetUtils.gs 文件头
+ * 对这同一类风险的既有说明），那两份文件现在只保留没有被合并过来的部分
+ * （migrateSchemaPersonalLifeOS/_appendMissingColumns_/
+ * renameSheetsToPascalCase，以及一段"已合并"的指向说明）。
+ */
+
+/**
+ * 【Everything Rebuildable】从 Events 表全量重放，重建 Projects。跟
+ * rebuildTasksProjection 同一个模式——ProjectEngine.deriveFromEvent 折叠
+ * 状态，ProjectEngine.materializeProjectRow_ 按 project_id 单行 upsert
+ * （不是清空重写：Projects 不是像 ActiveTasks 那样的"过滤子集"视图，
+ * 每一个存在的 project_id 永远对应一个 PROJECT_CREATED 事件，重放不会
+ * 留下"表里有行但 Events 里推导不出"的孤行风险，用 upsert 就足够，不需要
+ * 先清空）。
+ */
+function rebuildProjectsProjection() {
+  Logger.log('=== rebuildProjectsProjection ===');
+  var events = EventBus.getAllEvents();
+  var state = {};
+  events.forEach(function (e) {
+    ProjectEngine.deriveFromEvent(e, state);
+  });
+
+  Object.keys(state).forEach(function (projectId) {
+    ProjectEngine.materializeProjectRow_(projectId, state[projectId]);
+  });
+
+  Logger.log('✅ rebuildProjectsProjection 完成，共重建 ' + Object.keys(state).length + ' 个 Project');
+  return Object.keys(state).length;
+}
+
+/**
+ * 同上，Workflows 版本——WorkflowEngine.deriveFromEvent /
+ * materializeWorkflowRow_，同一个"每个 entity 一份、按主键 upsert"模式，
+ * 同样不需要先清空。
+ */
+function rebuildWorkflowsProjection() {
+  Logger.log('=== rebuildWorkflowsProjection ===');
+  var events = EventBus.getAllEvents();
+  var state = {};
+  events.forEach(function (e) {
+    WorkflowEngine.deriveFromEvent(e, state);
+  });
+
+  Object.keys(state).forEach(function (workflowId) {
+    WorkflowEngine.materializeWorkflowRow_(workflowId, state[workflowId]);
+  });
+
+  Logger.log('✅ rebuildWorkflowsProjection 完成，共重建 ' + Object.keys(state).length + ' 个 Workflow');
+  return Object.keys(state).length;
+}
+
+/**
+ * TaskViewOrder（UI-I6，ADR-2026-08-26-026）——跟上面两个不是同一个
+ * 重放形状。Projects/Workflows 是"每个 entity_id 一行、互不相关"；
+ * TaskViewOrder 的当前状态按 (chat_id, context_key) 分组，一组内的多行
+ * 必须整体替换（跟 10_ProjectionEngine.gs 的 projectViewOrderUpdated_/
+ * _replaceTaskViewOrderRows_ 是同一个"整体覆盖式重写"语义）——按
+ * (chat_id, context_key) 分组，每组只保留时间上最后一个
+ * VIEW_ORDER_UPDATED 事件的内容，最后一次性重建整张表。假设
+ * EventBus.getAllEvents() 按时间顺序返回（Events 表只增不删，新事件
+ * 永远追加在最后，读出来天然是时间顺序，跟本文件其它 rebuild*Projection
+ * 的既有假设一致）。
+ */
+function rebuildTaskViewOrderProjection() {
+  Logger.log('=== rebuildTaskViewOrderProjection ===');
+  var events = EventBus.getAllEvents();
+  var groups = {}; // key: chatId + '||' + contextKey → 最后一次事件的 payload（后面覆盖前面）
+
+  events.forEach(function (e) {
+    if (e.type !== 'VIEW_ORDER_UPDATED') return;
+    var p = e.payload || {};
+    if (!p.chat_id || !p.context_key || !p.ordered_task_ids) return;
+    groups[p.chat_id + '||' + p.context_key] = p;
+  });
+
+  var sheet;
+  try {
+    sheet = getSheet_('TaskViewOrder');
+  } catch (e) {
+    Logger.log('⚠️ TaskViewOrder Sheet 不存在，跳过重建（先跑 setupSheets() 建表）');
+    return 0;
+  }
+
+  var lastCol = sheet.getLastColumn();
+  var headerMap = getHeaderMap_(sheet);
+
+  var nowIso = new Date().toISOString();
+  var finalRows = [];
+  Object.keys(groups).forEach(function (key) {
+    var p = groups[key];
+    p.ordered_task_ids.forEach(function (taskId, idx) {
+      var row = new Array(lastCol).fill('');
+      row[headerMap['chat_id']]      = p.chat_id;
+      row[headerMap['context_key']]  = p.context_key;
+      row[headerMap['task_id']]      = taskId;
+      row[headerMap['order_index']]  = idx;
+      row[headerMap['updated_time']] = nowIso;
+      finalRows.push(row);
+    });
+  });
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+  }
+  if (finalRows.length > 0) {
+    sheet.getRange(2, 1, finalRows.length, lastCol).setValues(finalRows);
+  }
+
+  Logger.log('✅ rebuildTaskViewOrderProjection 完成，共重建 ' + Object.keys(groups).length +
+    ' 个 (chat_id, context_key) 分组，' + finalRows.length + ' 行');
+  return finalRows.length;
+}
+
+/**
  * 重建全部 Read Models。
  * 【V4修复】不再调用已删除的 rebuildInventoryProjection()（见文件头注释）。
  * 【V4.4 配套 HIGH RISK 3 修复】开始前先用 EventBus.getEventCount_()（轻量，
- * 只读行数不解析内容）报一下 Events 表当前规模——下面四个 rebuild* 函数
+ * 只读行数不解析内容）报一下 Events 表当前规模——下面几个 rebuild* 函数
  * 各自都会完整读取一遍 Events（EventBus.getAllEvents() 内部超过阈值会
  * 自动打警告日志，见 02_EventBus.gs），这里提前给个总览，方便判断这次
  * 手动重建大概要花多久。
+ *
+ * 【2026-09-15 Recovery Completeness Fix，见对话记录 Decision 3】新增
+ * 三行调用：rebuildProjectsProjection/rebuildWorkflowsProjection（Sprint 1
+ * 就已经存在的函数，一直没有被这里调用过）+ rebuildTaskViewOrderProjection
+ * （UI-I6 新增）。这是本次修复的全部内容——不是新功能，是让"已经存在、
+ * 已经验证过安全的 rebuild 函数"被这个顶层 Recovery Entry Point 正确
+ * 调用，让 rebuildAllProjections() 真正对得起"Everything Rebuildable"
+ * 这条原则。
+ *
+ * 执行顺序说明（不是机械照抄 Carson 列的顺序，是核实过真实依赖关系后
+ * 确认的）：这七个函数彼此之间没有真实依赖——每一个都独立从
+ * EventBus.getAllEvents() 重新推导状态，只写自己负责的那张表，互不读取
+ * 对方刚写完的结果（逐个核对过：rebuildStatisticsProjection/
+ * rebuildTaskFiltersProjection 表面上"看起来"应该在 Tasks 重建之后跑，
+ * 但两者实际都是独立重新从 Events 推导，不读 Tasks Sheet 本身——这条
+ * 顺序依赖其实并不存在，只是历史上凑巧这么写）。新增的三个之间也没有
+ * 依赖（TaskViewOrder 不校验引用的 task_id 是否存在，见
+ * 00_Drag_Ordering_ADR.gs「H.3」Orphan behavior）。这里把新的三个放在
+ * 已有四个之后（保留原有顺序不变，最大程度降低这次改动的影响面），
+ * 三个新增之间按"核心实体（Projects/Workflows）先，跨领域的视图状态
+ * （TaskViewOrder）后"排，纯粹是可读性考虑，不是正确性要求——任何顺序
+ * 排列这七个调用，结果都应该相同（这条本身也是下面 Idempotency/Replay
+ * 校验要验证的对象之一，不是本函数头注释里口头断言就算数）。
+ *
+ * getAllEvents() 有执行期内存缓存（02_EventBus.gs `_cachedEvents`），
+ * 只有 publish() 写新事件时才失效——这次调用序列本身不写任何新事件，
+ * 所以第一个 rebuild* 函数触发一次真实的 Sheet 读取后，后面六个都会拿到
+ * 同一份缓存数组，不会出现"跑到一半 Events 又多了几行、七个函数看到的
+ * 不是同一个快照"这种情况，这是这次七个函数能保证互相一致的一个关键、
+ * 已经存在、不需要本次新增的机制。
  */
 function rebuildAllProjections() {
   Logger.log('=== rebuildAllProjections ===');
@@ -497,7 +653,10 @@ function rebuildAllProjections() {
   rebuildActiveTasksProjection();
   rebuildStatisticsProjection();  // V4新增
   rebuildTaskFiltersProjection(); // V4新增
-  Logger.log('✅ 所有 Productivity OS Projection 重建完成');
+  rebuildProjectsProjection();       // 2026-09-15 补漏，Sprint 1 就已存在
+  rebuildWorkflowsProjection();      // 2026-09-15 补漏，Sprint 1 就已存在
+  rebuildTaskViewOrderProjection();  // 2026-09-15 补漏，UI-I6 新增
+  Logger.log('✅ 所有 Productivity OS Projection 重建完成（Tasks/ActiveTasks/Statistics/TaskFilters/Projects/Workflows/TaskViewOrder，共 7 个）');
 }
 
 // ============ Step 3：校验 ============

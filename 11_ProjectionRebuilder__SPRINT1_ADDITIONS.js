@@ -95,43 +95,18 @@ function _appendMissingColumns_(sheetName, newColumns) {
  * rebuildProjectsProjection() / rebuildWorkflowsProjection()
  * ============================================================
  *
- * 【Everything Rebuildable，见既有 Architecture Principle】跟既有
- * rebuildTasksSheet_ 同一个模式——从 Events 表全量重放，重建
- * Projects / Workflows。用于灾难恢复或怀疑 Read Model 跟
- * Events 不一致时手动执行。
- *
- * 请在你既有的 rebuildAllProjections() 函数体里追加这两行调用（放在
- * 既有 rebuildTasksSheet_() 等调用旁边即可）：
- *   rebuildProjectsProjection();
- *   rebuildWorkflowsProjection();
+ * 【2026-09-15 迁移，见对话记录 Decision 3 — Recovery Completeness Fix】
+ * 这两个函数已经原样迁移进 11_ProjectionRebuilder.gs 本体（紧跟在
+ * rebuildTaskFiltersProjection 后面），rebuildAllProjections() 现在也
+ * 已经正确调用它们——本节当时写的"请追加两行调用"这条待办已经完成，
+ * 不再需要单独粘贴这两个函数进你的项目（如果你之前已经手动粘贴过一次，
+ * 请确认 11_ProjectionRebuilder.gs 里没有出现两份同名定义：GAS 是扁平
+ * 全局命名空间，同名函数后加载的文件会静默覆盖先加载的，两份定义同时
+ * 存在不会报错，但会让人搞不清实际生效的是哪一份，见
+ * 05_SheetUtils.gs 文件头对同一类风险的既有说明）。这两个函数原来的
+ * 完整实现、设计说明见 11_ProjectionRebuilder.gs 本体对应位置，本文件
+ * 不再重复保留一份等效代码。
  */
-function rebuildProjectsProjection() {
-  var events = EventBus.getAllEvents();
-  var state = {};
-  events.forEach(function (e) {
-    ProjectEngine.deriveFromEvent(e, state);
-  });
-
-  Object.keys(state).forEach(function (projectId) {
-    ProjectEngine.materializeProjectRow_(projectId, state[projectId]);
-  });
-
-  Logger.log('✅ rebuildProjectsProjection 完成，共重建 ' + Object.keys(state).length + ' 个 Project');
-}
-
-function rebuildWorkflowsProjection() {
-  var events = EventBus.getAllEvents();
-  var state = {};
-  events.forEach(function (e) {
-    WorkflowEngine.deriveFromEvent(e, state);
-  });
-
-  Object.keys(state).forEach(function (workflowId) {
-    WorkflowEngine.materializeWorkflowRow_(workflowId, state[workflowId]);
-  });
-
-  Logger.log('✅ rebuildWorkflowsProjection 完成，共重建 ' + Object.keys(state).length + ' 个 Workflow');
-}
 
 /**
  * ============================================================

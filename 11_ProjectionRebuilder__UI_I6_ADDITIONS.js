@@ -1,6 +1,20 @@
 /**
  * 11_ProjectionRebuilder__UI_I6_ADDITIONS.gs
  *
+ * ⚠️⚠️ 【2026-09-15 更新：本文件已经被合并，不要再单独粘贴】下面这个
+ * rebuildTaskViewOrderProjection() 函数已经原样迁移进
+ * 11_ProjectionRebuilder.gs 本体（紧跟在 rebuildWorkflowsProjection
+ * 后面），rebuildAllProjections() 现在也已经正确调用它——见对话记录
+ * Decision 3（Recovery Completeness Fix）。这份文件留着只是保留当时
+ * 的设计说明作历史记录，**不要**把下面的函数体再粘贴进你的真实项目一
+ * 次：如果 11_ProjectionRebuilder.gs 和这份文件同时存在同名的
+ * rebuildTaskViewOrderProjection() 定义，GAS 扁平全局命名空间下不会
+ * 报错，但会变成"哪个后加载哪个生效"，没有人能一眼看出实际运行的是
+ * 哪一份——请确认你的项目里这个函数只存在于 11_ProjectionRebuilder.gs
+ * 一处。
+ *
+ * ⚠️ 以下是原始文件内容（2026-09-11 UI-I6 交付时写的），未做任何改动：
+ *
  * ⚠️ 这不是一个完整文件——跟既有 11_ProjectionRebuilder__SPRINT1_
  * ADDITIONS.gs / __DUE_DATE_VALUE_MIGRATION.gs 同一种约定（descriptive
  * suffix 命名，见 00_File_Map.gs"附：Track 1B 迁移工具"一节）：这是要
