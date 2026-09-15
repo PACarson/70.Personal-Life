@@ -2724,3 +2724,126 @@
  * 8/9、Project Deadline Contract、`source_domain` migration、Quick
  * Add 等既有 Freeze 项，本节没有触碰任何一个。
  */
+
+// ============================================================
+// 四十七、UI-I6 LIVE Gate 实测：拖不动的 bug + 修复 + 最终 LIVE
+//         VERIFIED（2026-09-11，同一天晚些时候）
+// ============================================================
+
+/**
+ * 接续上一节。Carson 跑完四十六节列的 LIVE Gate 清单：
+ * migrateSchemaPersonalLifeOS() 建表成功、runPreflightCheck 全过、
+ * `runDragOrderingGate()` 全过、既有 regression gate（
+ * `runUIBridgeInteractionsGate`/Sprint 3 Acceptance Gate/
+ * TaskToNoteConversion/TaskToProjectPrecheck）全过——但真实浏览器里
+ * Manual 排序 + 无 Filter 时，drag handle 渲染正确、cursor 正确，
+ * 实际按住拖动完全拖不动，也没有触发 ui_updateTaskOrder 请求。
+ *
+ * 三个根因（全部在 ui_index.html 交付版本的拖拽实现里，STATIC/
+ * AUTOMATED 天然测不到——那一层测的是服务端持久化，见「四十六」）：
+ * (1) move/up/cancel 监听挂在 18px 宽的 handle 本身，指针一移动就
+ * 滑出这个区域，事件直接丢失；(2) 用 setPointerCapture 想弥补，但
+ * GAS Web App 的 iframe 沙箱下，这个 API 配合拖拽中 insertBefore
+ * 动态改 DOM 顺序，会被浏览器判定成交互上下文突变，强制触发
+ * pointercancel，跟原来"cancel 就回滚"的逻辑一起构成死锁；(3) SVG
+ * 内部圆点没设 pointer-events:none，点击可能落在子元素上。修复：
+ * move/up/cancel 改挂 document（"局部激活，全局监听"），去掉
+ * setPointerCapture，SVG 加 pointer-events:none。完整診断+修复文字
+ * 见 `00_Drag_Ordering_ADR.gs`「J.8」，这里不重复。
+ *
+ * 修复后复测：拖拽顺畅、顺序持久化正确、reload 不丢失，既有
+ * regression gate 复测仍然全过（确认修复没有波及既有功能）。
+ *
+ * **UI-I6（Drag Ordering，ADR-2026-08-26-026）最终状态：ACCEPTED /
+ * LIVE VERIFIED**——四个 Track（见「四十五」之前的记录）里第一个真正
+ * 完整走完 STATIC → AUTOMATED → REGRESSION → LIVE 全链路并拿到 LIVE
+ * VERIFIED 的新功能（不是修复，是从 Decision Gate 到可用功能整条走完）。
+ *
+ * 可复用的一般性教训（不止对拖拽有效，写在这里是因为这是第一次真正
+ * 用到手势类交互，未来任何前端手势/滑块/长按功能都适用）：手势类
+ * 交互的 pointerdown 可以留在触发它的具体元素上，但 pointermove/
+ * pointerup/pointercancel 应该挂在 document/window 上，不要挂在那个
+ * 具体元素本身；这个项目的 GAS Web App 部署形态（iframe 沙箱）下，
+ * 不要依赖 Pointer Capture 这类在沙箱里表现不稳定的高级 API。
+ *
+ * Carson 的下一步建议：UI-I6 到此完全归档，精力转向 **Project
+ * Deadline Contract**（解开 Overall Dashboard + Task→Project 阻塞的
+ * 核心决策）——本节只记录这个方向性决定，具体讨论内容留给对应的
+ * session/文件，不在这里展开。
+ */
+
+// ============================================================
+// 四十八、rebuildAllProjections() Recovery Completeness Fix（Decision 3，
+//         2026-09-15，跟「四十六」「四十七」的 Project Deadline Contract
+//         是两条独立任务，本节单独记录）
+// ============================================================
+
+/**
+ * 背景：`rebuildAllProjections()` 一直只调用 Tasks 相关四个 rebuild*
+ * 函数（`rebuildTasksProjection`/`rebuildActiveTasksProjection`/
+ * `rebuildStatisticsProjection`/`rebuildTaskFiltersProjection`），漏掉
+ * 了 Sprint 1 就新增的 `rebuildProjectsProjection`/
+ * `rebuildWorkflowsProjection`（存在于当时的
+ * `11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs`，文件头明确要求"追加
+ * 两行调用"，但这个粘贴动作从未真正发生）和 UI-I6 新增的
+ * `rebuildTaskViewOrderProjection`（同样以"待粘贴"补丁文件形式交付，
+ * 同样没有被粘贴）——这个具体缺口是 UI-I6 那次工作（见「四十六」
+ * 「四十七」）顺带发现、如实记录、当时刻意没有顺手改的 side-finding，
+ * 这次作为独立任务正式处理。
+ *
+ * Phase 0 验证（不相信旧报告，重新核对当前代码）：确认
+ * `rebuildAllProjections()` 当前确实只调用四个；确认
+ * `rebuildProjectsProjection`/`rebuildWorkflowsProjection`/
+ * `rebuildTaskViewOrderProjection` 三个函数体本身都存在、逻辑都正确
+ * （分别核对了 `ProjectEngine.deriveFromEvent`/`materializeProjectRow_`、
+ * `WorkflowEngine` 同名函数、以及 TaskViewOrder 自己的整体覆盖式重写
+ * 逻辑）；确认三者之间以及跟既有四个之间都没有真实的执行顺序依赖
+ * （逐个核对了每个 rebuild* 函数的实现——包括原本"看起来"应该有顺序
+ * 依赖的 `rebuildStatisticsProjection`，核对后发现它实际是独立从
+ * Events 重新推导，不读 Tasks Sheet，跟 Tasks 重建与否无关）；确认
+ * `EventBus.getAllEvents()` 有执行期缓存，只有 `publish()` 写新事件
+ * 才失效——这保证一次 `rebuildAllProjections()` 调用里全部七个子函数
+ * 拿到的是同一份 Events 快照，天然一致，不需要额外的同步机制。
+ *
+ * Phase 1 审计：逐表建立 Projection → Rebuild Function → 顶层调用覆盖
+ * 的对应关系，除了确认上述三个缺口，额外发现六张表**完全没有对应的
+ * rebuild 函数**（ArchiveTasks/Timeline/Notes/Reviews/BusinessRules/
+ * WorkflowTemplates）——按任务要求只记录（见
+ * `00_Known_Limitations.gs`「十」），不在本次设计新的 rebuild 架构。
+ *
+ * Phase 2 修复：把三个函数原样迁移进 `11_ProjectionRebuilder.gs`
+ * 本体（不再是"待粘贴"补丁文件），`rebuildAllProjections()` 追加三行
+ * 调用（保留原有四个顺序不变，新增三个之间的顺序纯粹是可读性考虑——
+ * 已核实这七个互相没有依赖，任何顺序结果都应该相同）。为避免同名函数
+ * 在两处文件里各存一份（GAS 扁平命名空间下会静默覆盖），同步清理了
+ * `11_ProjectionRebuilder__SPRINT1_ADDITIONS.gs`（移除已迁移的两个
+ * 函数体，保留说明性指向）和 `11_ProjectionRebuilder__UI_I6_
+ * ADDITIONS.gs`（标记为已合并，保留原文作历史记录）。
+ *
+ * Phase 3 验证（不只是 syntax test）：本地搭了一个 Node.js 环境的 GAS
+ * shim（`SpreadsheetApp`/`SecureConfig`/`Session`/`Utilities`/`Logger`
+ * 等最小可用 mock，Sheet 用内存二维数组模拟），直接加载**真实生产
+ * 代码文件**（不是重新实现一份等价逻辑）跑：用 `createProjectDirect_`/
+ * `createWorkflowDirect_`/`createTaskDirect_`/`TaskEngine.
+ * updateTaskOrder` 制造一批真实事件（2 个 Project、1 个 Workflow、3 个
+ * Task、2 次拖拽排序），快照"live"状态（State A）；跑一次
+ * `rebuildAllProjections()`，快照 State B；再跑一次，快照 State C。
+ * 结果：Projects/Workflows/TaskViewOrder 三张表 A==B==C（忽略
+ * `updated_time` 这类预期会刷新的时间戳字段），行数在三次快照之间
+ * 保持不变（没有孤行/没有重复）；TaskViewOrder 的 manual ordering
+ * 顺序本身在 rebuild 前后逐项比对完全一致；Tasks/ActiveTasks/
+ * TaskFilters（既有四个之一）同样 A==B==C，确认这次改动没有影响它们。
+ * TaskStatistics 出现一处预期内的差异：State A（0 行，因为这次模拟
+ * 场景没有触发它平时的填充路径）vs State B/C（1 行，rebuild 从 Events
+ * 重新推导出正确结果）——B==C（幂等），差异本身是"模拟场景没有走到
+ * 平时填充 TaskStatistics 的那条路径"，跟这次三个函数的修复无关，
+ * `rebuildStatisticsProjection` 本身修复前后都没有被改动。这是模拟
+ * 环境（Node.js + mock Sheet），不是 Carson 真实 GAS/Spreadsheet 上的
+ * LIVE 验证——LIVE 部分仍然需要 Carson 执行，见对话记录 J 节的最小
+ * LIVE Gate 清单。
+ *
+ * 本次没有触碰：`02_EventBus.gs`、`10_ProjectionEngine.gs`的
+ * dispatch()/publish() 语义、任何 Event payload 形状、Project Deadline
+ * Contract（「四十六」「四十七」的话题）、UI-I6 已交付的拖拽功能本身
+ * ——只是让三个已经存在、已经验证过安全的 rebuild 函数被正确调用。
+ */

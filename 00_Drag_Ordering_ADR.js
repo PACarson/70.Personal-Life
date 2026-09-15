@@ -752,4 +752,50 @@
  *     一个所有未来 Domain OS 都能复用的通用组件）——「E」已经指出的
  *     "模式可以复用，数据不可以共享"原则继续适用，抽象成通用组件是
  *     另一件事，不在这次范围。
+ *
+ * J.8 LIVE 测试事故 + 修复（2026-09-11，Carson 实测发现，同一窗口内
+ *     修复并重新验证）
+ *
+ *   现象：Manual 排序、无 Filter 前提下，handle 正确渲染、cursor 正确
+ *   显示抓取手势，但按住拖动时卡片完全不动，也没有任何
+ *   ui_updateTaskOrder 网络请求——STATIC/AUTOMATED 全绿（「J.6」
+ *   Verification 一节）没有拦住这个问题，因为那一层测试的是服务端
+ *   持久化/隔离/重放，天然看不到浏览器指针事件（跟
+ *   00_Known_Limitations.gs「五」UI-I1 Sort 当年的既有测试边界是同一类
+ *   限制，这次是拖拽版本，不是新发现的边界）。
+ *
+ *   三个根因，全部出在 ui_index.html 的原始实现（「J.6」交付的版本）：
+ *     1. move/up/cancel 监听挂在 18px 宽的 drag-handle 本身，指针一
+ *        移动就滑出这个窄区域，后续事件直接丢失。
+ *     2. 用 setPointerCapture 想弥补第 1 点，但 GAS Web App 跑在
+ *        iframe 沙箱里，这个 API 配合"拖拽中 insertBefore 不断改变
+ *        DOM 顺序"会被浏览器判定成交互上下文突变，强制触发
+ *        pointercancel；原实现的 onCancel 又立刻回滚顺序——两者一起
+ *        构成死锁：卡片刚被拖走一点就被强制打回原位，表现为"完全
+ *        拖不动"。
+ *     3. drag-handle 内部的 SVG 圆点没有设 pointer-events:none，点击
+ *        可能落在子元素上，造成指针目标的微观抖动。
+ *
+ *   修复（当次修复，见 ui_index.html 当前版本）：move/up/cancel 改成
+ *   挂在 document 上（"局部激活，全局监听"——pointerdown 仍然只认
+ *   handle，不影响 Decision 3），彻底去掉 setPointerCapture/
+ *   releasePointerCapture（根因 1、2 一次解决——document 级别监听本来
+ *   就不需要 capture 才能持续收到事件），SVG 加
+ *   `pointer-events:none`（根因 3）。
+ *
+ *   复测结果：拖拽顺畅，顺序持久化正确，刷新不丢失——**UI-I6 状态
+ *   升级为 LIVE VERIFIED**（不再是「J.6」结尾的 STATIC/AUTOMATED
+ *   VERIFIED / LIVE TEST PENDING）。既有 regression gate
+ *  （`runUIBridgeInteractionsGate`/Sprint 3 Acceptance Gate/
+ *   TaskToNoteConversion/TaskToProjectPrecheck）复测全过，确认本次
+ *   修复没有波及既有功能。
+ *
+ *   可复用的一般性教训（不只对 Drag Ordering 有效，未来任何前端
+ *   手势/滑块/拖拽功能都应该遵守，供以后翻到这条 ADR 的人直接抄）：
+ *   (a) 手势类交互，pointerdown 可以留在具体元素上，但 pointermove/
+ *       pointerup/pointercancel 应该挂在 document（或 window）上，
+ *       不要挂在触发手势的那个小元素本身；(b) 在这个项目的 GAS Web
+ *       App 部署形态（iframe 沙箱）下，不要依赖 Pointer Capture 之类
+ *       在沙箱里表现不稳定的高级 API，配合动态 DOM 重排更容易触发
+ *       意外的 cancel。
  */

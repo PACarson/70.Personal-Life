@@ -1252,8 +1252,9 @@
 
 // ============================================================
 // ADR-2026-08-26-026：Context-Scoped Ordering Entity（Drag Ordering
-//                      Model 3）—— ACCEPTED / IMPLEMENTATION READY
-//                      （implemented 2026-09-11，LIVE test pending）
+//                      Model 3）—— ACCEPTED / LIVE VERIFIED
+//                      （implemented + live-tested 2026-09-11，见
+//                      00_Drag_Ordering_ADR.gs「J.8」的实测事故+修复）
 // ============================================================
 
 /**
@@ -1333,6 +1334,12 @@
  *   需要 Carson 执行，最小 LIVE Gate 清单见对话记录 F 节，不在本文件
  *   重复。UI-I6 整体状态：**ACCEPTED / IMPLEMENTATION READY，
  *   STATIC/AUTOMATED VERIFIED，LIVE TEST PENDING**。
+ *
+ *   【2026-09-11 追加，同日晚些时候】Carson 跑完 LIVE Gate：迁移/
+ *   Preflight/Drag Ordering Gate/既有 regression gate 全过，但真实
+ *   浏览器里拖拽本身完全拖不动——三个根因 + 修复见「J.8」。修复后复测：
+ *   拖拽顺畅、顺序持久化正确、刷新不丢失，既有 regression gate 复测
+ *   仍然全过。UI-I6 整体状态最终定为：**ACCEPTED / LIVE VERIFIED**。
  */
 
 // ============================================================
