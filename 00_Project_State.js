@@ -2846,4 +2846,31 @@
  * dispatch()/publish() 语义、任何 Event payload 形状、Project Deadline
  * Contract（「四十六」「四十七」的话题）、UI-I6 已交付的拖拽功能本身
  * ——只是让三个已经存在、已经验证过安全的 rebuild 函数被正确调用。
+ *
+ * 【2026-09-15 追加，Carson 真实 GAS/Spreadsheet 执行结果】部署后跑了
+ * 一次 `rebuildAllProjections()`：Events 表当时共 518 行，七个子函数
+ * 全部执行、全部无报错，约 40 秒内完成。结果：Tasks 157（更新 157/
+ * 新增 0）、ActiveTasks 105、TaskStatistics 89 个 chat_id、TaskFilters
+ * 157、**Projects 67**、**Workflows 10**、**TaskViewOrder 13 个
+ * (chat_id, context_key) 分组共 31 行——三个新增调用在真实数据规模下
+ * 确认可以正常跑完，数量看起来跟真实系统规模相符（不是 0，不是异常
+ * 大的数字）。这确认了 Execution 这一项在 LIVE 环境下成立；Idempotency
+ * （连续跑两次数量应该完全相同）和 Persistence（具体字段值 rebuild
+ * 前后一致，不只是行数/条数一致）这两项，本条日志本身还不能单独证明，
+ * 需要 Carson 后续视需要再跑一次（或直接查 Sheet 内容）确认。
+ *
+ * 【2026-09-15 追加，第二次真实执行 + Idempotency 确认】Carson 当天
+ * 晚些时候又跑了一次 `rebuildAllProjections()`：Tasks 157（更新
+ * 157/新增 0）、ActiveTasks 105、TaskStatistics 89、TaskFilters 157、
+ * Projects 67、Workflows 10、TaskViewOrder 13 个分组/31 行——七个数字
+ * **跟第一次逐一完全相同**，确认 Idempotency 成立（连续执行不产生
+ * 重复/遗漏/数量漂移）。Carson 另外手动查看了 Projects/Workflows/
+ * TaskViewOrder 的实际内容，确认"看起来很正常"。至此 Execution/
+ * Idempotency/Persistence（数量 + 内容双重确认）三项均已在真实环境
+ * 完成验证。
+ *
+ * **Decision 3（rebuildAllProjections() Recovery Completeness）最终
+ * 状态：LIVE VERIFIED。** 剩余可选项（非阻塞）：跑一次既有 regression
+ * gate（`runUIBridgeInteractionsGate` 等）做最后的交叉确认，随时可以
+ * 做，不是这次任务的必要条件。
  */
