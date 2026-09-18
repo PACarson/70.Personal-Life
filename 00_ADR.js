@@ -1504,6 +1504,14 @@
  * 因为它记录的是"当时的真实状态"，不是错误；完整实现细节见
  * 00_Project_State.gs「三十二」，不在这里重复。
  *
+ * 【2026-09-18 追记】本条 Related ADR 段预留的"一旦 Project Deadline
+ * Contract 批准，本条 BLOCKED 判断需要重新评估"这个触发条件已经满足——
+ * ADR-2026-09-18-031（Project Deadline Contract）已 Accepted。本条这里
+ * 的 BLOCKED 检查**实际代码移除仍未发生**，是 031 号 Implementation
+ * Gate 第 5 项的范围，不因为 031 号 Accepted 就自动发生——读到这条的人
+ * 请以 031 号自己的 Notes/00_Project_State.gs 最新记录为准，不要假设
+ * 代码已经跟上。
+ *
  * Notes
  *   完整讨论见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
  *   Review_2026-09-01.md 第 5.1 节。
@@ -1943,4 +1951,276 @@
  *   **SLICE_4_PART_B — IMPLEMENTATION READY**——Implementation Gate
  *   已经列完整，等 Carson 另外明确指示才开始写代码，不因为 ADR
  *   Accepted 就自动继续实施。
+ */
+
+// ============================================================
+// ADR-2026-09-18-031：Project Deadline Contract —— Schema Model C +
+//                      Identity Model B（Task-Parity，非"简化版"）+
+//                      Workflow 不继承 + Task↔Project 双向字段映射
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-09-18-031
+ * Status          : Accepted（决定本身已批准；对应代码尚未实现——见
+ *                   Consequences 最后一段与 Implementation Gate。本条
+ *                   ADR 本身不包含任何以下代码改动）
+ * Decision Date   : 2026-09-18
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 07_IdentityEngine.gs（generateProjectIdentity 签名）、
+ *                   27_ProjectEngine.gs（CFG.IDENTITY_AFFECTING_FIELDS、
+ *                   新增私有 _computeDueDatetime_、updateProject 的
+ *                   identity 重算调用）、09_IdempotencyManager.gs
+ *                   （createProjectIfNotExists 的 identity 计算）、
+ *                   15_Setup.gs / 11_ProjectionRebuilder.gs（新增一个
+ *                   "给 Projects 既有表追加列"迁移函数）、
+ *                   42_ConversionEngine.gs（移除 due_* 相关 BLOCKED 检查
+ *                   + 正向字段映射）、20_TaskEngine.gs
+ *                   （createTaskFromConversion_ 反向字段映射）、
+ *                   55_Tests_TaskToProjectBlocked.gs（改写为验证成功
+ *                   转换而非 BLOCKED）。
+ *                   10_ProjectionEngine.gs（projectProjectCreated_/
+ *                   projectProjectUpdated_）与 14_ProjectQueryEngine.gs
+ *                   （getProject/getProjects/_readAllProjects_）本次已
+ *                   逐一核对代码，确认**都是通用 key-value 透传，不需要
+ *                   任何改动**——不是假设，是读了实际函数体后的结论，
+ *                   见 Event/Projection Impact。
+ * Related ADR     : ADR-2026-09-02-028（Conversion No-Silent-Loss +
+ *                   Task→Project BLOCKED 决定）——本条正是 028 Notes 里
+ *                   预留的"一旦 Project Deadline Contract 批准，该 BLOCKED
+ *                   判断本身需要重新评估"那个触发条件。028 已加一条
+ *                   2026-09-18 追记指回本条；BLOCKED 检查的实际移除仍在
+ *                   本条 Implementation Gate 第 5 项，不在本条 ADR
+ *                   Accepted 那一刻自动发生。
+ *
+ * Context
+ *   2026-08-29 的 Architecture Review（「八」「十二」）已经给出 Schema
+ *   Model C / Identity Model B / Workflow 不继承 这三个建议，但当时只是
+ *   Architecture Review 阶段的建议文本，从未写成正式 ADR 条目——
+ *   2026-09-15 checkpoint 明确记录了这一点，避免被误当成"已经批准"。
+ *   本窗口 Carson 在 Identity 具体机制上做了明确决定：Option
+ *   2——Project Identity 与 Task Identity 的 due-value 语义完全一致，
+ *   不是"Project 只看 due_date"这种简化版本。
+ *
+ *   写本条 ADR 之前的核实澄清了一个 2026-09-15 checkpoint 草稿里不准确
+ *   的描述：Task 现在的 identity **不是**直接用 due_date 算的——
+ *   `generateTaskIdentity()`（20_TaskEngine.gs:316）传入的 due 参数是
+ *   `IdentityEngine.resolveIdentityDueValue(merged)`
+ *   （20_TaskEngine.gs:319），这个函数（07_IdentityEngine.gs:171）取的
+ *   是 `due_datetime || due_date`——只设了 due_date 时用 due_date；
+ *   due_time 也设了、due_datetime 非空时用 due_datetime。也就是说 Task
+ *   目前只要设了 due_time，单独改 due_time 就会让 identity 变，
+ *   `IDENTITY_AFFECTING_FIELDS` 里包含 `due_time`
+ *   （20_TaskEngine.gs:94）正是为了让这类改动能触发重算。之前"due_time
+ *   改了不影响 Task identity"的说法不准确，本条 ADR 及以后任何文档都
+ *   不应该再这样描述。
+ *
+ * Decision
+ *   1. Schema Model C（源自 2026-08-29 Architecture Review「八」，本条
+ *      正式采纳，逐字复用 Task 现有三层模型，不重新设计）：
+ *      - due_date：用户输入的日期（YYYY-MM-DD 字符串）
+ *      - due_time：用户输入的时间，可选，独立于 due_date
+ *      - due_datetime：派生字段，不是独立输入源，计算规则
+ *        （`20_TaskEngine.gs:118` `_computeDueDatetime_` 逐字复用）：
+ *        `due_datetime = (due_date && due_time) ? due_date + 'T' +
+ *        due_time + ':00' : ''`。只有 due_date、没有 due_time
+ *        时，due_datetime 是空字符串，**不会**自动补到午夜——"只有日期
+ *        没有时间"和"午夜"是两个不同的状态，不能用同一个值表示。
+ *
+ *   2. Identity Model B（Task-Parity，Carson 本窗口明确选择 Option
+ *      2，2026-09-18）：
+ *      a. `27_ProjectEngine.gs` 的 `CFG.IDENTITY_AFFECTING_FIELDS`
+ *         从 `['title', 'parent_project_id']` 改为 `['title',
+ *         'parent_project_id', 'due_date', 'due_time']`——跟 Task 的
+ *         `IDENTITY_AFFECTING_FIELDS` 同时包含 due_date 和 due_time
+ *         （不包含 due_datetime 本身，因为它是派生值不是原始输入）完全
+ *         对齐。
+ *      b. `07_IdentityEngine.gs` 的 `generateProjectIdentity(chatId,
+ *         title, parentProjectId)` 需要新增第 4 个参数
+ *         `generateProjectIdentity(chatId, title, parentProjectId,
+ *         dueValue)`，`parts` 数组追加 `String(dueValue || '')`。
+ *         **这是一处签名改动，不是新增一个平行函数**——`resolveIdentityDueValue()`
+ *         本身是通用纯函数（只读 `.due_datetime`/`.due_date`
+ *         属性，没有任何 Task 专属假设），可以原样传入 Project 对象，
+ *         真正的缺口是 `generateProjectIdentity` 当前完全没有 due
+ *         值的参数位——这不是"新增抽象"，是给一个已有、已上线的函数加
+ *         一个参数，遵循它自己在 Sprint 1 就已确立的"跟
+ *         generateTaskIdentity 同一套设计"的既有承诺（见本文件开头
+ *         Engine 注释）。
+ *      c. 这个签名改动影响的全部调用点（逐一核对过，不是假设）：
+ *         - `27_ProjectEngine.gs:186`（`updateProject` 的 identity
+ *           重算块）——生产路径，必须同步改，调用处改为传入
+ *           `IdentityEngine.resolveIdentityDueValue(merged)` 作为
+ *           第 4 参数。
+ *         - `09_IdempotencyManager.gs:126`（`createProjectIfNotExists`）
+ *           ——生产路径，Project **创建时**的 identity 计算在这里，不在
+ *           `27_ProjectEngine.gs`（`createProject` 只是薄封装，直接转发
+ *           给这个函数）。创建时还没有"merged"对象，只有
+ *           `title`+`meta`——`meta.due_date`/`meta.due_time` 需要先算出
+ *           `due_datetime`（同一个 `_computeDueDatetime_`
+ *           公式）再传给 `resolveIdentityDueValue`，具体这段小计算放在
+ *           `27_ProjectEngine.gs` 还是 `09_IdempotencyManager.gs`
+ *           哪个文件里，留给 Phase 2 实施时决定，不是本条 ADR
+ *           需要锁死的架构判断。
+ *         - `07_IdentityEngine.gs:265-267`、`08_DeduplicationEngine.gs:212`
+ *           ——各自的开发者自测函数（`testDuplicateProject` 等），3
+ *           参数调用在 JS 里不会报错（第 4 参数变成 undefined），但不会
+ *           覆盖到新的 due-value 行为，建议 Phase 2 顺手补上，不是
+ *           阻塞项。
+ *      d. `27_ProjectEngine.gs` 的 `updateProject` 需要新增一段跟
+ *         `20_TaskEngine.gs:287-291` 完全同构的 due_datetime 重算——
+ *         **必须在 identityFieldChanged 判断之前**（顺序不能反，Task
+ *         的实现就是先重算 due_datetime 并 merge 进 `merged`，再判断
+ *         identity 要不要变，这样 `resolveIdentityDueValue(merged)`
+ *         读到的才是最新值，不是重算前的旧值）：
+ *         `if (payload.hasOwnProperty('due_date') ||
+ *         payload.hasOwnProperty('due_time')) { ... }`。
+ *      e. 效果：同一个 Project 同一天把 18:00 改成
+ *         20:00——如果这个 Project 已经设了 due_time——due_datetime
+ *         会变，identity 会变；如果这个 Project 完全没设 due_time
+ *         （due_datetime 一直是空字符串），`resolveIdentityDueValue`
+ *         走 due_date 分支，只有改 due_date 本身才会变 identity。这
+ *         跟 Task 现在的真实行为（不是简化版）完全一致。
+ *
+ *   3. Workflow 不继承：不给 Workflow 加任何 deadline 字段，不做任何
+ *      自动继承机制（源自 2026-08-29 Architecture Review「十二」，
+ *      本条正式采纳）。
+ *
+ *   4. Task↔Project 转换字段映射：
+ *      a.（正向，Task→Project）`42_ConversionEngine.gs:104`
+ *         的 `convertTaskToProject` 现有检查
+ *         `if (sourceTask.due_date || sourceTask.due_time ||
+ *         sourceTask.due_datetime) { return {blocked:true, ...} }`
+ *         全部移除，改为把 `sourceTask.due_date`/`due_time` 传入
+ *         `ProjectEngine.createProject(...)` 的 meta 对象
+ *         （due_datetime 不需要手动传，由 ProjectEngine 内部新增的
+ *         `_computeDueDatetime_` 自动派生，逐字复制
+ *         `20_TaskEngine.gs:118` 的实现，不重新发明）。
+ *      b.（反向，Project→Task，**本条为 Claude 在写这份 ADR 时提出的
+ *         对称性补充，Carson 原始 Section C 只明确提到了正向**）
+ *         `20_TaskEngine.gs:635` 的 `createTaskFromConversion_` 目前
+ *         完全不处理 due_date/due_time（因为 Project 现在没这些字段），
+ *         Model C 落地后应同步补上 `due_date:
+ *         sourceProject.due_date||''`、`due_time:
+ *         sourceProject.due_time||''`——理由：ADR-028 的 No-Silent-Loss
+ *         原则对双向转换同等适用，只做单向会在另一个方向重新制造同类型
+ *         的静默丢失问题。这一点如果 Carson 不同意，请在下次窗口明确
+ *         指出，会以追记形式记录，不会静默改动本条已写入的文本。
+ *      c. `00_Business_Rules.gs`「一」既有的 Task↔Project 字段映射表
+ *         已预留这一行位置，新增行格式照抄同表其他行格式。
+ *      d. `55_Tests_TaskToProjectBlocked.gs` 现有的
+ *         `testTaskToProject_DueDateBlocked_()`/
+ *         `runTaskToProjectBlockedGate()` 需要改写为验证"成功转换 +
+ *         字段映射正确"，不再验证 BLOCKED——文件本身保留复用，不新建
+ *         不删除。
+ *
+ * Event / Projection Impact（已逐一读代码核实，不是假设）
+ *   `10_ProjectionEngine.gs` 的 `projectProjectCreated_`/
+ *   `projectProjectUpdated_` 都是把 event.payload 整个对象原样传给
+ *   `upsertRowByKey_(PROJECTS_SHEET, 'project_id', ..., payload)`——
+ *   通用 key-value upsert，没有任何字段白名单。`14_ProjectQueryEngine.gs`
+ *   的 `getProject`/`getProjects`/`_readAllProjects_`
+ *   同样是整行读出，没有字段白名单。**结论：只要 Sheet 本身有
+ *   due_date/due_time/due_datetime 这三列（见 Migration Impact），
+ *   Projection 和 Read 两层完全不需要改一行代码**——这跟 Task 当年
+ *   NEW_TASK_COLUMNS 那次事故的教训不一样：那次的坑是 Sheet 本身没有
+ *   列（Setup/Migration 缺口），不是 Projection/Read 代码本身有白名单
+ *   遗漏；这次同类型的坑（Sheet 没列）已经在 Implementation Gate 第 1
+ *   项单独列出，Projection/Read 这两层已确认不是新的坑。
+ *
+ * Migration Impact
+ *   Projects 是已有数据的表（真实环境 67 行，见 00_Project_State.gs
+ *   「四十八」的 rebuildAllProjections 真实执行结果），不是 TaskViewOrder
+ *   那种全新建表——不能照抄 TaskViewOrder 的"_ensureSheet_
+ *   自动整块设纯文本"那条路径（`_ensureSheet_` 只在
+ *   `sheet.getLastRow() === 0` 时才生效，Projects 早就有 header +
+ *   数据行，这个分支不会跑）。正确先例是
+ *   `migrateSchemaDueTime()`（`11_ProjectionRebuilder.gs:124`，
+ *   Tasks 当年给已有数据的表追加 due_time/due_datetime 两列时走的就是
+ *   这条路径）：对 Projects 调用
+ *   `_addColumnsIfMissing_('Projects', ['due_date','due_time',
+ *   'due_datetime'])` + `_setPlainTextFormatForNewColumns_('Projects',
+ *   [...])`。**跟 Tasks 那次不完全一样的地方**：Tasks
+ *   那次纯文本调用只传了 `['due_time','due_datetime']`，没有
+ *   `due_date`——因为 `due_date` 对 Tasks 是建表时就有的历史列，不是
+ *   那次新加的列。Projects 这次三个字段都是全新列，所以
+ *   `_setPlainTextFormatForNewColumns_` 这一步三个字段都要传，不能照抄
+ *   Tasks 那次两列的参数列表。
+ *
+ * Consequences
+ *   正面：Project 获得跟 Task 完全对称的 deadline 能力（schema +
+ *   identity 语义都不是"阉割版"），ADR-028 的 BLOCKED 判断有了可以
+ *   正式重新评估的依据，Task↔Project 转换不再因为日期字段而单向受限。
+ *
+ *   代价：`generateProjectIdentity` 签名改动触碰 3 个既有调用点（2
+ *   生产 + 2 自测，见 Decision 2.c），需要逐一确认，属于本条 ADR
+ *   Implementation Gate 范围内的"full-chain check"，不是可以跳过的
+ *   细节。
+ *
+ *   Dashboard（12_TaskQueryEngine.gs `getTaskDashboard()` 的
+ *   `project_due_view` 目前硬编码
+ *   `{status:'BLOCKED_PENDING_PROJECT_DEADLINE_CONTRACT', ...}`）：
+ *   Model C 落地后这段文案在事实层面不再成立，但具体改成什么
+ *   status/message、要不要分桶展示，Carson 已经明确要求"这一轮只解除
+ *   结构性阻塞，不顺手设计完整 Dashboard 改版"——**这是一个独立的、
+ *   本条 ADR 不覆盖的 Decision Gate**，需要 Phase 1 之后单独跟 Carson
+ *   过一遍再动手，不在本条 Implementation Gate 里。
+ *
+ *   Reminder OS（`43_ReminderConnector.gs` 的
+ *   `requestProjectReminder(...)`）：已存在、已是完整实现（发布
+ *   entity_type:'PROJECT' 的 REMINDER_REQUESTED 事件），目前只是没有
+ *   调用方。Model C 落地本身**不需要改这个文件**——Carson 原始
+ *   Section E 已经明确"目标只是让 Project 有一个合法的 deadline
+ *   引用，不要顺手把 Reminder Engine 也扩展了"，这个结论已经确认，
+ *   Phase 1 直接引用，不重新调查。
+ *
+ *   【重要】截至 2026-09-18 记录时，本条只是决定，不是实现——上面
+ *   Affected Modules 列的所有文件，实际代码都还是本条 ADR
+ *   写入之前的原样，Implementation Gate 一行都没有开始。任何读到这条
+ *   ADR 的人（包括未来的 Claude 窗口）不应该假设代码已经跟上——请先看
+ *   `00_Project_State.gs` 最新记录，再决定要不要去查代码。
+ *
+ * Implementation Gate（PROJECT_DEADLINE_CONTRACT — 尚未开始，Accepted
+ * 之后、真正动手写代码之前，必须逐条满足/确认的清单；本条 ADR 本身
+ * 不包含任何以下代码改动，Phase 2 需要 Carson 另外明确指示才开始）
+ *   1. Schema/Migration：`11_ProjectionRebuilder.gs` 新增
+ *      `migrateSchemaProjectDeadline()`（或同类命名），逻辑见 Migration
+ *      Impact，Carson 需要在真实 GAS 环境手动跑一次。
+ *   2. `27_ProjectEngine.gs`：新增私有 `_computeDueDatetime_`
+ *      （逐字复制 `20_TaskEngine.gs:118`）；`CFG.IDENTITY_AFFECTING_FIELDS`
+ *      加 `due_date`/`due_time`；`updateProject` 加 due_datetime
+ *      重算块（顺序在 identityFieldChanged 判断之前）；
+ *      `generateProjectIdentity` 调用处加第 4 参数。
+ *   3. `07_IdentityEngine.gs`：`generateProjectIdentity` 签名加
+ *      `dueValue` 参数；建议同步扩充 265-267 行的自测用例覆盖 due
+ *      场景（非阻塞）。
+ *   4. `09_IdempotencyManager.gs`：`createProjectIfNotExists`
+ *      的 identity 计算加第 4 参数，due_datetime 的计算方式见 Decision
+ *      2.c，具体落在哪个文件由实施时决定。
+ *   5. `42_ConversionEngine.gs`：移除 due_* 相关 BLOCKED 检查，加正向
+ *      字段映射（Decision 4.a）。
+ *   6. `20_TaskEngine.gs`：`createTaskFromConversion_`
+ *      加反向字段映射（Decision 4.b，**Carson 需确认是否同意这一项**）。
+ *   7. `00_Business_Rules.gs`「一」补新行（Decision 4.c）。
+ *   8. `55_Tests_TaskToProjectBlocked.gs` 改写（Decision 4.d）。
+ *   9. `10_ProjectionEngine.gs`、`14_ProjectQueryEngine.gs`——已确认
+ *      不需要改动，此处列出是为了让未来窗口不会误以为遗漏了这两层
+ *      （见 Event/Projection Impact）。
+ *  10. 验证要求延续本项目一贯标准：node --check + 全项目语法扫描 +
+ *      对既有 Task↔Project 相关测试的 regression 核对 + 明确区分
+ *      STATIC VERIFIED / LIVE TEST PENDING，不得把没有实机验证的项目
+ *      写成 PASS。
+ *  11. 完成后按既有习惯更新 `00_Project_State.gs` 记录。
+ *
+ * Notes
+ *   完整背景见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
+ *   Review_2026-09-01.md（Schema/Identity 建议出处）、
+ *   `00_Session_Handoff_Checkpoint_2026-09-15.js`（Phase 0 调查记录）、
+ *   本条 ADR 写入当次对话对 07_IdentityEngine.gs/27_ProjectEngine.gs/
+ *   09_IdempotencyManager.gs/08_DeduplicationEngine.gs/
+ *   10_ProjectionEngine.gs/14_ProjectQueryEngine.gs 的逐一代码核实
+ *   （Identity 机制的"due_datetime || due_date"准确描述、
+ *   generateProjectIdentity 既有签名与三处调用点、Projection/Read 两层
+ *   确认无需改动，均在本条决定之前首次发现，不在 2026-09-15
+ *   checkpoint 原文中）。
  */

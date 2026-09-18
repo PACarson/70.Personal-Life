@@ -2874,3 +2874,110 @@
  * gate（`runUIBridgeInteractionsGate` 等）做最后的交叉确认，随时可以
  * 做，不是这次任务的必要条件。
  */
+
+/**
+ * 四十九、Project Deadline Contract —— Identity 机制核实 + ADR-2026-09-18-031
+ *         正式写入（2026-09-18）
+ *
+ * Carson 本窗口对 2026-09-15 checkpoint 留下的 Identity 开放问题做出
+ * 明确决定：Option 2——Project Identity 与 Task Identity 的 due-value
+ * 语义完全一致，不是"Project 只看 due_date"的简化版本。
+ *
+ * 写 ADR 前先核实了 5 个问题（Carson 明确要求，逐项读代码，不是假设）：
+ *   1. due_datetime 派生公式：`_computeDueDatetime_(due_date, due_time)`
+ *      = `(due_date && due_time) ? due_date+'T'+due_time+':00' : ''`
+ *      （20_TaskEngine.gs:118，逐字复用）。
+ *   2. 无 due_time 时的 fallback：due_datetime 为空字符串，不补午夜。
+ *   3. resolveIdentityDueValue() 可否直接复用：函数本身通用（只读
+ *      .due_datetime/.due_date），**真正的缺口不在这个函数，而在
+ *      generateProjectIdentity(chatId, title, parentProjectId) 现有签名
+ *      完全没有 due 值参数位**——这是本次核实中最重要的发现，
+ *      2026-09-15 checkpoint 完全没有意识到 Project 已经有自己独立的
+ *      identity 生成函数（Sprint 1 就已新增，见 07_IdentityEngine.gs
+ *      文件头注释），一直在按"从零参照 Task 设计"的假设推演，实际上
+ *      只需要给一个已有函数加一个参数。
+ *   4. 修改 due_time 是否触发 due_datetime 更新+identity 重算：会——
+ *      机制逐字对照 20_TaskEngine.gs:287-291（顺序：先重算
+ *      due_datetime 并 merge，再判断 identityFieldChanged，顺序不能反）。
+ *   5. Identity-affecting fields 一致性：CFG.IDENTITY_AFFECTING_FIELDS
+ *      从 ['title','parent_project_id'] 加 due_date/due_time 两个
+ *      （不加 due_datetime，跟 Task 自己的既有列表同构）。
+ *
+ * 【重要纠正】2026-09-15 checkpoint 草稿里"due_time 改了不影响 Task
+ * identity，Project 应该保持一致"这个说法本身不准确——Task 现在的
+ * identity 用的是 resolveIdentityDueValue() 算出的
+ * `due_datetime || due_date`，只要 Task 设了 due_time，改 due_time
+ * 就会让 identity 变。本条 ADR 已经用准确描述替换了这个说法，以后不应
+ * 再使用"Task/Project 只看 due_date"这种表述。
+ *
+ * 顺带核实（Carson 自己的 full-chain check 习惯要求）：generateProjectIdentity
+ * 的全部既有调用点（27_ProjectEngine.gs:186 update 路径、
+ * 09_IdempotencyManager.gs:126 create 路径——create 路径不在
+ * 27_ProjectEngine.gs 本体，`createProject` 只是转发；07_IdentityEngine.gs:265-267
+ * 与 08_DeduplicationEngine.gs:212 两处开发者自测）；
+ * 10_ProjectionEngine.gs 的 projectProjectCreated_/projectProjectUpdated_
+ * 与 14_ProjectQueryEngine.gs 的 getProject/getProjects/_readAllProjects_
+ * 逐一读代码确认都是通用 key-value 透传，**不需要任何改动**——这两层
+ * 这次不是坑，跟当年 NEW_TASK_COLUMNS 那次的坑（Sheet 本身缺列）性质
+ * 不同，已在 ADR 里明确写清楚，避免未来窗口重复排查。
+ *
+ * 结论：Contract 核实完整，没有发现需要 Carson 再判断一次的新
+ * Decision Gate（唯一一处需要 Carson 复核的是反向字段映射的对称性
+ * 补充，见下段），按 Carson 指示正式写入 ADR-2026-09-18-031（Accepted），
+ * 并在 ADR-2026-09-02-028 追加一条 2026-09-18 的交叉引用（不删改原文，
+ * 追记形式，跟本项目一贯的 ADR 修订习惯一致）。ADR-031 完整内容见
+ * 00_ADR.gs 本身，不在这里重复；Implementation Gate 一行代码都还没动，
+ * Phase 2 需要 Carson 另外明确指示才开始。
+ *
+ * 唯一需要 Carson 明确回应的一点：Task↔Project 双向字段映射里，反向
+ * （Project→Task，createTaskFromConversion_ 新增 due_date/due_time
+ * 映射）是本次写 ADR 时 Claude 自己提出的对称性补充，Carson 原始
+ * Section C 只明确提到了正向——已在 ADR-031 Decision 4.b 里明确标注
+ * 这一点，如果不同意需要下次窗口明确指出，会以追记形式撤回，不会静默
+ * 改动已写入的 ADR 文本。
+ */
+
+/**
+ * 五十、Note 计数不显示 —— 排查结果：代码本身已经是对的，未做任何改动
+ *       （2026-09-18）
+ *
+ * Carson 观察到左侧导航栏 Notes 没有显示数量、Tasks 有。收到明确指示
+ * 实施修复（加 HTML span + JS 两行）之前，先做了 Carson 要求的最小范围
+ * 静态检查（DOM ID 与 JS selector 对应）——检查结果：**这次上传的
+ * repo 里，代码已经是完整、正确的，结构上跟 Tasks/Projects 逐一对应**：
+ *   - ui_index.html:300 `<span class="nav-count" id="noteCount">`
+ *     已存在（跟 :301 Tasks、:302 Projects 同一种写法）
+ *   - ui_index.html:725 `var noteCountEl =
+ *     document.getElementById('noteCount');` 已存在
+ *   - ui_index.html:730 `noteCountEl.textContent = notes.length ||
+ *     '';` 已存在，在 renderNotes() 函数体内，位置、写法跟
+ *     renderTasks()/renderProjects() 的对应行完全一致
+ *   - loadNotes() → google.script.run...ui_getOpenNotes() →
+ *     renderNotes(result.notes) 这条调用链本身也正常，没有发现遗漏或
+ *     报错风险
+ *   - id="noteCount" 在全文件唯一（无重复 id）；没有发现任何
+ *     .nav-count 相关的 CSS 会条件性隐藏这个特定 badge
+ *
+ * 【重要】这跟上一轮（同一次对话，写 handoff 分析时）给出的诊断
+ * 不一致——上一轮的结论（"HTML 缺 span、renderNotes 缺一行"）是
+ * **错误的**，本次动手改代码前的静态检查发现了这个错误，没有把改动
+ * 套在本来就是对的代码上。这正是 Carson 要求"先做最小范围静态检查"
+ * 这一步存在的意义。
+ *
+ * 没有对 ui_index.html 做任何改动——这次上传的 repo 里没有可修的
+ * 代码缺陷。Carson 观察到的现象（数量确实不显示）最可能的两种解释：
+ *   1. 浏览器缓存了旧版本的 ui_index.html——GAS HtmlService
+ *      页面常见问题，硬刷新（Ctrl/Cmd+Shift+R）值得先试。
+ *   2. 真实 Apps Script 编辑器里部署的 ui_index.html 跟这次上传的
+ *      repo 版本不完全一致——本项目有过先例（见本文件 2026-09-08
+ *      环境事故：01_SecureConfig.gs 在真实环境被覆盖，疑似网页编辑器
+ *      粘贴事故），这次如果是类似情况，需要 Carson 直接对照真实
+ *      编辑器里 ui_index.html 第 300 行、第 720-730 行附近跟这次
+ *      repo 版本是否一致。
+ *
+ * 无法从这次上传的静态文件判断到底是哪一种（两者都不是能从代码本身
+ * 看出来的问题），需要 Carson 在真实环境确认后回报，不在这里猜测
+ * 结论。STATIC VERIFIED（代码本身经检查是对的，不是"未测试"）——不适用
+ * LIVE VERIFIED/LIVE TEST PENDING 这套状态词，因为这次没有代码改动
+ * 可供 LIVE 验证。
+ */
