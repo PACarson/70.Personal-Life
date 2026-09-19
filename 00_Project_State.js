@@ -3098,3 +3098,45 @@
  * 【新 Decision Gate】无——本次实施过程中没有出现需要 Carson 另外
  * 判断的新业务决策。
  */
+
+/**
+ * 五十二、Project Deadline Contract —— Real GAS Verification Gate 已设计，
+ *         尚未执行（2026-09-19，Carson 明确指示下）
+ *
+ * Carson 要求在真实 GAS/Spreadsheet 环境验证 ADR-2026-09-18-031。**如实
+ * 记录：这次对话的执行环境（沙盒容器）没有任何方式访问 Carson 的真实
+ * Google Apps Script 项目或真实 Spreadsheet——检查过可用的连接器
+ * （search_mcp_registry 搜了 google sheets/apps script/spreadsheet 相关
+ * 关键词），没有任何能代替 Carson 在真实环境点"运行"的手段。这不是
+ * 消极配合，是 Carson 自己在这次任务最后一段明确要求的行为：无法访问时
+ * 必须明确说明，输出可执行清单，不得声称已完成 LIVE 验证。**
+ *
+ * Phase 0（本次已完成，可以做）：重新读取当前 repo 副本（
+ * `/home/claude/work/70.Personal-Life-main/`，含上一轮 Phase A/B
+ * 的全部改动）确认了全部函数签名/Sheet名/字段名/测试入口跟当前实际
+ * 代码一致，没有依赖上一轮分析的记忆。
+ *
+ * Phase 1-5（设计完成，交付为独立文件，一次都没有执行）：产出
+ * `Project_Deadline_Real_GAS_Verification_Plan_2026-09-19.md`——逐项
+ * 覆盖 Schema/Migration、CRUD/Identity（含 Identity Model B 的
+ * due_time-改变-identity 这个核心断言）、Task→Project 正向转换 +
+ * 反向确认无映射、既有回归 Gate 重跑清单、Dashboard/UI 边界核对，
+ * 每项按 Carson 要求的模板（验证目标/入口/前置条件/步骤/预期结果/
+ * 证据/是否改真实数据/清理回滚）写清楚，并给了可以直接复制运行的
+ * Apps Script 代码片段。全部测试数据用 `[TEST-ADR031]` 前缀或
+ * `live_verify_*` chat_id 跟真实业务数据隔离，明确排除对真实业务
+ * Project/Task 的破坏性操作。
+ *
+ * 【状态，如实标注】Phase 1-5 全部条目：**LIVE TEST PENDING**——协议
+ * 已设计，一次都没有在真实环境跑过，不是"应该没问题"。不等同于上一轮
+ * Node.js GAS-shim 的"STATIC VERIFIED + Node 环境 LIVE-EXECUTED"，那是
+ * 完全不同的两件事，本条明确不把两者混为一谈。
+ *
+ * 【新 Decision Gate】无——本次纯粹是重新核对现有实现 + 设计验证协议，
+ * 过程中没有发现代码跟 ADR-031 有实质冲突，也没有出现新的未决业务
+ * 决策。
+ *
+ * 下一步：Carson 按交付的 Verification Plan 在真实环境逐项执行，完成后
+ * 按 Plan 里 Phase 6 的模板填写「五十三」记录（本条只记录"计划已交付"，
+ * 不预先假设 Carson 会全部通过）。
+ */
