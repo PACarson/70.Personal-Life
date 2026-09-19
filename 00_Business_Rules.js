@@ -94,6 +94,23 @@
  * Project Deadline Contract 一旦批准，这条规则本身也需要跟着重新评估
  * （届时 Project 有地方存日期了，可能就不再需要 BLOCKED，改成正常
  * 映射）。
+ *
+ * 【v5.4 新增，2026-09-18，见 ADR-2026-09-18-031】Project Deadline
+ * Contract 已 Accepted，上面这条 v5.3 规则被取代——保留上面原文不删，
+ * 是因为它记录的是"当时的真实状态"，不是错误。当前状态：
+ *   - `42_ConversionEngine.convertTaskToProject` 的 due_* BLOCKED
+ *     检查已移除；源 Task 的 due_date/due_time 正向映射进新 Project
+ *     （due_datetime 由目标侧的 27_ProjectEngine 内部自动派生，不是
+ *     手动传入）；不带日期的 Task 转换行为不变。
+ *   - 反方向（Project→Task）**没有**同步加 due 字段映射——ADR-031
+ *     的治理追记已经明确记录：这是 Claude 在写 ADR 时提出的对称性
+ *     提案，Carson 明确否决，`TaskEngine.createTaskFromConversion_`
+ *     维持原状，不处理 due_date/due_time。"双向转换、No-Silent-Loss
+ *     原则应该对称适用"这个直觉本身不构成默认实现依据——不对称是这次
+ *     明确的业务决定，不是遗漏，未来如需要必须另行提出 Decision
+ *     Gate/ADR。
+ *   - STATIC VERIFIED（见 00_Project_State.gs 对应交付章节），LIVE
+ *     TEST PENDING。
  */
 
 // ============================================================

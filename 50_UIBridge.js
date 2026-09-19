@@ -1088,6 +1088,14 @@ function ui_createProject(title, meta, _testOverrides) {
       description:        meta.description,
       execution_mode:      meta.execution_mode,
       parent_project_id:    meta.parent_project_id,
+      // 【ADR-2026-09-18-031，2026-09-18】没有这两行，即使 27_ProjectEngine
+      // 已经能接受 due_date/due_time，这里的显式白名单也会把它们静默
+      // 丢弃——跟 ui_updateProject 直接转发整个 changes 对象不是同一种
+      // 写法，这里必须显式加。当前 ui_index.html 还没有对应的表单输入
+      // 元素（这是本次交付明确标注的未决项，不是本次一并新增的范围），
+      // 但后端链路先打通，不依赖 UI 那一步。
+      due_date:       meta.due_date,
+      due_time:       meta.due_time,
       source_domain:  meta.source_domain,
       source_module:  'UIBridge.ui_createProject',
       decision_owner: decisionOwner

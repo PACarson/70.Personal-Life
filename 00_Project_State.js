@@ -2981,3 +2981,120 @@
  * LIVE VERIFIED/LIVE TEST PENDING 这套状态词，因为这次没有代码改动
  * 可供 LIVE 验证。
  */
+
+/**
+ * 五十一、Project Deadline Contract Phase 2/3 实施完成（ADR-2026-09-18-031），
+ *         2026-09-18，Carson 明确指示下按 Phase A→B 顺序执行
+ *
+ * 【Phase A，先执行】ADR-031 治理追记：Project→Task 反向字段映射
+ * （Decision 4.b）未获批准，撤回，本阶段不实现。正向映射（4.a）、
+ * Decision 1/2/3、ADR-031 Accepted 状态均不受影响。ADR-028 也同步加了
+ * 一条交叉引用追记。两条 ADR 都是追记形式，原文未删改。
+ *
+ * 【Phase B，B1 重新核对】没有依赖旧 handoff 或本次对话之前的分析——
+ * 重新完整读取了 27/09/07/42/15/11/10/14_ProjectQueryEngine/
+ * 00_Business_Rules/55_Tests_TaskToProjectBlocked/57_Tests_
+ * TaskToProjectPrecheck/36_Tests_Sprint3Acceptance 等文件的当前真实
+ * 内容。过程中发现并纠正了两处早前分析里不准确/不完整的地方（如实
+ * 记录，不是这次新引入的问题）：
+ *   1. `27_ProjectEngine.gs` 的 `UPDATABLE_FIELDS` 白名单——如果只加
+ *      `CFG.IDENTITY_AFFECTING_FIELDS` 不加这里，`updateProject` 会
+ *      静默忽略 due_date/due_time 的改动请求，不会报错也不会生效。
+ *   2. `27_ProjectEngine.gs` 的 `deriveFromEvent`（Replay 层，供
+ *      `11_ProjectionRebuilder.gs` 的 `rebuildProjectsProjection`
+ *      调用）——此前只核实了 `10_ProjectionEngine.gs` 的实时
+ *      Projection 层通用透传，没有单独核实 Replay 层；本次核实
+ *      `deriveFromEvent` 同样通用透传，不需要改动。
+ * 没有发现跟 ADR-031 实质冲突的地方，也没有出现新的、需要 Carson
+ * 判断的未决业务决策（唯一的未决项——ui_index.html 缺 Project
+ * 的 due_date/due_time 输入表单——已在 ADR-031 里如实标注为独立于
+ * Implementation Gate 的开放问题，不是"发现冲突后自行决定"）。
+ *
+ * 【B2-B8 实施范围，全部完成】修改的文件与目的：
+ *   - `15_Setup.js`：`setupSheets()` 的 Projects baseline 加三列
+ *     （未来全新部署不需要额外迁移）。
+ *   - `11_ProjectionRebuilder.js`：新增 `migrateSchemaProjectDeadline()`
+ *     （给已有数据的 Projects 表追加三列 + 三列都做纯文本格式）。
+ *   - `07_IdentityEngine.js`：`generateProjectIdentity` 加第 4 参数
+ *     （dueValue），自测用例同步扩充。
+ *   - `27_ProjectEngine.js`：`IDENTITY_AFFECTING_FIELDS`/
+ *     `UPDATABLE_FIELDS` 加 due_date/due_time；新增私有
+ *     `_computeDueDatetime_`；`createProjectDirect_`/`updateProject`
+ *     加对应逻辑（含 due_datetime 重算顺序必须在 identity 判断之前，
+ *     跟 20_TaskEngine.js 同构）。
+ *   - `09_IdempotencyManager.js`：`createProjectIfNotExists` 的
+ *     identity 计算加第 4 参数，创建时直接算好 due_datetime（跟 Task
+ *     既有创建路径不完全同构，是有意的，见 ADR-031 本次追记）。
+ *   - `42_ConversionEngine.js`：`convertTaskToProject` 移除 due_*
+ *     BLOCKED 检查，加正向字段映射；JSDoc 同步更新（`blocked`
+ *     分支已不会再发生，从类型注释删除）。
+ *   - `50_UIBridge.js`：`ui_createProject` 补 due_date/due_time
+ *     到显式白名单（本次核实时发现的额外一处，原 Implementation
+ *     Gate 未列出）。
+ *   - `00_Business_Rules.js`「一」：新增 v5.4 段落，v5.3 原文保留。
+ *   - `55_Tests_TaskToProjectBlocked.js`：内容改写为验证成功转换+
+ *     字段映射（不再验证 BLOCKED），文件名/gate 函数名保留。
+ *   - `00_ADR.js`：Phase A 治理追记 + Phase B 完成状态追记（本条）。
+ *   - 本文件：本条记录。
+ *
+ * 每项 ADR-031 要求与实现位置的对应关系、完整设计细节，见
+ * `00_ADR.js` 本条（ADR-2026-09-18-031）自己的 Decision/
+ * Implementation Gate/2026-09-18 追记部分，不在这里重复摘抄。
+ *
+ * 【验证方式与结果】用 Node.js GAS-shim 方式（跟 Decision 3 同一手法）：
+ * 真实加载上面全部生产文件到同一个共享上下文，配内存版假 Spreadsheet，
+ * 真实执行、不是推断。覆盖：
+ *   - Migration 幂等（连跑两次 Sheet 内容逐字节一致）+ 不清空/不覆盖
+ *     既有 Project 数据（模拟"既有部署缺这三列"再迁移，确认存量行的
+ *     title/id 等字段迁移前后不变）。
+ *   - create/update 的 due_datetime 派生规则、fallback（只有 date
+ *     没 time 时是空字符串，不补午夜）。
+ *   - Identity Model B（Task-Parity）：同一天改 due_time 确实改变
+ *     identity（不是"只看 due_date"）；无关字段（description）改动
+ *     不影响 identity；没有 deadline 的旧 Project identity 跟改动前
+ *     逐字节一致（向后兼容）。
+ *   - IdempotencyManager 创建路径幂等（重复调用返回同一个
+ *     project_id，第二次 created:false）。
+ *   - Task→Project 正向转换：仅 due_date / date+time / 无日期
+ *     三种情况的字段映射，均含 Create→Projection→Read-back 一致性
+ *     核对；Project→Task 反向确认没有映射。
+ *   - 重新跑了两个跟这次改动无关、但共享文件已被这次改动碰过的既有
+ *     回归测试——`36_Tests_Sprint3Acceptance.testBidirectionalConversion_`
+ *     和 `57_Tests_TaskToProjectPrecheck.runTaskToProjectBlockedGate`
+ *     ——都是真实调用、真实通过，不是"看起来不相关就假设没事"。
+ *   - 55_Tests_TaskToProjectBlocked.js 改写后的
+ *     `runTaskToProjectBlockedGate()` 本身也是真实跑的，不是只读代码
+ *     没执行。
+ *   - 全部 23 项检查通过，0 失败。
+ *
+ * 【STATIC / LIVE 区分，如实标注】上面全部是 STATIC VERIFIED + 在
+ * Node 模拟环境里真实执行通过——**不是** Carson 真实 GAS/Spreadsheet
+ * 上的 LIVE VERIFIED。真实环境仍然 PENDING：
+ *   1. Carson 需要在真实 Apps Script 编辑器运行一次
+ *      `migrateSchemaProjectDeadline()`（对真实 Projects 表，当前
+ *      67 行数据，见「四十八」）。
+ *   2. 真实 Google Sheets 的自动类型识别行为（这次模拟环境无法复现，
+ *      内存假表不会像真实 Sheets 一样误判字符串成 Date 类型）——
+ *      `_setPlainTextFormatForNewColumns_` 这一步本身的效果只能在
+ *      真实环境确认。
+ *   3. `runTaskToProjectBlockedGate()`、`testBidirectionalConversion_`、
+ *      `runTaskToProjectPrecheckGate` 三个 Gate 建议 Carson 在真实
+ *      环境也各跑一次，确认这次改动没有破坏任何既有行为（Node 模拟
+ *      环境已经真实跑过，这里是双重确认，不是没做过）。
+ *   4. `38_Tests_UIBridge.js` 的三个 ConvertTaskToProject 测试、
+ *      `ui_createProject` 改动，本次没有进 Node 验证（需要额外 shim
+ *      Session.getEffectiveUser 等，判断投入产出不成比例），停留在
+ *      代码核对层面。
+ *
+ * 【未完成项/风险/已知限制】
+ *   - ui_index.html 没有 Project 的 due_date/due_time 输入表单——
+ *     见 00_ADR.js 本条最后一段，独立的开放问题，未擅自设计。
+ *   - Dashboard（12_TaskQueryEngine.gs 的 project_due_view 硬编码
+ *     BLOCKED 文案）本次未改——ADR-031 本身已经说明这是独立于本次
+ *     Implementation Gate 的 Decision Gate，不是遗漏。
+ *   - Known Limitation 9/10 本次未处理（不在授权范围内，Carson 明确
+ *     排除）。
+ *
+ * 【新 Decision Gate】无——本次实施过程中没有出现需要 Carson 另外
+ * 判断的新业务决策。
+ */

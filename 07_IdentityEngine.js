@@ -175,8 +175,9 @@ var IdentityEngine = (function () {
   }
 
   /**
-   * 【Sprint 1 新增】Project Identity。组合字段：
-   * chat_id | normalized_title | parent_project_id
+   * 【Sprint 1 新增，2026-09-18 由 ADR-2026-09-18-031 扩展签名】Project
+   * Identity。组合字段：
+   * chat_id | normalized_title | parent_project_id [ | dueValue ]
    *
    * 不把 status/execution_mode 纳入 identity——这些是会随时间自然变化
    * 的字段（跟 Task 的 due_date/priority/category 属于"定义这个对象
@@ -187,12 +188,22 @@ var IdentityEngine = (function () {
    * 不同父 Project 下"这种合理场景不被误判重复（比如"清洁"作为
    * Sub-Project 同时出现在"厨房翻新"和"浴室翻新"两个不同父 Project
    * 下，应该是两个不同的 Project，不是重复）。
+   *
+   * 【ADR-2026-09-18-031，Identity Model B，Task-Parity】dueValue
+   * 缺省参数位向后兼容：不传或传空字符串时，parts 数组最后一段是
+   * `String(undefined||'')` = `''`，跟这次改动之前逐字节相同——现存
+   * 全部既有调用路径（没有 due_date 的 Project）哈希不受影响。dueValue
+   * 由调用方传入 `IdentityEngine.resolveIdentityDueValue(project)` 的
+   * 结果（`due_datetime || due_date`），不是本函数自己去读 due_date——
+   * 本模块架构铁律是"纯函数、只处理调用方传入的参数"，取值逻辑留在
+   * resolveIdentityDueValue 里统一实现，不在这里重复一份。
    */
-  function generateProjectIdentity(chatId, title, parentProjectId) {
+  function generateProjectIdentity(chatId, title, parentProjectId, dueValue) {
     var parts = [
       String(chatId || ''),
       normalizeTitle(title),
-      String(parentProjectId || '')
+      String(parentProjectId || ''),
+      String(dueValue || '')
     ];
     return sha256_(parts.join('|'));
   }
@@ -267,6 +278,23 @@ var IdentityEngine = (function () {
     var p3 = generateProjectIdentity('123', '清洁', 'PRJ-B');
     Logger.log('p2 === p3 (同名不同父级)? ' + (p2 === p3) + '  (expected: false)');
     Logger.log('p1 是否生成成功? ' + (!!p1) + '  (expected: true)');
+
+    // 【ADR-2026-09-18-031，2026-09-18 新增】due-value 向后兼容 +
+    // Identity Model B（Task-Parity）区分能力测试
+    var p4 = generateProjectIdentity('123', '装修', '', '');
+    Logger.log('p4 === generateProjectIdentity(不传第4参数) 逐字节相同（向后兼容）? ' +
+      (p4 === generateProjectIdentity('123', '装修', '')) + '  (expected: true)');
+
+    var p5 = generateProjectIdentity('123', '装修', '', resolveIdentityDueValue({ due_date: '2026-10-01' }));
+    var p6 = generateProjectIdentity('123', '装修', '', resolveIdentityDueValue({ due_date: '2026-10-02' }));
+    Logger.log('p5 === p6 (不同 due_date，identity 应该不同)? ' + (p5 === p6) + '  (expected: false)');
+
+    var p7 = generateProjectIdentity('123', '装修', '',
+      resolveIdentityDueValue({ due_date: '2026-10-01', due_time: '18:00', due_datetime: '2026-10-01T18:00:00' }));
+    var p8 = generateProjectIdentity('123', '装修', '',
+      resolveIdentityDueValue({ due_date: '2026-10-01', due_time: '20:00', due_datetime: '2026-10-01T20:00:00' }));
+    Logger.log('p7 === p8 (同一天，只改 due_time，due_datetime 跟着变，identity 应该不同——这正是 Task-Parity 的意义，不是"Project 只看 due_date")? ' +
+      (p7 === p8) + '  (expected: false)');
 
     var w1 = generateWorkflowIdentity('123', '洗衣流程', 'PRJ-A', 'SEQUENTIAL');
     var w2 = generateWorkflowIdentity('123', '洗衣流程', 'PRJ-A', 'PARALLEL');

@@ -52,7 +52,15 @@ var LifeProjectConfig = Object.freeze({
   // 07_IdentityEngine.generateProjectIdentity）；depends_on_project_ids/
   // execution_mode/description 等不影响 identity——描述"这个 Project
   // 跟谁关联/怎么组织"，不描述"这个 Project 本身是什么"。
-  IDENTITY_AFFECTING_FIELDS: ['title', 'parent_project_id']
+  // 【ADR-2026-09-18-031，2026-09-18，Identity Model B，Task-Parity】
+  // due_date/due_time 加入——跟 20_TaskEngine.gs 的 IDENTITY_AFFECTING_
+  // FIELDS 同时包含 due_date 和 due_time 完全对齐（不含 due_datetime
+  // 本身，它是派生值不是原始输入，见 updateProject 里的重算块）。准确
+  // 描述：Task 现在的 identity 用的是 resolveIdentityDueValue() 算出的
+  // `due_datetime || due_date`，不是"只看 due_date"——due_time 变了，
+  // 只要 due_date 也设了，due_datetime 会跟着变，identity 也会变。
+  // Project 这里刻意做成完全一致的行为，不是简化版。
+  IDENTITY_AFFECTING_FIELDS: ['title', 'parent_project_id', 'due_date', 'due_time']
 });
 
 var ProjectEngine = (function () {
@@ -73,6 +81,17 @@ var ProjectEngine = (function () {
       decision_owner:   meta.decision_owner || String(chatId || ''),
       approval_status:  isAiCreated ? 'PENDING' : 'APPROVED'
     };
+  }
+
+  /**
+   * 【ADR-2026-09-18-031，2026-09-18，Project Deadline Contract】逐字
+   * 复制 20_TaskEngine.gs:118 的实现，不重新发明——两处各自私有，不做
+   * 跨文件调用（IdentityEngine 之外的每个 Engine 保持独立，见本文件
+   * 顶部"架构铁律"）。due_time 没有 due_date 不是一个有意义的真实
+   * 数据状态，但仍然按同一条件式处理，不特殊拦截。
+   */
+  function _computeDueDatetime_(dueDate, dueTime) {
+    return (dueDate && dueTime) ? (dueDate + 'T' + dueTime + ':00') : '';
   }
 
   // ============ Create ============
@@ -111,6 +130,14 @@ var ProjectEngine = (function () {
       source_task_id:            meta.source_task_id || '',
       converted_to_task_id:        '', // Sprint 3：Project→Task 反方向用
       instantiated_from_template_id:  meta.instantiated_from_template_id || '', // Sprint 3
+      // 【ADR-2026-09-18-031，2026-09-18，Schema Model C】due_datetime
+      // 是纯派生字段，不接受调用方传入独立值——跟 due_date/due_time
+      // 是否为空的组合关系见 _computeDueDatetime_ 本身；只有 due_date
+      // 没有 due_time 时是空字符串，不自动补午夜（"只有日期没有时间"
+      // 和"午夜"是两个不同状态）。
+      due_date:                          meta.due_date || '',
+      due_time:                          meta.due_time || '',
+      due_datetime:                        _computeDueDatetime_(meta.due_date || '', meta.due_time || ''),
       archived_at:                       '',
       chat_id:                              chatId || '',
 
@@ -147,7 +174,14 @@ var ProjectEngine = (function () {
     // 00_Data_Ownership.gs「三」），只是之前没有开放编辑——这次复用既有
     // 字段，不新增第二个 OS/Domain 字段。枚举见 20_TaskEngine.gs 顶层的
     // OS_REGISTRY（跨 Task/Project 共用同一份，不在这里另抄一份）。
-    'source_domain'
+    'source_domain',
+    // 【ADR-2026-09-18-031，2026-09-18，Project Deadline Contract】
+    // due_date/due_time 加入——没有这一步，即使 CFG.IDENTITY_AFFECTING_
+    // FIELDS 已经包含它们，updateProject 下面的 UPDATABLE_FIELDS.forEach
+    // 循环也不会把它们从 changes 抄进 payload，改动会被静默忽略而不是
+    // 报错。due_datetime 不在这里——它是派生字段，不接受调用方直接指定
+    // （见下面的重算块）。
+    'due_date', 'due_time'
   ];
 
   /**
@@ -179,6 +213,16 @@ var ProjectEngine = (function () {
     var merged = shallowCopy_(existing);
     for (var k in payload) merged[k] = payload[k];
 
+    // 【ADR-2026-09-18-031，2026-09-18】跟 20_TaskEngine.gs:287-291
+    // 逐字同构，顺序不能反——必须先重算 due_datetime 并 merge 进
+    // merged，再判断 identityFieldChanged/算新 identity，否则下面
+    // resolveIdentityDueValue(merged) 读到的是重算前的旧值。
+    if (payload.hasOwnProperty('due_date') || payload.hasOwnProperty('due_time')) {
+      var recomputedDatetime = _computeDueDatetime_(merged.due_date || '', merged.due_time || '');
+      payload.due_datetime = recomputedDatetime;
+      merged.due_datetime   = recomputedDatetime;
+    }
+
     var identityFieldChanged = CFG.IDENTITY_AFFECTING_FIELDS.some(function (f) {
       return payload.hasOwnProperty(f);
     });
@@ -186,7 +230,8 @@ var ProjectEngine = (function () {
       var newIdentity = IdentityEngine.generateProjectIdentity(
         merged.chat_id || chatId || existing.chat_id,
         merged.title,
-        merged.parent_project_id || ''
+        merged.parent_project_id || '',
+        IdentityEngine.resolveIdentityDueValue(merged)
       );
       payload.identity = newIdentity;
       merged.identity   = newIdentity;

@@ -153,6 +153,31 @@ function migrateSchemaReminderPolicy() {
 }
 
 /**
+ * 【ADR-2026-09-18-031，Project Deadline Contract，Schema Model C】
+ * Projects 是已有数据的表（真实环境曾确认 67 行，见
+ * 00_Project_State.gs「四十八」），不是全新建表——不能照抄
+ * TaskViewOrder 那种"_ensureSheet_ 自动整块设纯文本"的路径。
+ *
+ * 跟 migrateSchemaDueTime() 同一个模式，但有一处刻意不同：
+ * migrateSchemaDueTime() 的纯文本调用只传了 due_time/due_datetime 两个
+ * 字段，不含 due_date——因为 Tasks 的 due_date 是建表时就有的历史列，
+ * 不是那次新加的列。这次 Projects 的三个字段（due_date/due_time/
+ * due_datetime）全部是全新列，所以 _setPlainTextFormatForNewColumns_
+ * 这一步三个字段都要传，不能照抄 Tasks 那次两列的参数列表——否则
+ * due_date 这一列会在 Sheets 里被自动识别成 Date 类型，读回来的值需要
+ * 经过 07_IdentityEngine._canonicalizeDueValue_ 才能安全使用，这里
+ * 直接从根源上避免这个问题，不依赖下游兜底。
+ *
+ * 幂等：_addColumnsIfMissing_ 本身只在列缺失时才追加，重复运行安全。
+ */
+function migrateSchemaProjectDeadline() {
+  Logger.log('=== migrateSchemaProjectDeadline ===');
+  _addColumnsIfMissing_('Projects', ['due_date', 'due_time', 'due_datetime']);
+  _setPlainTextFormatForNewColumns_('Projects', ['due_date', 'due_time', 'due_datetime']);
+  Logger.log('✅ Projects due_date/due_time/due_datetime 列迁移完成（三列均按纯文本格式处理，不同于 Tasks 当年只处理两列——见函数注释）。存量 Project 行三列均为空字符串，等价于"没有 deadline"，行为不变。');
+}
+
+/**
  * 对指定列的既有数据区（不含表头行）设纯文本格式，防止 Google Sheets
  * 把形如 'HH:mm' / 'yyyy-MM-ddTHH:mm:ss' 的字符串自动识别成 Time/
  * DateTime 类型。只处理"迁移时已经存在的行"——迁移之后新建的行走

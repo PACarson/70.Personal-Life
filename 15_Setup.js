@@ -113,6 +113,11 @@ function setupSheets() {
     'project_id', 'identity', 'title', 'description', 'status',
     'execution_mode', 'parent_project_id', 'depends_on_project_ids',
     'source_task_id', 'converted_to_task_id', 'instantiated_from_template_id',
+    // 【ADR-2026-09-18-031，Project Deadline Contract，Schema Model C】
+    // 只在这条 baseline 数组里新增——已有部署（Sheet 已存在、已有数据）
+    // 不会因为改这里就自动补上这三列，退化路径见
+    // 11_ProjectionRebuilder.gs 的 migrateSchemaProjectDeadline()。
+    'due_date', 'due_time', 'due_datetime',
     'archived_at', 'chat_id',
     'creator', 'suggested_by', 'source_domain', 'source_module',
     'source_event_id', 'created_method', 'created_time', 'updated_time',

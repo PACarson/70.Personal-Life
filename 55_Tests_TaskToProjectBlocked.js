@@ -1,102 +1,197 @@
 /**
  * 55_Tests_TaskToProjectBlocked.gs
- * Personal Life OS — Slice 4 Part A（Task → Project BLOCKED）针对性
- * 验收测试，ADR-2026-09-02-028
+ * Personal Life OS —— Task → Project 的 due_date/due_time 字段映射
+ * 验收测试，ADR-2026-09-18-031（Project Deadline Contract）
  *
- * 起因：Slice 4 Part A 交付时（2026-09-04）`36_Tests_Sprint3Acceptance.gs`/
- * `38_Tests_UIBridge.gs`只回归确认了"没有 due_date 的 Task 正常转换成
- * Project"这条既有路径没被破坏（`testBidirectionalConversion_`，line
- * 165-178，已确认 converted_to_project_id 正确回读），但 ADR-028 这次
- * 新加的核心行为——"带 due_date/due_time 的 Task 应该被 BLOCKED，不能
- * 转换成 Project"——本身从来没有一个自动化测试真正验证过，一直是
- * Known gap（见 00_Project_State.gs 交付章节里"没有自动化测试覆盖新的
- * BLOCKED 路径本身"那条）。本文件只补这一个缺口，不重复
- * `testBidirectionalConversion_`已经覆盖的成功路径。
+ * 【2026-09-18，改写】文件名/单一入口函数名 `runTaskToProjectBlockedGate()`
+ * 保留不变（`57_Tests_TaskToProjectPrecheck.gs` 的操作提示字符串、
+ * `00_Project_State.gs`/`00_Known_Limitations.gs` 的历史记录都按这个
+ * 名字引用它，改名会让那些引用变成错误指向，不是本次范围），但测试
+ * 内容整体改写——这个文件原本验证"带 due_date/due_time 的 Task 应该被
+ * BLOCKED，不能转换成 Project"（ADR-2026-09-02-028），现在 Project
+ * Deadline Contract 已经批准（ADR-2026-09-18-031），这条 BLOCKED 检查
+ * 本身已经从 `42_ConversionEngine.convertTaskToProject` 里移除，
+ * 原来验证 BLOCKED 的测试内容已经不适用，改为验证"成功转换 + 字段
+ * 映射正确"。
  *
- * 跟 35/36/38/54 一样是真实环境集成测试（真的写 Sheet），用命名空间化
- * 的测试 chatId（accept_test_ttpb_ + 时间戳）隔离，不碰真实 Telegram
- * 数据。
+ * 覆盖范围（新）：
+ *   1. 源 Task 只带 due_date（无 due_time）→ 转换成功，Project.due_date
+ *      跟源一致，due_time/due_datetime 都是空字符串（不自动补午夜）。
+ *   2. 源 Task 带 due_date + due_time → 转换成功，Project 三个字段
+ *      都跟源一致，due_datetime 按公式正确派生。
+ *   3. 源 Task 完全不带日期字段 → 转换成功，Project 三个字段都是空
+ *      字符串（回归确认：这次改动没有影响"不带日期"这条既有路径）。
+ *   4. 转换后立刻用 ProjectQueryEngine.getProject 重新读一遍（不是只看
+ *      convertTaskToProject 的直接返回值）——确认 Create→Read-back 一致，
+ *      也间接确认 Projection/Replay 层（10_ProjectionEngine.
+ *      projectProjectCreated_，本次未改动，通用 key-value upsert）
+ *      正确落地了这三个字段。
+ *   5. Project → Task 反方向**没有**新增 due 字段映射的负向确认——
+ *      ADR-2026-09-18-031 的治理追记明确记录这是 Carson 否决的对称性
+ *      提案，这里验证 `createTaskFromConversion_` 确实维持原状。
  *
- * 覆盖范围：
- *   1. 源 Task 只带 due_date → BLOCKED
- *   2. 源 Task 只带 due_time → BLOCKED
- *   3. 两种 BLOCKED 情况下都确认：没有 Project 被创建、源 Task 没有被
- *      标记成 CONVERTED（对称于 54_Tests_TaskToNoteConversion.gs 里
- *      同样的检查方式）
+ * 刻意排除（如实记录，不是遗漏）：
+ *   - "已经转换过的 Task 之后被打上 due_date，再次调用应该走幂等分支"
+ *     ——跟改写前的文件一样，本次同样不测这个更复杂的场景，原因不变
+ *     （updateTask 对已 CONVERTED 的 Task 的行为本次未验证）。
+ *   - 终态 Task / 已转换成 Note 的 Task 的 BLOCKED 路径——这两条跟
+ *     due_date 无关，本次未改动，已经由 `57_Tests_TaskToProjectPrecheck.gs`
+ *     覆盖，这里不重复造。
+ *   - Identity 在 due_time 变化时的重算行为——这是 Project 自己的
+ *     Identity Model B 行为，不是 Conversion 本身的行为，由
+ *     单独的 Node.js 验证脚本覆盖（见交付说明），这里不重复。
  *
- * 刻意排除（不在本文件范围内，如实记录，不是遗漏）：
- *   - "已经转换过的 Task 之后被打上 due_date，再次调用应该走幂等分支
- *     而不是变成 BLOCKED"——42_ConversionEngine.gs 第 66-74 行的注释
- *     明确写了这是有意的顺序（幂等检查在 BLOCKED 检查之前），但要验证
- *     这条需要先让一个 Task 成功转换、再用 updateTask 补一个 due_date
- *     上去，前提是 updateTask 对已经 CONVERTED 的 Task 不会拒绝写入
- *     ——这一点本次没有去确认，为了不重复这次 due_datetime 那种"测试
- *     假设了一个没验证过的行为"的错误，这次不做这个更复杂的场景，只
- *     测最核心、最直接的触发条件。等 Carson 需要时可以再单独补。
- *   - due_datetime 单独触发——ADR-028 的检查是
- *     `due_date || due_time || due_datetime`的 OR 条件，due_date 或
- *     due_time 单独设置就足够触发，不需要（也做不到，due_datetime 是
- *     纯派生字段，见 54_Tests_TaskToNoteConversion.gs 顶部同样的教训）
- *     单独构造一个"只有 due_datetime"的场景。
- *
- * 单一入口：runTaskToProjectBlockedGate()
+ * 单一入口：runTaskToProjectBlockedGate()（名字保留，见上）
  */
 
 // ============================================================
-// 一、Negative Tests — due_date / due_time 触发 BLOCKED
+// 一、Positive Tests —— due_date/due_time 正确映射
 // ============================================================
 
-function testTaskToProject_DueDateBlocked_() {
-  Logger.log('--- testTaskToProject_DueDateBlocked_ 开始 ---');
+function testTaskToProject_DueDateOnly_MapsCorrectly_() {
+  Logger.log('--- testTaskToProject_DueDateOnly_MapsCorrectly_ 开始 ---');
   var pass = true;
   var testChatId = 'accept_test_ttpb_' + new Date().getTime();
 
-  var cases = [
-    { field: 'due_date', meta: { due_date: '2026-12-31' } },
-    { field: 'due_time', meta: { due_date: '2026-12-31', due_time: '09:00' } }
-    // due_time 单独测试也顺带给了 due_date（跟 54 号文件对 due_time
-    // 用例的处理方式一致），因为空 due_time、没有 due_date 不是一个
-    // 有意义的真实数据状态；这条用例主要验证 due_time 这个 OR 分支
-    // 本身确实会被走到（哪怕 due_date 同时也真），不是排他性验证。
-  ];
+  try {
+    var task = TaskEngine.createTask('验收测试-TaskToProject-仅due_date', { due_date: '2026-12-31' }, testChatId);
+    var result = ConversionEngine.convertTaskToProject(task.task_id, {}, testChatId);
 
-  cases.forEach(function (c) {
-    try {
-      var title = '验收测试-TaskToProject-BLOCKED-' + c.field;
-      var task = TaskEngine.createTask(title, c.meta, testChatId);
+    if (!result.project) {
+      Logger.log('❌ 应该转换成功，实际: ' + JSON.stringify(result));
+      return false;
+    }
 
-      var result = ConversionEngine.convertTaskToProject(task.task_id, {}, testChatId);
-
-      if (!result.blocked) {
-        Logger.log('❌ [' + c.field + '] 应该 blocked，实际: ' + JSON.stringify(result));
-        pass = false;
-        return;
-      }
-
-      if (result.project) {
-        Logger.log('❌ [' + c.field + '] blocked 了，但仍然返回了一个 project 对象，不应该发生: ' + JSON.stringify(result));
-        pass = false;
-        return;
-      }
-
-      // 源 Task 本身不应该被标记为 CONVERTED（对称于
-      // 54_Tests_TaskToNoteConversion.gs 里同样的检查方式）
-      var reloaded = TaskQueryEngine.getTask(task.task_id, testChatId);
-      if (String(reloaded.status).toUpperCase() === 'CONVERTED') {
-        Logger.log('❌ [' + c.field + '] BLOCKED 之后源 Task 不应该变成 CONVERTED，实际: ' + JSON.stringify(reloaded));
-        pass = false;
-      }
-      if (reloaded.converted_to_project_id) {
-        Logger.log('❌ [' + c.field + '] BLOCKED 之后源 Task 不应该有 converted_to_project_id，实际: ' + reloaded.converted_to_project_id);
-        pass = false;
-      }
-    } catch (e) {
-      Logger.log('❌ [' + c.field + '] 不应该抛异常: ' + e.message);
+    if (result.project.due_date !== '2026-12-31') {
+      Logger.log('❌ due_date 映射不对，期望 2026-12-31，实际: ' + result.project.due_date);
       pass = false;
     }
-  });
+    if (result.project.due_time !== '') {
+      Logger.log('❌ due_time 应该是空字符串，实际: ' + JSON.stringify(result.project.due_time));
+      pass = false;
+    }
+    if (result.project.due_datetime !== '') {
+      Logger.log('❌ 只有 due_date 没有 due_time，due_datetime 不应该自动补午夜，应该是空字符串，实际: ' + result.project.due_datetime);
+      pass = false;
+    }
 
-  Logger.log(pass ? '✅ testTaskToProject_DueDateBlocked_ PASS' : '❌ testTaskToProject_DueDateBlocked_ FAIL');
+    // Create → Read-back 一致，间接确认 Projection/Replay 正确落地
+    var reloaded = ProjectQueryEngine.getProject(result.project.project_id, testChatId);
+    if (!reloaded || reloaded.due_date !== '2026-12-31' || reloaded.due_time !== '' || reloaded.due_datetime !== '') {
+      Logger.log('❌ Read-back 不一致: ' + JSON.stringify(reloaded));
+      pass = false;
+    }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testTaskToProject_DueDateOnly_MapsCorrectly_ PASS' : '❌ testTaskToProject_DueDateOnly_MapsCorrectly_ FAIL');
+  return pass;
+}
+
+function testTaskToProject_DueDateAndTime_MapsCorrectly_() {
+  Logger.log('--- testTaskToProject_DueDateAndTime_MapsCorrectly_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ttpb_' + new Date().getTime();
+
+  try {
+    var task = TaskEngine.createTask('验收测试-TaskToProject-date+time',
+      { due_date: '2026-12-31', due_time: '09:00' }, testChatId);
+    var result = ConversionEngine.convertTaskToProject(task.task_id, {}, testChatId);
+
+    if (!result.project) {
+      Logger.log('❌ 应该转换成功，实际: ' + JSON.stringify(result));
+      return false;
+    }
+
+    if (result.project.due_date !== '2026-12-31' || result.project.due_time !== '09:00' ||
+        result.project.due_datetime !== '2026-12-31T09:00:00') {
+      Logger.log('❌ 三个字段映射不对，实际: due_date=' + result.project.due_date +
+        ' due_time=' + result.project.due_time + ' due_datetime=' + result.project.due_datetime);
+      pass = false;
+    }
+
+    var reloaded = ProjectQueryEngine.getProject(result.project.project_id, testChatId);
+    if (!reloaded || reloaded.due_datetime !== '2026-12-31T09:00:00') {
+      Logger.log('❌ Read-back 不一致: ' + JSON.stringify(reloaded));
+      pass = false;
+    }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testTaskToProject_DueDateAndTime_MapsCorrectly_ PASS' : '❌ testTaskToProject_DueDateAndTime_MapsCorrectly_ FAIL');
+  return pass;
+}
+
+function testTaskToProject_NoDueDate_StillWorksUnaffected_() {
+  Logger.log('--- testTaskToProject_NoDueDate_StillWorksUnaffected_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ttpb_' + new Date().getTime();
+
+  try {
+    var task = TaskEngine.createTask('验收测试-TaskToProject-无日期', {}, testChatId);
+    var result = ConversionEngine.convertTaskToProject(task.task_id, {}, testChatId);
+
+    if (!result.project) {
+      Logger.log('❌ 应该转换成功（回归），实际: ' + JSON.stringify(result));
+      return false;
+    }
+    if (result.project.due_date !== '' || result.project.due_time !== '' || result.project.due_datetime !== '') {
+      Logger.log('❌ 不带日期时三个字段都应该是空字符串，实际: ' + JSON.stringify(result.project));
+      pass = false;
+    }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testTaskToProject_NoDueDate_StillWorksUnaffected_ PASS' : '❌ testTaskToProject_NoDueDate_StillWorksUnaffected_ FAIL');
+  return pass;
+}
+
+// ============================================================
+// 二、Negative Test —— Project → Task 反方向确认没有新增映射
+// ============================================================
+
+function testProjectToTask_NoDueFieldReverseMapping_() {
+  Logger.log('--- testProjectToTask_NoDueFieldReverseMapping_ 开始 ---');
+  var pass = true;
+  var testChatId = 'accept_test_ttpb_' + new Date().getTime();
+
+  try {
+    // 先造一个带 due_date 的 Project（走 createProject 直接创建，不
+    // 经过 Task→Project，避免跟上面几个测试耦合）。
+    var project = ProjectEngine.createProject('验收测试-ProjectToTask-反向不映射',
+      { due_date: '2026-12-31', due_time: '09:00' }, testChatId);
+
+    if (project.due_date !== '2026-12-31') {
+      Logger.log('❌ 测试前置条件失败：Project 创建时 due_date 没有生效: ' + JSON.stringify(project));
+      return false;
+    }
+
+    var result = ConversionEngine.convertProjectToTask(project.project_id, {}, testChatId);
+    if (!result.task) {
+      Logger.log('❌ 应该转换成功，实际: ' + JSON.stringify(result));
+      return false;
+    }
+
+    // ADR-2026-09-18-031 治理追记：反向映射明确未获批准，
+    // createTaskFromConversion_ 应该维持原状，新 Task 不应该有任何
+    // due_date/due_time 值。
+    if (result.task.due_date || result.task.due_time) {
+      Logger.log('❌ 反方向不应该映射 due 字段（这是明确否决的提案），实际: ' +
+        JSON.stringify({ due_date: result.task.due_date, due_time: result.task.due_time }));
+      pass = false;
+    }
+  } catch (e) {
+    Logger.log('❌ 不应该抛异常: ' + e.message);
+    pass = false;
+  }
+
+  Logger.log(pass ? '✅ testProjectToTask_NoDueFieldReverseMapping_ PASS' : '❌ testProjectToTask_NoDueFieldReverseMapping_ FAIL');
   return pass;
 }
 
@@ -105,19 +200,23 @@ function testTaskToProject_DueDateBlocked_() {
 // ============================================================
 
 function runTaskToProjectBlockedGate() {
-  Logger.log('========== Task → Project BLOCKED Gate 开始 ==========');
-  Logger.log('范围：42_ConversionEngine.gs convertTaskToProject 的');
-  Logger.log('ADR-2026-09-02-028 BLOCKED 检查（Slice 4 Part A）。');
-  Logger.log('成功转换路径已经由 36_Tests_Sprint3Acceptance.gs 的');
+  Logger.log('========== Task → Project due_date/due_time Gate 开始 ==========');
+  Logger.log('范围：42_ConversionEngine.gs convertTaskToProject 在');
+  Logger.log('ADR-2026-09-18-031 之后的 due_date/due_time 字段映射行为');
+  Logger.log('（此前 ADR-2026-09-02-028 的 BLOCKED 检查已移除）。');
+  Logger.log('成功转换路径的其它既有断言已经由 36_Tests_Sprint3Acceptance.gs 的');
   Logger.log('testBidirectionalConversion_ 覆盖，本 Gate 不重复。');
   Logger.log('');
 
   var results = {
-    'Negative: Task→Project Blocked by due_date/due_time': testTaskToProject_DueDateBlocked_()
+    'Positive: due_date only maps correctly':          testTaskToProject_DueDateOnly_MapsCorrectly_(),
+    'Positive: due_date + due_time maps correctly':    testTaskToProject_DueDateAndTime_MapsCorrectly_(),
+    'Regression: no due_date still works unaffected':  testTaskToProject_NoDueDate_StillWorksUnaffected_(),
+    'Negative: Project→Task has no reverse due mapping': testProjectToTask_NoDueFieldReverseMapping_()
   };
 
   Logger.log('');
-  Logger.log('========== Task → Project BLOCKED Gate 结果汇总 ==========');
+  Logger.log('========== Task → Project due_date/due_time Gate 结果汇总 ==========');
   var allPass = true;
   for (var name in results) {
     Logger.log((results[name] ? '✅ ' : '❌ ') + name);

@@ -47,16 +47,17 @@ var ConversionEngine = (function () {
    *                                execution_mode }
    * @param {string} chatId
    * @returns {{project:object, already_converted?:boolean}|{not_found:true}|
-   *           {blocked:true, reason:string}|
    *           {invalid_state:true, current_status:string, reason:string, project?:object}}
-   *   【2026-09-08，Known Limitation 8 修复】新增 invalid_state 分支：
+   *   【2026-09-08，Known Limitation 8 修复】invalid_state 分支：
    *   已转换成 Note、或终态 Task 会在创建 Project 之前被挡下来返回
    *   这个形态；`project` 字段只在极罕见的并发防御性分支里才会跟
    *   invalid_state 一起出现（见函数体内注释）。
-   *   【2026-09-04 更正】此前这里写的是 {invalid_state:true,...}——查了一遍
-   *   代码，这个函数从来没有返回过 invalid_state，是文档跟代码从一开始
-   *   就没对上，不是这次改动引入的偏差。新增的 blocked 是这次 Slice 4
-   *   Part A 真实加入的分支（ADR-2026-09-02-028）。
+   *   【2026-09-18，ADR-2026-09-18-031】此前这里还有一个
+   *   `{blocked:true, reason:string}` 分支（源 Task 带 due_date/
+   *   due_time 时触发，2026-09-04 由 Slice 4 Part A/ADR-2026-09-02-028
+   *   引入）——Project Deadline Contract 批准后这条检查已经移除，
+   *   `blocked` 这个返回形态目前已经不会再发生，从这份类型注释里删掉，
+   *   不是遗漏。
    */
   function convertTaskToProject(taskId, projectMeta, chatId) {
     var sourceTask = TaskQueryEngine.getTask(taskId, chatId);
@@ -92,23 +93,16 @@ var ConversionEngine = (function () {
         reason: '只有非终态的 Task 才能转换为 Project' };
     }
 
-    // 【Slice 4 Part A, 2026-09-04，ADR-2026-09-02-028 + Business_Rules
-    // 「十一」No-Silent-Loss Principle】源 Task 带日期时，Project 现在
-    // 没有 schema 能存放，必须结构化 BLOCKED，不能静默丢弃。跟
-    // convertProjectToTask 的 checkEligibleForTaskDemotion_ 同一个
-    // "先校验、不满足直接 return {blocked:true, reason}" 风格。放在
-    // 幂等分支之后：已经转换过的 Task 不应该因为带日期而在重复调用时
-    // 突然变成 BLOCKED——幂等优先于这条新校验。Project Deadline
-    // Contract 一旦批准，这条检查本身要重新评估（见 ADR-028 Related
-    // ADR 一栏），不是这次顺手解决。
-    if (sourceTask.due_date || sourceTask.due_time || sourceTask.due_datetime) {
-      return {
-        blocked: true,
-        reason: 'Project 尚不支持 deadline（due_date/due_time），暂时无法转换。' +
-                '等 Project Deadline Contract 批准后可以重新尝试。'
-      };
-    }
-
+    // 【ADR-2026-09-18-031，2026-09-18，Project Deadline Contract 已
+    // Accepted】上面 ADR-2026-09-02-028 的 Related ADR 一栏、
+    // 00_Business_Rules.gs「一」都预留了"批准后这条检查本身要重新
+    // 评估"这一步——这就是那一步：Project 现在有 schema 能存放
+    // due_date/due_time 了，原有的 BLOCKED 检查（源 Task 带日期就拒绝
+    // 转换）已经不再需要，原样移除，改成把日期字段正向映射进新
+    // Project。反方向（Project→Task 补 due 字段）**没有**同步加——
+    // ADR-031 治理追记已明确记录这是 Claude 曾经提出、后来被 Carson
+    // 否决的对称性提案，不是这次的实现范围，`convertProjectToTask`/
+    // `TaskEngine.createTaskFromConversion_` 本次未改动。
     projectMeta = projectMeta || {};
 
     // 【失败恢复策略，见 00_Business_Rules.gs「一」，本次未改动这个
@@ -116,13 +110,18 @@ var ConversionEngine = (function () {
     // CONVERTED——如果第二步失败，源 Task 仍然完好，不会出现"源丢了
     // 目标也没建成"的情况；下次重试时，`ProjectEngine.createProject`
     // 自己的 identity/去重会认出这是同一次转换，不会建出第二个
-    // Project。上面两条新增的 pre-check 只是在"要不要开始建"这一步
-    // 之前多挡两层，不影响这里的失败恢复策略。
+    // Project。
     var project = ProjectEngine.createProject(sourceTask.title, {
       description:       projectMeta.description || sourceTask.notes || '',
       parent_project_id: projectMeta.parent_project_id || '',
       execution_mode:    projectMeta.execution_mode || '',
       source_task_id:    taskId,
+      // 【ADR-2026-09-18-031，2026-09-18】正向字段映射——due_datetime
+      // 不在这里手动传，ProjectEngine.createProjectDirect_ 内部会用
+      // 新增的私有 _computeDueDatetime_ 自动派生，跟 due_date/due_time
+      // 两个原始字段是否都非空的组合关系一致，不在这里重复计算一遍。
+      due_date:          sourceTask.due_date || '',
+      due_time:          sourceTask.due_time || '',
       creator:           'User',
       source_module:     'ConversionEngine.convertTaskToProject',
       decision_owner:    projectMeta.decision_owner // 2026-08-16 同一处修复

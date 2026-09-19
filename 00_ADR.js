@@ -2212,6 +2212,102 @@
  *      写成 PASS。
  *  11. 完成后按既有习惯更新 `00_Project_State.gs` 记录。
  *
+ * 【2026-09-18 治理追记——撤回反向字段映射，Carson 明确指示】
+ *   Decision 4.b（Project→Task 反向字段映射）与 Implementation Gate
+ *   第 6 项标注的"Carson 需确认是否同意这一项"，Carson 已明确回应：
+ *   **不同意，撤回**。具体：
+ *   1. Project→Task 的 due_date/due_time 反向映射**未获批准**——
+ *      Decision 4.b 原文保留在上面，作为"曾经提出过、后来被明确否决"
+ *      的历史记录，不删除、不改写，但不再是本 ADR 的有效范围。
+ *   2. 本阶段（含接下来的 Implementation Gate 执行）**不实现**该
+ *      反向映射——Implementation Gate 第 6 项视为撤销，
+ *      `20_TaskEngine.gs`/`createTaskFromConversion_` 不在本次
+ *      Phase 2 改动范围内。
+ *   3. "对称性"（ADR-028 No-Silent-Loss 原则双向同等适用）不得被当成
+ *      默认业务规则自动推出反向映射——Decision 4.a（正向，
+ *      Task→Project）本身不受影响，正向映射的批准状态不变。
+ *   4. 本条追记只影响 Decision 4.b / Implementation Gate 第 6
+ *      项；Decision 1（Schema Model C）、Decision 2（Identity Model
+ *      B）、Decision 3（Workflow 不继承）、Decision 4.a（正向映射）、
+ *      Implementation Gate 其余各项、以及本 ADR 的 Accepted 状态本身
+ *      均**保持不变**，不因这条追记重新开放讨论。
+ *   5. 未来如果确实需要 Project→Task 反向映射，必须另行提出一个独立
+ *      的 Decision Gate / ADR，不能作为本条 ADR 的默认延伸或"顺手"
+ *      加回。
+ *
+ * 【2026-09-18 Phase 2 完成状态，Carson 指示下实施】Implementation Gate
+ *   第 1-5、7-11 项已完成（第 6 项撤销，见上方治理追记）：
+ *   - 第 1 项（Migration）：`11_ProjectionRebuilder.gs` 新增
+ *     `migrateSchemaProjectDeadline()`；`15_Setup.gs` 的 `setupSheets()`
+ *     baseline 同步加了三列（未来全新部署不需要再跑这条迁移）。
+ *   - 第 2-3 项（Identity）：`07_IdentityEngine.gs`
+ *     的 `generateProjectIdentity` 加了第 4 参数；
+ *     `27_ProjectEngine.gs` 的 `CFG.IDENTITY_AFFECTING_FIELDS`/
+ *     `UPDATABLE_FIELDS`/`createProjectDirect_`/`updateProject` 都已
+ *     改动（含新增私有 `_computeDueDatetime_`）。
+ *   - 第 4 项（IdempotencyManager 创建路径）：`09_IdempotencyManager.gs`
+ *     的 `createProjectIfNotExists` 已改动——**跟 Task 既有的
+ *     `createTaskIfNotExists` 不完全同构，是有意的**：本次在这里直接
+ *     算好 due_datetime 再求 identity，不是照抄 Task 创建路径"直接传
+ *     原始 meta"的写法（那样写会让 Project 创建时和更新时对 due_time
+ *     的处理不一致——这是本次核实中在 Task 既有代码里发现的一处
+ *     创建/更新不对称，如实记录，不在 Task 身上动它，详见
+ *     09_IdempotencyManager.gs 本次改动处的行内注释）。
+ *   - 第 5 项（正向转换）：`42_ConversionEngine.gs` 的 due_*
+ *     BLOCKED 检查已移除，字段正向映射已加。
+ *   - 【本次交付时发现，原 Implementation Gate 未列出，一并完成】
+ *     `50_UIBridge.gs` 的 `ui_createProject`：这个函数用显式白名单
+ *     转发 meta 字段（跟 `ui_updateProject` 直接转发整个 changes 对象
+ *     不是同一种写法），没有这一步即使后端已经能接受 due_date/due_time
+ *     也会被这里静默丢弃——已补上。`ui_updateProject`/
+ *     `ui_getActiveProjects`/`ui_convertTaskToProject` 已核实不需要
+ *     改动（前者直接转发 changes；后两者调用的
+ *     `_sanitizeTaskDatesForTransport_` 本身通用，不认对象是 Task 还是
+ *     Project，只认字段名）。
+ *   - 第 7 项（Business_Rules 文档）：`00_Business_Rules.gs`「一」新增
+ *     v5.4 段落，v5.3 原文保留。
+ *   - 第 8 项（测试改写）：`55_Tests_TaskToProjectBlocked.gs`
+ *     内容改写（文件名/gate 函数名 `runTaskToProjectBlockedGate`
+ *     保留不变，避免 `57_Tests_TaskToProjectPrecheck.gs`
+ *     的操作提示字符串指向一个不存在的函数名）。
+ *   - 第 9 项：确认成立，10/14 两个文件确实不需要改动。
+ *   - 第 10 项（验证证据）：本次用 Node.js GAS-shim 方式（跟 Decision 3
+ *     同一手法，见 00_Project_State.gs「四十八」）——把上面全部
+ *     真实生产文件加载进同一个共享上下文，配一个内存版假 Spreadsheet，
+ *     真实执行（不是"应该能跑通"的静态推断），覆盖：migration 幂等性
+ *     （连跑两次内容一致）+ 不丢已有数据、create/update 的
+ *     due_datetime 派生与 fallback、Identity Model B 的 due_time
+ *     确实会变identity（不是"只看due_date"）、无 deadline 的旧
+ *     Project identity 向后兼容不受影响、正向转换字段映射 + 反向转换
+ *     确认没有映射、以及**重新跑了两个跟这次改动无关但同一个文件动过
+ *     的既有回归测试**（`36_Tests_Sprint3Acceptance.testBidirectionalConversion_`、
+ *     `57_Tests_TaskToProjectPrecheck.runTaskToProjectBlockedGate`）——
+ *     两个都是真实调用、真实通过，不是假设没受影响。全部 23 项检查
+ *     通过。**明确边界**：这是模拟环境，不是 Carson 的真实 GAS/Spreadsheet，
+ *     替代不了下面的 LIVE TEST PENDING 项；Sheets 真实的自动类型识别
+ *     行为（Finding DT-2 那一类问题）这个模拟环境里没有复现能力
+ *     （内存假表不会像真实 Sheets 一样把字符串误判成 Date 类型），
+ *     `_setPlainTextFormatForNewColumns_` 这一步本身的效果只能在真实
+ *     环境验证。`38_Tests_UIBridge.gs` 的三个 ConvertTaskToProject
+ *     测试、`ui_createProject` 的改动，本次未进这套 Node 验证（需要
+ *     Session.getEffectiveUser 等更多 shim，且这两处本身改动很小/未改
+ *     ——判断为投入产出不成比例），停留在代码核对层面，如实标记。
+ *   - 状态：**STATIC VERIFIED + Node 环境 LIVE-EXECUTED（真实运行，
+ *     非真实环境）**——不等同于 Carson 真实 GAS/Spreadsheet 上的
+ *     LIVE VERIFIED，那一步仍然 PENDING，需要 Carson 在真实环境跑
+ *     一遍 `migrateSchemaProjectDeadline()` 和相关 Gate。
+ *   - 新的 Decision Gate：无——本次实施过程中没有出现需要 Carson
+ *     另外判断的新业务决策。
+ *   - **一个未决项，如实标注，不在本条 Implementation Gate 范围内
+ *     自行决定**：`ui_index.html` 目前没有任何 Project 创建/编辑表单
+ *     输入 due_date/due_time 的界面元素——后端链路（Schema/Identity/
+ *     Create/Update/Read/Conversion/UIBridge 转发）已经完整打通，但
+ *     普通用户目前只能通过 Task→Project 转换"间接"让 Project 带上
+ *     deadline，没有办法在 Web UI 里直接给一个 Project 设置/编辑
+ *     deadline。要不要加、加在哪、长什么样，是一个需要 Carson 另外
+ *     决定的 UI 设计问题，不在这次 ADR 的 Implementation Gate 原始
+ *     范围内，本次没有擅自设计，留给 Carson 决定是否需要单独一轮。
+ *
  * Notes
  *   完整背景见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
  *   Review_2026-09-01.md（Schema/Identity 建议出处）、

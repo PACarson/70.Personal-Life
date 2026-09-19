@@ -134,10 +134,29 @@ var IdempotencyManager = (function () {
   function createProjectIfNotExists(title, meta, chatId) {
     meta = meta || {};
 
+    // 【ADR-2026-09-18-031，2026-09-18】跟 createTaskIfNotExists 上面的
+    // resolveIdentityDueValue(meta) 不完全同构，是有意的，不是疏漏：
+    // Task 那条路径直接传原始 meta，如果 meta 只带了 due_date+due_time
+    // 但没有预先算好 due_datetime，resolveIdentityDueValue 会退到只用
+    // due_date（因为 meta.due_datetime 还不存在）——这是 Task 既有代码
+    // 里创建时和更新时的一处不对称（20_TaskEngine.updateTask 会先重算
+    // due_datetime 再取 identity，createTaskIfNotExists 不会），本次
+    // 不在 Task 身上碰它（出这个不对称的是既有代码，不在这次 ADR 范围
+    // 内，如实记录，不顺手"修"）。但 Project 这条路径是全新写的代码，
+    // 没有历史行为要保持向后兼容，所以在这里直接算好 due_datetime 再
+    // 求 identity，让 Project 创建时和更新时对 due_time 的处理完全
+    // 一致——这一行只是 27_ProjectEngine._computeDueDatetime_
+    // 的逐字重复（那个函数是私有的，这个文件访问不到），两行代码的
+    // 重复成本远低于跨模块开洞暴露一个只有一处调用方的工具函数。
+    var metaDueDatetime = (meta.due_date && meta.due_time) ? (meta.due_date + 'T' + meta.due_time + ':00') : '';
     var identity = IdentityEngine.generateProjectIdentity(
       chatId,
       title,
-      meta.parent_project_id || ''
+      meta.parent_project_id || '',
+      IdentityEngine.resolveIdentityDueValue({
+        due_date: meta.due_date || '',
+        due_datetime: metaDueDatetime
+      })
     );
 
     var acquired = _acquireSoftLock_(chatId);
