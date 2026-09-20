@@ -596,3 +596,80 @@
  * `deriveFromEvent`/`materializeXxxRow_`，需要逐个核实，本次未核实）。
  */
 
+
+// ============================================================
+// 十一、_setPlainTextFormatForNewColumns_ 的纯文本保护有生命周期上限
+//     （2026-09-20 新增，Real GAS Verification Gate 修复过程中发现，
+//     修复本身不能、也不需要消除这条残留风险）
+// ============================================================
+
+/**
+ * `11_ProjectionRebuilder.gs` 的 `_setPlainTextFormatForNewColumns_`
+ * 这次修复（见 ADR-2026-09-18-031 追记）把格式化范围从 `getLastRow()`
+ * 改成了 `getMaxRows()`——跟 `_ensureSheet_` 对全新表的处理方式对齐，
+ * 把当前物理网格里还没有数据的预留行也提前格式化好。
+ *
+ * 但这个 range 是"迁移那一刻的 getMaxRows()"，不是"永远"。如果这张
+ * 表将来的数据行数增长超过当前 `getMaxRows()`，Google Sheets 会自动
+ * 扩容网格——扩容出来的全新行不在这次格式化的 range 里，会重新暴露
+ * 同一个"日期/时间形状的字符串被自动识别成 Date/Time 类型"问题。
+ *
+ * 这不是这次修复的缺陷，是跟 `_ensureSheet_` 自己对全新表的保护方式
+ * 完全同一等级的残留风险——`_ensureSheet_` 也只格式化创建时刻的
+ * `getMaxRows()`，同样不会自动跟着未来的网格扩容延伸保护范围。这次
+ * 修复只是把 `_setPlainTextFormatForNewColumns_` 提升到跟
+ * `_ensureSheet_` 同一个保护水平，不是消灭这类风险本身。
+ *
+ * 真正杜绝需要在写入路径本身加保护（比如每次 appendRow/upsertRowByKey_
+ * 写入 due_date 这类字段时显式 setNumberFormat 那一格），这是更大的
+ * 改动，不在这次授权范围内，故记录为 Known Limitation，不是这次顺手
+ * 解决的范围。
+ *
+ * 触发条件：Projects/Tasks/ActiveTasks/ArchiveTasks 任意一张表的行数
+ * 增长到超过它们各自当前的 `getMaxRows()`（Google Sheets 新建 Sheet
+ * 默认一般是 1000 行，具体数字取决于每张表各自的创建历史，这次修复
+ * 没有、也无法从代码里确认每张真实表当前实际的 getMaxRows() 是多少）。
+ * 以 Carson 真实环境当前的数据量（Projects 67 行、Tasks 157 行，见
+ * 00_Project_State.gs「四十八」）来看，短期内触发的概率很低，但不是
+ * 零，值得记录，不假设"不会发生"。
+ */
+
+// ============================================================
+// 十二、Tasks 表 due_time 是否已经存在历史性静默损坏 —— 范围未知，
+//     需要真实环境核实（2026-09-20 新增，同上背景发现）
+// ============================================================
+
+/**
+ * `migrateSchemaDueTime()`（给 Tasks/ActiveTasks/ArchiveTasks 追加
+ * due_time/due_datetime 两列）用的是同一个（这次已修复）
+ * `_setPlainTextFormatForNewColumns_`。这次在真实环境证实的 bug
+ * （Project Deadline Real GAS Verification Gate，2026-09-19/20）
+ * 证明：**在这次修复之前**，任何一张表在"迁移那一刻"之后新增的行，
+ * due_time/due_datetime 列都没有纯文本保护，会被 Sheets 自动识别成
+ * Date/Time 类型。
+ *
+ * 这次修复之前，`migrateSchemaDueTime()` 是什么时候在 Carson 真实
+ * 环境跑的、当时 Tasks 有多少行、之后又新增了多少行——这些都无法从
+ * 代码本身确认。如果 `migrateSchemaDueTime()` 运行得比较早、Tasks
+ * 之后又持续新增了大量带 due_time 的真实 Task，这些真实 Task 的
+ * due_time（进而 due_datetime、进而 Task Identity 的计算）**可能已经
+ * 在真实 Spreadsheet 里静默损坏了一段时间**——不是假设一定发生，是
+ * "无法排除，需要真实环境核实"。
+ *
+ * 核实方法（真实环境执行，不在这次修复范围内自动完成）：在 Apps
+ * Script 编辑器里挑一个真实存在、带 due_time 的较早的 Task，直接读它
+ * 的 due_time 单元格值，看是字符串（比如 "18:00"）还是 Date 对象
+ * （类似 "Sat Dec 30 1899 09:00:00 GMT+xxxx" 这种形状）。如果发现真的
+ * 有历史性损坏，修复已损坏的既有行需要一次数据层面的批量修复（把这些
+ * 单元格重新格式化成纯文本、再重写回正确的字符串值），这是比这次
+ * 授权范围（"修复共用 helper"）更大的一次操作，需要 Carson 另行决定
+ * 是否要做、怎么做，不在这次任务范围内自动展开。
+ *
+ * 补充：Tasks 的 `due_date`（不同于 due_time/due_datetime）大概率不受
+ * 影响——它是 Tasks 建表时就有的历史列，从 `_ensureSheet_`
+ * 建表那一刻起就已经被整块设成纯文本（见 15_Setup.gs 对 Tasks 的
+ * `_ensureSheet_` 调用），只要 Tasks 至今的行数没有超过它建表时的
+ * `getMaxRows()`（大概率没有，参照「十一」的分析），due_date 应该
+ * 一直是安全的——但这是推理，不是已经在真实环境验证过的事实，如实
+ * 标注为推理而不是结论。
+ */

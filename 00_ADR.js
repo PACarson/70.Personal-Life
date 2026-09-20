@@ -2308,6 +2308,52 @@
  *     决定的 UI 设计问题，不在这次 ADR 的 Implementation Gate 原始
  *     范围内，本次没有擅自设计，留给 Carson 决定是否需要单独一轮。
  *
+ * 【2026-09-19/20 追记 —— 真实 GAS 环境发现并修复一个真实 bug】
+ *   Carson 在真实 Apps Script 环境跑 `runTaskToProjectBlockedGate()`
+ *   时，`testTaskToProject_DueDateOnly_MapsCorrectly_`/
+ *   `_DueDateAndTime_MapsCorrectly_` 两项 FAIL——真实 read-back 显示
+ *   `due_date`/`due_time` 被 Google Sheets 自动识别成了 Date/Time
+ *   类型（不是字符串），`_computeDueDatetime_` 拿到 Date 对象后用字符
+ *   串拼接，产出损坏的 `due_datetime`。**这是这次 ADR 引入的代码
+ *   触发的真实 bug，根因不在这次新写的代码本身，在一个更早就存在、
+ *   三个迁移路径共用的 helper**：`11_ProjectionRebuilder.gs` 的
+ *   `_setPlainTextFormatForNewColumns_` 原来只格式化"迁移那一刻已存在"
+ *   的行（`getRange(2, colIndex, lastRow-1, 1)`），迁移之后新
+ *   appendRow 进来的行不受保护——`migrateSchemaProjectDeadline()`
+ *   刚跑完 Projects 表还没有任何数据，之后测试新建的每一个 Project
+ *   都精确落在这个洞里，100% 命中。
+ *
+ *   修复（Carson 明确授权，"允许修复该 bug，但不得顺带进行无关
+ *   重构"）：把格式化范围从 `getLastRow()` 改成 `getMaxRows()`——跟
+ *   `_ensureSheet_` 对全新表的处理方式对齐，提前把还没有数据的预留行
+ *   也格式化好。同时改正了原来"没有数据行就直接跳过"的分支（这正是
+ *   bug 的根源之一：以为没数据就不用管，但没数据恰恰是最需要提前
+ *   格式化的时候）。这个 helper 被 `migrateSchemaDueTime()`
+ *   （Tasks 系）、`migrateSchemaReminderPolicy()`（Tasks 系）、
+ *   `migrateSchemaProjectDeadline()`（Projects）三处共用，三处一次
+ *   修好，语义对三者完全一致（纯粹扩大格式化范围，不改变对已覆盖
+ *   行的处理方式）。
+ *
+ *   验证：Node.js GAS-shim 环境（跟之前一样，不能替代真实 GAS——这次
+ *   模拟环境本身就无法复现 Sheets 的自动类型识别行为，所以这次的
+ *   验证只能确认"修复后请求的格式化 range 确实变大了"这个代码层面的
+ *   事实，不能重现或反证真实环境里 Date 类型被误判这件事本身）——已
+ *   确认：三个共用调用点（Projects/Tasks 系/ReminderPolicy）修复后都
+ *   请求了基于 `getMaxRows()` 的大 range；新增的"空表/只有表头"边界
+ *   情况不再直接跳过、不再抛异常；既有的 migrateSchemaProjectDeadline
+ *   幂等性回归依然成立。全部 27 项检查通过（含之前 Node 验证的全部
+ *   既有断言）。**真实环境的实际重跑仍是 LIVE TEST PENDING**，详见
+ *   本次同步交付的 Real GAS Re-verification Protocol。
+ *
+ *   两处新记录的 Known Limitation（`00_Known_Limitations.gs`「十一」
+ *   「十二」）：(1) 这次修复本身有生命周期上限——表将来增长超过当前
+ *   `getMaxRows()` 会重新暴露同一类问题，跟 `_ensureSheet_` 自己面临
+ *   的残留风险同一等级，不是这次修复引入的新缺口；(2) **真实 Tasks
+ *   表的 due_time 是否已经存在这一类历史性静默损坏，范围未知，需要
+ *   Carson 在真实环境核实**——这个 bug 触发条件（迁移之后新增的行）
+ *   在 `migrateSchemaDueTime()` 这条路径上存在的时间远比这次
+ *   Projects 的路径长，不能假设"没出现过"。
+ *
  * Notes
  *   完整背景见 Personal_Life_OS_UIV2_Architecture_Capability_Gap_
  *   Review_2026-09-01.md（Schema/Identity 建议出处）、

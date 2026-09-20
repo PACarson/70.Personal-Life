@@ -3140,3 +3140,77 @@
  * 按 Plan 里 Phase 6 的模板填写「五十三」记录（本条只记录"计划已交付"，
  * 不预先假设 Carson 会全部通过）。
  */
+
+/**
+ * 五十四、Real GAS 环境发现真实 bug + 共用 helper 修复（2026-09-20，
+ *         Carson 明确授权下按 Phase 0-4 顺序执行）
+ *
+ * 【根因与影响范围】Carson 在真实 Apps Script 环境跑
+ * `runTaskToProjectBlockedGate()` 时两项测试真实 FAIL——真实 read-back
+ * 显示 `due_date`/`due_time` 被 Sheets 自动识别成 Date/Time 类型。
+ * 根因：`11_ProjectionRebuilder.js` 的 `_setPlainTextFormatForNewColumns_`
+ * 原来只格式化"迁移那一刻已存在"的行（`getLastRow()`），迁移之后新增
+ * 的行不受纯文本保护。这个 helper 被 `migrateSchemaDueTime()`
+ * （Tasks/ActiveTasks/ArchiveTasks 的 due_time/due_datetime）、
+ * `migrateSchemaReminderPolicy()`（同三张表 reminder_policy）、
+ * `migrateSchemaProjectDeadline()`（Projects 的 due_date/due_time/
+ * due_datetime）三处共用——本次改动只碰这一个共用函数本身，没有改变
+ * 三个调用点各自的调用方式或业务语义。
+ *
+ * 【Phase 0，测试数据清理】受影响的 3 条真实 Projects 测试行 +
+ * 配套的真实 Tasks 测试行，因为没有真实环境访问权限，本次交付为独立
+ * 协议文档（`Project_Deadline_Bug_Fix_Cleanup_And_Retest_Protocol_
+ * 2026-09-20.md`），要求逐条核对 chat_id + 标题 + ID 三个字段一致才
+ * 清理，不允许按模糊标题批量删——**尚未执行**，需要 Carson 在真实
+ * 环境跑。
+ *
+ * 【Phase 1，Helper 修复，已完成】`_setPlainTextFormatForNewColumns_`
+ * 改动前后行为：
+ *   - 改动前：`sheet.getRange(2, colIndex, lastRow - 1, 1)`；
+ *     `lastRow < 2`（空表/只有表头）时直接跳过，不做任何格式化。
+ *   - 改动后：`var rowsToFormat = Math.max(lastRow, sheet.getMaxRows()) - 1`，
+ *     `rowsToFormat <= 0` 才跳过（正常 Sheet 几乎不会触发）；跟
+ *     `_ensureSheet_` 对全新表的处理方式对齐，把还没有数据的预留行
+ *     也提前格式化好。对既有覆盖行的处理方式没有变化（纯粹扩大
+ *     range，不改变已覆盖部分的语义）。
+ *
+ * 【Phase 2，调用面审查，已完成——代码层面 + Node 模拟环境，非真实
+ * GAS】三个调用点（Projects/Tasks 系/ReminderPolicy）逐一核实：
+ *   - 修复后请求的格式化 range 都变成了基于 `getMaxRows()` 的大 range
+ *     （Node 环境里观察到的具体数值是 999，等于这次模拟环境默认
+ *     `maxRows`-1，不代表真实环境的实际数值）。
+ *   - 新增的"空表/只有表头"边界场景：不再跳过、不再抛异常，确认
+ *     格式化真的发生了。
+ *   - `migrateSchemaProjectDeadline()` 幂等性：仍然成立（跟改动前
+ *     相同结论，重新验证过，不是照抄旧结论）。
+ *   - 没有发现 Tasks/ReminderPolicy 的业务语义跟这次修复冲突——纯粹
+ *     格式化 range 扩大，不改变任何字段的读写逻辑本身，不需要
+ *     HARD STOP。
+ *   - **新增两条 Known Limitation**（`00_Known_Limitations.js`
+ *     「十一」「十二」）：这次修复本身的残留风险（表未来增长超过
+ *     当前 getMaxRows 会重新暴露同一问题）；真实 Tasks 表的 due_time
+ *     是否已经存在历史性静默损坏——范围未知，需要 Carson 在真实环境
+ *     核实，本次没有能力从代码本身判断。
+ *
+ * 【Phase 3，真实环境重测，尚未执行】协议已设计（同 Phase 0 那份
+ * 文档），覆盖：migration 前后 schema 核对、连续两次幂等、
+ * 仅date/date+time 两种新建场景的真实 read-back、更新/清除、
+ * due_datetime 派生/fallback、Identity 是否符合 ADR-031、重跑
+ * Task→Project 相关 Gate、conversion 一致性——**全部 LIVE TEST
+ * PENDING，一次都没有在真实环境跑过，不是"应该没问题"**。
+ *
+ * 【Phase 4，本条记录】不得仅写"通过"——本条如实区分：
+ *   - STATIC VERIFIED + Node 环境模拟执行通过：helper 修复本身的
+ *     range 计算逻辑、边界情况处理、三个调用点的一致性、既有回归
+ *     （27 项检查，含之前的 23 项 + 这次新增的 4 项）。
+ *   - LIVE TEST PENDING（一次都没跑）：真实环境的测试数据清理、
+ *     helper 修复在真实 Sheets 上的实际效果（模拟环境本身没有能力
+ *     复现 Sheets 的自动类型识别行为，所以连"应该能解决"都不是这次
+ *     验证能确认的，只能确认"代码逻辑变了、逻辑本身没有明显缺陷"）、
+ *     Phase 3 全部重测项、Known Limitation 十二 提出的 Tasks 历史
+ *     数据核实。
+ *   - 没有出现新的、需要 Carson 判断的业务决策（两条新 Known
+ *     Limitation 是记录风险，不是决策请求——如果 Carson 决定要
+ *     处理「十二」，那才是一次新的、独立的 Decision Gate，本条不
+ *     预先假设答案）。
+ */

@@ -194,8 +194,45 @@ function _setPlainTextFormatForNewColumns_(sheetName, columnNames) {
 
   var headerMap = getHeaderMap_(sheet);
   var lastRow   = sheet.getLastRow();
-  if (lastRow < 2) {
-    Logger.log('  [' + sheetName + '] 没有数据行，跳过纯文本格式设置');
+
+  // 【2026-09-20，修复真实 GAS 环境发现的 bug，Project Deadline Real
+  // GAS Verification Gate】原来这里只格式化 `lastRow - 1` 行——只覆盖
+  // "迁移那一刻已经存在"的数据行。迁移之后新 appendRow 进来的行不在这
+  // 个 range 里，没有纯文本保护，Sheets 会把日期/时间形状的字符串自动
+  // 识别成 Date/Time 类型——真实环境已经证实：`due_date` 读回来变成
+  // `Thu Dec 31 2026 00:00:00 GMT+0800`，`due_time` 变成
+  // `Sat Dec 30 1899 09:00:00 GMT+0655`（Sheets 内部纯时间值的
+  // 1899-12-30 epoch），`_computeDueDatetime_` 拿到这两个 Date 对象
+  // 后用字符串拼接，产出了完全损坏的 due_datetime。
+  //
+  // 修复：跟 `_ensureSheet_` 对全新表的处理方式对齐——用
+  // `getMaxRows()`（物理网格行数，通常比 `lastRow` 大得多，新建 Sheet
+  // 默认一般有 1000 行）代替 `lastRow`，把还没有数据的预留行也提前
+  // 格式化好，这样将来 appendRow 写进这些行时，纯文本格式已经就位，
+  // 不会被重新自动识别。`Math.max(lastRow, maxRows)` 是防御性写法——
+  // 不假设"maxRows 一定 >= lastRow"这个不变量在任何时候都成立，即使
+  // 出现异常情况也不会算出比原来更小的范围。
+  //
+  // 【残留风险，如实记录，这次修复没有、也不需要消除它】如果这张表将来
+  // 增长超过当前 maxRows（Sheets 会自动扩容网格），扩容出来的全新行
+  // 同样不在这次格式化的 range 里，会重新暴露同一个问题——这跟
+  // `_ensureSheet_` 自己对全新表的保护方式面临的是同一种、同一等级
+  // 的残留风险，不是这次修复引入的新缺口，也不是这次要解决的范围
+  // （真正杜绝需要在写入路径本身加保护，属于更大的改动，不在 Carson
+  // 这次给的授权范围内）。
+  //
+  // 【边界情况处理】原来 `lastRow < 2`（空表/只有表头）时会直接跳过，
+  // 完全不做任何格式化——这正是这次 bug 的根源之一：以为"没有数据就
+  // 不用管"，但"没有数据"恰恰是最需要提前格式化的时候（后面新增的每
+  // 一行都会命中这个洞）。改成基于 `maxRows` 计算之后，`lastRow < 2`
+  // 不再是跳过条件，只在 `rowsToFormat <= 0`（比如 maxRows 异常小到
+  // 1 或更小，这种情况正常 Sheet 几乎不会出现）时才跳过，避免算出
+  // 非法的零行或负行 range。
+  var maxRows      = sheet.getMaxRows();
+  var rowsToFormat = Math.max(lastRow, maxRows) - 1;
+
+  if (rowsToFormat <= 0) {
+    Logger.log('  [' + sheetName + '] 行数异常小（lastRow=' + lastRow + ', maxRows=' + maxRows + '），跳过纯文本格式设置');
     return;
   }
 
@@ -205,8 +242,8 @@ function _setPlainTextFormatForNewColumns_(sheetName, columnNames) {
       return;
     }
     var colIndex = headerMap[col] + 1; // 转 1-based
-    sheet.getRange(2, colIndex, lastRow - 1, 1).setNumberFormat('@');
-    Logger.log('  [' + sheetName + '] 列 "' + col + '" 已设为纯文本格式');
+    sheet.getRange(2, colIndex, rowsToFormat, 1).setNumberFormat('@');
+    Logger.log('  [' + sheetName + '] 列 "' + col + '" 已设为纯文本格式（第 2 到第 ' + (rowsToFormat + 1) + ' 行，含尚无数据的预留行——原来只到第 ' + lastRow + ' 行）');
   });
 }
 
