@@ -42,6 +42,46 @@ var ConversionEngine = (function () {
   // ============ Task → Project ============
 
   /**
+   * 【ADR-2026-09-18-031 边界修复，2026-09-20，Carson 明确指示——只修
+   * convertTaskToProject 这一处映射边界，不动 TaskQueryEngine.getTask()
+   * 的裸读架构、不动 IdentityEngine.canonicalizeDueValue() 本身、不动
+   * UI transport sanitizer】
+   *
+   * `TaskQueryEngine.getTask()`（12_TaskQueryEngine.gs:184）是 Engine
+   * 层裸读，不 canonicalize——这是既有架构，本次不改。`sourceTask.
+   * due_time` 因此可能是 Google Sheets 自动识别出的纯时间 Date 对象
+   * （Sheets 内部用 1899-12-30 做这类值的 epoch，跟真正的日期无关）。
+   *
+   * 这里**不能**用 `IdentityEngine.canonicalizeDueValue()`
+   * （ADR-2026-07-24-023）——那个函数靠 `isMidnight` 判断该输出纯日期
+   * 还是完整 datetime，是给"日期，可能带时间"这种形状设计的；纯时间
+   * 值送进去会被判定成"非午夜"，格式化出 `"1899-12-30T09:00:00"`
+   * 这种带着 Sheets 内部日期残留的错误结果，不是 `"09:00"`。
+   * `50_UIBridge.gs:210-211` 的 `_sanitizeTaskDatesForTransport_` 已经
+   * 对 `due_time` 单独用 `'HH:mm'` 格式，不是不假思索复用同一个
+   * canonicalizer——这里不机械照抄那个函数的整体实现（那个函数还处理
+   * `due_date`/`due_datetime`、走的是数组批量转换），只按同样的思路
+   * 单独写这一个字段需要的最小逻辑。
+   *
+   * 时区：直接用 `Session.getScriptTimeZone()`——这是
+   * `_canonicalizeDueValue_`（07_IdentityEngine.gs）和
+   * `_sanitizeTaskDatesForTransport_`（50_UIBridge.gs）两处都在用的
+   * 同一个全局 GAS API，不是借用某个文件的局部变量，跨文件直接调用
+   * 安全。
+   */
+  function _canonicalizeDueTimeForConversion_(value) {
+    if (!value) return value; // 空值原样返回，不是"无效"
+    if (!(value instanceof Date)) return value; // 已经是字符串，按现有契约原样处理，不重新校验内容
+    if (isNaN(value.getTime())) {
+      // 【不得静默转换无效值，Carson 明确要求】Invalid Date 不去猜一个
+      // 看起来合理但其实是错的时间，直接抛错，让问题在这一步就暴露，
+      // 不要包着一个错误值继续往下传进 Project create 路径。
+      throw new Error('convertTaskToProject: 源 Task 的 due_time 是一个无效的 Date 对象（Invalid Date），拒绝静默转换，请检查源数据是否正确');
+    }
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'HH:mm');
+  }
+
+  /**
    * @param {string} taskId
    * @param {object} projectMeta  { description, parent_project_id,
    *                                execution_mode }
@@ -60,6 +100,7 @@ var ConversionEngine = (function () {
    *   不是遗漏。
    */
   function convertTaskToProject(taskId, projectMeta, chatId) {
+
     var sourceTask = TaskQueryEngine.getTask(taskId, chatId);
     if (!sourceTask) return { not_found: true };
 
@@ -116,12 +157,23 @@ var ConversionEngine = (function () {
       parent_project_id: projectMeta.parent_project_id || '',
       execution_mode:    projectMeta.execution_mode || '',
       source_task_id:    taskId,
-      // 【ADR-2026-09-18-031，2026-09-18】正向字段映射——due_datetime
-      // 不在这里手动传，ProjectEngine.createProjectDirect_ 内部会用
-      // 新增的私有 _computeDueDatetime_ 自动派生，跟 due_date/due_time
-      // 两个原始字段是否都非空的组合关系一致，不在这里重复计算一遍。
-      due_date:          sourceTask.due_date || '',
-      due_time:          sourceTask.due_time || '',
+      // 【ADR-2026-09-18-031，2026-09-18，边界修复 2026-09-20】正向
+      // 字段映射——due_datetime 不在这里手动传，
+      // ProjectEngine.createProjectDirect_ 内部会用新增的私有
+      // _computeDueDatetime_ 自动派生。due_date/due_time 这里先
+      // canonicalize 一遍再往下传（见上面 _canonicalizeDueTimeForConversion_
+      // 的完整说明）——sourceTask 来自 TaskQueryEngine.getTask() 的裸
+      // 读，可能是 Sheets 自动识别出的 Date 对象，不在这里处理的话，
+      // 09_IdempotencyManager.gs 派生 due_datetime 时会对着两个 Date
+      // 对象做字符串拼接，产出类似
+      // "...GMT+0800...T...GMT+0655...:00" 这种损坏值（真实环境已经
+      // 证实过这个现象）。due_date 复用既有
+      // IdentityEngine.canonicalizeDueValue()（对字符串输入是
+      // no-op，对 Date 对象按脚本时区格式化成 'yyyy-MM-dd'，两种输入
+      // 都覆盖，不需要另写）；due_time 不能用这个函数（原因见上面），
+      // 用专门写的 _canonicalizeDueTimeForConversion_。
+      due_date:          IdentityEngine.canonicalizeDueValue(sourceTask.due_date) || '',
+      due_time:          _canonicalizeDueTimeForConversion_(sourceTask.due_time) || '',
       creator:           'User',
       source_module:     'ConversionEngine.convertTaskToProject',
       decision_owner:    projectMeta.decision_owner // 2026-08-16 同一处修复

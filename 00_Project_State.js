@@ -3214,3 +3214,53 @@
  *     处理「十二」，那才是一次新的、独立的 Decision Gate，本条不
  *     预先假设答案）。
  */
+
+/**
+ * 五十六、convertTaskToProject 边界 canonicalize 修复（2026-09-20，
+ *         Carson 明确指示下按 Phase 0-3 顺序执行；「五十五」留给
+ *         Carson 自己那份 Cleanup+Retest Protocol 的真实结果，本条
+ *         不占用那个编号）
+ *
+ * 上一条记录（「五十四」）的 `_setPlainTextFormatForNewColumns_` 修复
+ * 部署后，真实环境重测 `runTaskToProjectBlockedGate()` 仍然 2/4
+ * FAIL——排查确认这次失败跟那次修复无关，是另一条独立路径：
+ * `sourceTask.due_date`/`due_time`（`TaskQueryEngine.getTask()` 裸
+ * 读，ADR-2026-07-24-023 从没覆盖这条 Task→Project 转换路径）可能
+ * 本身就是 Date 对象，被 `convertTaskToProject` 直接抄进新 Project，
+ * `09_IdempotencyManager.gs` 派生 due_datetime 时对两个 Date 对象做
+ * 字符串拼接，产出损坏值——这跟真实日志里那段乱码字符串完全对得上。
+ *
+ * 【Phase 1 修复，已完成】`42_ConversionEngine.js` 的
+ * `convertTaskToProject` 内新增私有 `_canonicalizeDueTimeForConversion_`
+ * （due_time 专用），due_date 复用既有
+ * `IdentityEngine.canonicalizeDueValue()`（对字符串 no-op，对 Date
+ * 对象按脚本时区格式化，两种输入都覆盖）。`TaskQueryEngine.getTask()`
+ * 裸读架构、`canonicalizeDueValue()` 本身、UI transport sanitizer、
+ * Project Identity 算法均未改动——严格只改了这一处映射边界。
+ *
+ * 【Phase 2 测试，已完成，Node.js GAS-shim 环境】新增白盒测试（直接
+ * 往内存里注入真实 Date 对象/Invalid Date，绕过公开 API——GAS 测试
+ * 文件本身没有合法途径通过公开 API 注入这类值，这个限制如实记录在
+ * `55_Tests_TaskToProjectBlocked.js` 更新后的文件头注释里）：
+ *   - due_date 注入为 Date 对象 → 正确还原：PASS。
+ *   - 已是干净字符串 → 原样通过，无回归：PASS。
+ *   - Invalid Date 的 due_time → 显式抛错：PASS。
+ *   - **due_time 注入为 Sheets 内部纯时间 Date 对象 → 有约 65 分钟
+ *     系统性偏差：FAIL**——不是代码缺陷，是新加坡/马来西亚历史时区
+ *     偏移导致的信息失真，见 `00_Known_Limitations.js`「十三」完整
+ *     记录，也见 `00_ADR.js` ADR-031 本次追记。
+ *
+ * 【Phase 3 回归，已完成，Node.js GAS-shim 环境，非真实 GAS】
+ * `runTaskToProjectBlockedGate()`（改写后）、
+ * `36_Tests_Sprint3Acceptance.testBidirectionalConversion_`、
+ * `57_Tests_TaskToProjectPrecheck.runTaskToProjectPrecheckGate`——全部
+ * 重新真实跑过（不是复用旧结果），全部 PASS。**这些都是 Node 模拟
+ * 环境结果，不是真实 GAS 验证**——真实环境的 `runTaskToProjectBlockedGate()`
+ * 重跑，仍是 LIVE TEST PENDING，需要 Carson 部署这次的
+ * `42_ConversionEngine.js` 后重新执行。
+ *
+ * 【新 Decision Gate】Known Limitation「十三」提出的问题——due_time
+ * 一旦已经被误判成 Date 对象，读时补救对这个时区有约 65 分钟精度
+ * 上限，要不要处理、怎么处理——是本轮新发现、未在授权范围内自行
+ * 决定的问题，留给 Carson。
+ */

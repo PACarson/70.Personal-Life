@@ -2365,4 +2365,54 @@
  *   generateProjectIdentity 既有签名与三处调用点、Projection/Read 两层
  *   确认无需改动，均在本条决定之前首次发现，不在 2026-09-15
  *   checkpoint 原文中）。
+ *
+ * 【2026-09-20 追记二 —— convertTaskToProject 边界 canonicalize 修复】
+ *   上一条追记的 `_setPlainTextFormatForNewColumns_` 修复只解决"写入
+ *   之后新行有没有纯文本保护"这一层；真实环境重测时发现即使 Projects
+ *   自己这层保护生效了，`convertTaskToProject` 仍然 FAIL——根因是
+ *   `sourceTask.due_date`/`due_time`（`TaskQueryEngine.getTask()` 裸
+ *   读，ADR-2026-07-24-023 写的时候这条 Task→Project 转换路径还不
+ *   存在，从没被纳入那次的 canonicalize 保护）可能本身就是 Date
+ *   对象，直接被抄进新 Project，`09_IdempotencyManager.gs` 派生
+ *   due_datetime 时对两个 Date 对象做字符串拼接，产出损坏值。
+ *
+ *   修复（Carson 明确指示，只改这一处映射边界）：
+ *   `42_ConversionEngine.gs` 的 `convertTaskToProject` 内新增私有
+ *   `_canonicalizeDueTimeForConversion_`（`due_time` 专用，`due_date`
+ *   直接复用既有 `IdentityEngine.canonicalizeDueValue()`——不能反过来
+ *   对 `due_time` 用这个函数，它的 `isMidnight` 判断是给"日期，可能
+ *   带时间"这种形状设计的，纯时间值会被错误格式化成带 1899-12-30
+ *   残留的字符串）。`TaskQueryEngine.getTask()` 裸读架构、
+ *   `canonicalizeDueValue()` 本身、UI transport sanitizer、Project
+ *   Identity 算法均未改动。
+ *
+ *   验证（Node.js GAS-shim，白盒注入 Date 对象——这个环境本身不能
+ *   自然重现 Sheets 自动转类型，只能验证代码对"已经是 Date 对象"这
+ *   个症状的处理是否正确）：
+ *   - due_date 注入为 Date 对象 → 正确还原成 'yyyy-MM-dd'：PASS。
+ *   - 已经是干净字符串的输入 → 原样通过，无回归：PASS。
+ *   - Invalid Date 的 due_time → 显式抛错，不静默转换成错误值：PASS。
+ *   - **due_time 注入为 Sheets 内部纯时间 Date 对象（1899-12-30 锚点）
+ *     → 读回来跟原始输入有约 65 分钟系统性偏差：FAIL，但这不是这次
+ *     代码的缺陷**——见下一段，也见
+ *     `00_Known_Limitations.gs`「十三」完整记录。
+ *
+ * 【新发现，未在本次授权范围内自行处理，记录为 Known Limitation「十三」】
+ *   due_time 一旦真的在 Sheets 里被误判成 Date 对象，靠读时
+ *   canonicalize 补救这条路径，对新加坡/马来西亚时区存在约 65 分钟的
+ *   系统性精度损失——根源是 Google Sheets 内部把"纯时间"值锚定在
+ *   1899-12-30 这个历史日期，而这个时区在 1899 年的真实历史 UTC
+ *   偏移不是今天的整点 +8:00，IANA 时区数据库对此有准确记录，任何
+ *   遵守时区规则的实现（包括 Google Apps Script 自己）都会得到同样
+ *   的偏差——不是这次代码能在读的时候修好的，信息在 Sheets 内部序列
+ *   化那一步已经失真。已用 Node.js 环境的 Intl.DateTimeFormat 独立
+ *   算出跟 Carson 真实环境日志里 `GMT+0655` 完全一致的偏差量（两个
+ *   独立来源交叉确认），不是猜测。**这只影响"due_time 已经被误判成
+ *   Date 对象"这一种情况**，不影响 due_date（现代日期无此历史偏移
+ *   问题），也不影响"due_time 从未被误判、一直是字符串"的正常路径
+ *   ——真正杜绝需要防止 due_time 一开始就被误判（即上一条追记的
+ *   纯文本格式化防护，那一层做对了，这条读时补救永远不会被真正用
+ *   到），不是本条要重新设计一套"精确读时恢复"方案。要不要处理、
+ *   怎么处理，是一个新的、留给 Carson 判断的问题，不在本次授权范围
+ *   内自行决定。
  */

@@ -42,6 +42,23 @@
  *     单独的 Node.js 验证脚本覆盖（见交付说明），这里不重复。
  *
  * 单一入口：runTaskToProjectBlockedGate()（名字保留，见上）
+ *
+ * 【2026-09-20 追记】真实 GAS 环境跑这份文件时，前两项一度真实 FAIL——
+ * 根因是 `sourceTask.due_date`/`due_time` 经 `TaskQueryEngine.getTask()`
+ * 裸读回来可能是 Google Sheets 自动识别出的 Date 对象，`convertTaskToProject`
+ * 当时直接拿 Date 对象往下传，没有 canonicalize。已在
+ * `42_ConversionEngine.js`（`convertTaskToProject` 内部新增私有
+ * `_canonicalizeDueTimeForConversion_`，`due_date` 复用既有
+ * `IdentityEngine.canonicalizeDueValue()`）修复这一处映射边界，`
+ * TaskQueryEngine.getTask()` 裸读架构本身未改。**下面这 4 项测试的
+ * 逻辑本身不需要改——它们本来就是端到端读真实 read-back，一旦
+ * 真实环境里 sourceTask.due_date/due_time 真的是 Date 对象，这 4
+ * 项测试自然会在真实环境里验证这次的边界修复是否生效，不需要另外
+ * 构造一个"故意注入 Date 对象"的测试**（GAS 测试文件没有合法途径
+ * 通过公开 API 让 `TaskEngine.createTask` 存进去一个 Date 对象或
+ * Invalid Date——这类白盒场景的验证只能在 Node.js GAS-shim 环境里
+ * 直接操作内存数据做到，真实环境测不了这么细，如实标注这个边界，
+ * 不假装能测）。
  */
 
 // ============================================================
