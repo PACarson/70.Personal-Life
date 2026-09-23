@@ -140,8 +140,32 @@ function getHeaderMap_(sheet) {
  * @param {string} keyHeader     用来定位行的列名，比如 'task_id'
  * @param {string} keyValue      要找的值
  * @param {object} rowDataObj    { 列名: 值, ... }
+ * @param {string[]} [plainTextColumns]  可选。列名形如 'due_date'/'due_time'
+ *   这类日期/时间形状的字符串，写入前会被 Google Sheets 自动识别成
+ *   Date/Time 类型（cell 的底层存储类型变了，不只是显示），后续
+ *   getValues() 读回来就是裸 Date 对象，不是原来写进去的字符串。
+ *   传了这个参数的列，写值之前会先对目标行那一格显式
+ *   setNumberFormat('@')（纯文本），杜绝这次写入被自动识别。
+ *
+ *   【2026-09-23，Known Limitation 11 的"真正杜绝"修复，见
+ *   00_Known_Limitations.gs「十一」】11_ProjectionRebuilder.gs 的
+ *   _setPlainTextFormatForNewColumns_ 只能对"迁移那一刻已经存在/预留"的
+ *   行批量占位，表将来长大超过那次占位的范围（或者迁移之后一直没有
+ *   重新跑过）就会重新暴露问题——这正是 ADR-2026-09-18-031 这次真实
+ *   环境复测又踩到的情况。真正的防护必须在写入路径本身，不能只靠
+ *   提前占位一个会被用完的 range，所以这里补上：调用方按字段名主动
+ *   声明"这些列需要纯文本保护"，不需要调用方自己管行号/格式，本函数
+ *   内部处理。不传这个参数时行为跟之前完全一样（现有几十个调用点
+ *   不用改）。
+ *
+ *   已知 trade-off：新增行分支为了能在 appendRow() 之前先格式化目标格，
+ *   用 lastRow+1 预先算出"即将追加到的行号"——这跟 appendRow() 自己
+ *   "原子性找下一个空行"不是同一个操作，单脚本单次执行内没有问题，
+ *   真出现并发写同一张表的场景（本项目目前没有这种场景）才有极小概率
+ *   猜错行号；这跟 _setPlainTextFormatForNewColumns_ 本身也没上
+ *   LockService 是同一个风险等级，不是这次新引入的。
  */
-function upsertRowByKey_(sheetName, keyHeader, keyValue, rowDataObj) {
+function upsertRowByKey_(sheetName, keyHeader, keyValue, rowDataObj, plainTextColumns) {
   var sheet = getSheet_(sheetName);
   var headerMap = getHeaderMap_(sheet);
   var numCols = sheet.getLastColumn();
@@ -176,6 +200,16 @@ function upsertRowByKey_(sheetName, keyHeader, keyValue, rowDataObj) {
       var val = rowDataObj[key];
       rowArray[headerMap[key]] = (val === null || val === undefined) ? '' : val;
     }
+  }
+
+  // 写值之前先落纯文本格式，见上面函数注释 / Known Limitation 11。
+  if (plainTextColumns && plainTextColumns.length) {
+    var targetRowForFormat = foundRow > 0 ? foundRow : (lastRow + 1);
+    plainTextColumns.forEach(function (col) {
+      if (headerMap.hasOwnProperty(col)) {
+        sheet.getRange(targetRowForFormat, headerMap[col] + 1).setNumberFormat('@');
+      }
+    });
   }
 
   if (foundRow > 0) {

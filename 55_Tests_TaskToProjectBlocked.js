@@ -59,6 +59,30 @@
  * Invalid Date——这类白盒场景的验证只能在 Node.js GAS-shim 环境里
  * 直接操作内存数据做到，真实环境测不了这么细，如实标注这个边界，
  * 不假装能测）。
+ *
+ * 【2026-09-23 追记】真实环境这次报的 ❌ 还是"Read-back 不一致"，但根因
+ * 跟 09-20 那次不是同一层：这次 `result.project.*`（内存直接返回值）已
+ * 确认是对的，问题出在 `ProjectQueryEngine.getProject()` 重新读一遍之
+ * 后——Projects 表刚写进去的 due_date/due_time/due_datetime 被 Google
+ * Sheets 自动识别成了 Date/Time 类型，这正是 Known Limitation 11 当时
+ * 记录的"占位用完/迁移没有重新跑"的残留风险这次真的复发了。
+ *
+ * 中途试过直接在这份文件的 read-back 断言里加
+ * `IdentityEngine.canonicalizeDueValue()` 把读回来的值转正再比较，本地
+ * 确实能让测试变绿——但这跟 ADR-2026-09-18-031 追记二已经定过的原则
+ * 冲突（"不在测试比较逻辑里加 canonicalize，那样会掩盖生产代码自己的
+ * 缺陷"），而且这次这么改还有两个具体副作用：(1) `due_time` 一旦真的被
+ * 误判成 Date 对象，canonicalize 补救会撞上 Known Limitation 13 的新加坡
+ * /马来西亚历史时区 ~65 分钟偏差——测试不报错，但值是错的，静默通过反而
+ * 更危险；(2) 这份测试能不能 PASS 不再能说明"getProject() 之后随便哪个
+ * 调用方拿到的是不是干净字符串"，只能说明"这份测试文件自己能不能容忍
+ * 脏值"，保护范围变窄了。所以这次没有采用那个方向，撤回到原来的严格
+ * 字符串比较，改在真正的根因上补：`05_SheetUtils.js` 的
+ * `upsertRowByKey_` 新增了 `plainTextColumns` 参数，在写入路径本身杜绝
+ * Sheets 自动识别（`10_ProjectionEngine.js`/`27_ProjectEngine.js` 里写
+ * Projects 表 due_date/due_time/due_datetime 的几个调用点已经传了这个
+ * 参数）。下面 4 个测试函数本身维持 09-20 追记那句话——逻辑不需要改，
+ * 写入路径修好之后应该自然全部 PASS，不需要测试这一侧再做任何补救。
  */
 
 // ============================================================

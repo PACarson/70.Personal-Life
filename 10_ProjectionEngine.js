@@ -426,7 +426,10 @@ var ProjectionEngine = (function () {
   function projectProjectCreated_(event) {
     var p = event.payload || {};
     if (!p.project_id) return;
-    upsertRowByKey_(PROJECTS_SHEET, 'project_id', p.project_id, p);
+    // 【2026-09-23，Known Limitation 11 修复】due_date/due_time/due_datetime
+    // 需要纯文本保护，见 05_SheetUtils.gs upsertRowByKey_ 的 plainTextColumns 说明。
+    upsertRowByKey_(PROJECTS_SHEET, 'project_id', p.project_id, p,
+      ['due_date', 'due_time', 'due_datetime']);
   }
 
   function projectProjectUpdated_(event) {
@@ -435,7 +438,10 @@ var ProjectionEngine = (function () {
     var fields = shallowCopy_(p);
     delete fields.project_id;
     if (Object.keys(fields).length === 0) return;
-    upsertRowByKey_(PROJECTS_SHEET, 'project_id', p.project_id, fields);
+    // updateProject 现在允许改 due_date/due_time（ADR-2026-09-18-031），
+    // 同一个风险，同一个防护——见上面 projectProjectCreated_ 的注释。
+    upsertRowByKey_(PROJECTS_SHEET, 'project_id', p.project_id, fields,
+      ['due_date', 'due_time', 'due_datetime']);
   }
 
   function projectProjectCompleted_(event) {

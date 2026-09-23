@@ -484,7 +484,12 @@ var ProjectEngine = (function () {
   function materializeProjectRow_(projectId, knownProject) {
     var project = knownProject;
     if (!project) return;
-    upsertRowByKey_(CFG.PROJECTS_SHEET_NAME, 'project_id', projectId, project);
+    // 【2026-09-23，Known Limitation 11 修复】Projection 重放（rebuild）
+    // 写的是同一张 Projects 表、同一批字段，跟正常 create/update 走
+    // 10_ProjectionEngine.js 是同一个风险，需要同一个防护——见
+    // 05_SheetUtils.gs upsertRowByKey_ 的 plainTextColumns 说明。
+    upsertRowByKey_(CFG.PROJECTS_SHEET_NAME, 'project_id', projectId, project,
+      ['due_date', 'due_time', 'due_datetime']);
   }
 
   // ============ 内部工具 ============
