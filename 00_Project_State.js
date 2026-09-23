@@ -3264,3 +3264,88 @@
  * 上限，要不要处理、怎么处理——是本轮新发现、未在授权范围内自行
  * 决定的问题，留给 Carson。
  */
+
+/**
+ * 五十七、Known Limitation 十一/十二的"真正杜绝"写入路径修复
+ *         （2026-09-23，Carson 明确指示下按 Scope Firewall 执行，同一
+ *         个任务里一并授权修 Tasks，「五十六」当时还没有这个授权）
+ *
+ * 上一条记录（「五十六」）修的是 convertTaskToProject 内部的映射边界
+ * canonicalize；真实环境重测（Carson 自己在 GAS 里跑的，附截图/日志）
+ * 之后确认那个修复本身是对的（`result.project.*` 内存返回值一直正确），
+ * 但 read-back 仍然 FAIL——根因确认是 Known Limitation「十一」描述的
+ * 情况真的复发了：`_setPlainTextFormatForNewColumns_` 只能保护"迁移
+ * 那一刻"存在/预留的行，Projects 表在这之后又跑了好几轮 Gate 测试，
+ * 新增的行落到了保护范围之外。中途 Carson 自己在真实环境试过在
+ * `55_Tests_TaskToProjectBlocked.js` 的 read-back 断言里加
+ * `IdentityEngine.canonicalizeDueValue()` 把值转正再比较，确认能让
+ * 测试变绿，但这次任务明确指示不要用这个方向（会掩盖生产代码缺陷，
+ * 跟 ADR-2026-09-18-031 追记二定的原则冲突），改成在真正的根因上补。
+ *
+ * 【本轮修复，已完成，STATIC VERIFIED】
+ *   1. `05_SheetUtils.js`：`upsertRowByKey_` 新增可选
+ *      `plainTextColumns` 参数——不传时行为跟之前完全一致（现有几十个
+ *      调用点零影响）；传入时在写值之前对目标行指定列显式
+ *      `setNumberFormat('@')`。`batchUpsertRowsByKey_` 同一个机制的
+ *      批量版本（整段 range 一次性设格式，不逐行调用）。
+ *   2. Project 三个真实写入点全部接上（due_date/due_time/due_datetime）：
+ *      `10_ProjectionEngine.js` 的 `projectProjectCreated_`/
+ *      `projectProjectUpdated_`；`27_ProjectEngine.js` 的
+ *      `materializeProjectRow_`（同时覆盖 update 兜底 **和**
+ *      `11_ProjectionRebuilder.js` 的全量重建，两者共用这一个函数）。
+ *   3. Task 侧本次一并授权修复（due_time/due_datetime，due_date 不动，
+ *      理由见 00_Known_Limitations.gs「十二」新追记）：
+ *      `10_ProjectionEngine.js` 的 `projectTaskCreated_`/
+ *      `projectTaskUpdated_`（各自要同时写 Tasks 表和 ActiveTasks 表，
+ *      两处都接了）；`20_TaskEngine.js` 的 `materializeTaskRow_`；
+ *      `11_ProjectionRebuilder.js` 的 `rebuildTasksProjection`/
+ *      `rebuildActiveTasksProjection`（这两个走的是
+ *      `batchUpsertRowsByKey_`，不是 `upsertRowByKey_`，是这次
+ *      write-path audit 之前从未被检查过的独立路径）。
+ *   4. write-path audit 额外发现并修复一处之前完全没被列过的缺口：
+ *      `13_ActiveTasksEngine.js` 的 `runDailyArchive`（Tasks→
+ *      ArchiveTasks 每日归档）是手写批量 `setValues()`，不经过上面
+ *      任何 helper，之前零保护——同一个原则直接在这个函数里补了
+ *      `setNumberFormat('@')`，没有为此重构这个函数原有的自愈/排重
+ *      逻辑。
+ *   5. 全仓库逐一核对了每一处 `upsertRowByKey_`/
+ *      `batchUpsertRowsByKey_`/直接 `appendRow`/`setValues` 调用
+ *      （不只是"看起来相关"的几处），确认 TaskFilters/TaskStatistics/
+ *      Workflows/Notes/Reviews/BusinessRules/Timeline/TaskViewOrder/
+ *      Events 都不携带 due_date/due_time/due_datetime，不需要这次的
+ *      保护；`11_ProjectionRebuilder__DUE_DATE_VALUE_MIGRATION.js`
+ *      是另一个已经批准、独立于这次任务、专门处理 Tasks 历史
+ *      due_date/due_datetime 值的手动迁移工具（不含 due_time，2026-08-22
+ *      Carson 批准，状态"实施就绪待手动执行"），这次没有触碰它。
+ *   6. 新增 `59_Tests_DueTimePlainTextProtection.js`（Gate:
+ *      `runDueTimePlainTextProtectionGate()`），覆盖 Task
+ *      create/update、Project 直接 create、两个 materialize 兜底的
+ *      read-back；rebuild 场景的等价测试
+ *      （`testDueFields_SurviveActiveTasksRebuild_`）因为会重建整张
+ *      表，故意没放进日常 Gate。`55_Tests_TaskToProjectBlocked.js`
+ *      维持严格字符串比较，撤回了中途试过的 canonicalize 容忍版本。
+ *   7. 一个轻量 Node shim（`/home/claude/verify_plaintext_shim.js`，
+ *      不是这个仓库的一部分）直接加载真实 `05_SheetUtils.js`，用假
+ *      sheet 对象验证 `upsertRowByKey_`/`batchUpsertRowsByKey_` 这次
+ *      新逻辑本身的调用顺序/目标格计算/向后兼容——8 项全部 PASS。
+ *      这只能证明"代码逻辑本身没有明显缺陷"，不能、也不试图证明
+ *      "Google Sheets 真的不会再把这些字符串自动识别成 Date 类型"这个
+ *      平台行为本身——那部分事实上不可能在 Node 环境验证。
+ *
+ * 【明确没做，按这次任务的 Scope Firewall】不碰
+ * `IdentityEngine.canonicalizeDueValue()`、`TaskQueryEngine.getTask()`
+ * 裸读架构、`_sanitizeTaskDatesForTransport_`、Identity 算法、
+ * Task→Project conversion contract、ADR-031 已接受的决定、Project→Task
+ * 反向映射、Project deadline UI；不做任何全局纯文本迁移；不对 Known
+ * Limitation「十三」（历史 due_time 精度偏差）做任何自动修复或猜测性
+ * 批量修正；没有删除任何未经确认的业务行，也没有主动清理这次或之前
+ * 测试跑留下的 `accept_test_*` 脏数据行（这次任务没有要求做这件事）。
+ *
+ * 【LIVE GAS PENDING——一次都没有在真实环境跑过】上面全部是 STATIC/
+ * SHIM VERIFIED。Carson 回到电脑后需要：部署这 7 个改动文件、跑
+ * `runDueTimePlainTextProtectionGate()`、重跑
+ * `runTaskToProjectBlockedGate()` 确认这次真的能让之前那两个 FAIL 变
+ * PASS、按已有 Cleanup Protocol 清掉这几轮测试留下的脏数据行、单独
+ * 手动跑一次 `testDueFields_SurviveActiveTasksRebuild_()`（重建整张
+ * ActiveTasks 表，不要跟日常 Gate 一起频繁跑）。
+ */

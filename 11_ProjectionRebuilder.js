@@ -287,7 +287,10 @@ function rebuildTasksProjection() {
     tasksToWrite.push(task);
   }
 
-  var result = batchUpsertRowsByKey_('Tasks', 'task_id', tasksToWrite); // 05_SheetUtils.gs
+  // 【2026-09-23，Known Limitation 11/12 修复】全量重建之前完全没有
+  // 走过任何纯文本保护——见 05_SheetUtils.js batchUpsertRowsByKey_ 的
+  // plainTextColumns 参数说明，这是这次修复之前唯一被漏掉的真实写入点。
+  var result = batchUpsertRowsByKey_('Tasks', 'task_id', tasksToWrite, ['due_time', 'due_datetime']); // 05_SheetUtils.gs
   var count = tasksToWrite.length;
 
   Logger.log('✅ 重建 Tasks 完成，共处理 ' + count + ' 个任务（更新 ' + result.updated + ' / 新增 ' + result.appended + '）');
@@ -347,7 +350,8 @@ function rebuildActiveTasksProjection() {
 
   var count = 0;
   if (activeTasks.length > 0) {
-    var result = batchUpsertRowsByKey_('ActiveTasks', 'task_id', activeTasks);
+    // 同上 rebuildTasksProjection 的修复说明。
+    var result = batchUpsertRowsByKey_('ActiveTasks', 'task_id', activeTasks, ['due_time', 'due_datetime']);
     count = result.updated + result.appended;
   }
 

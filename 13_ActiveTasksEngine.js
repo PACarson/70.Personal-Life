@@ -295,6 +295,19 @@ var ActiveTasksEngine = (function () {
     // 批量写入 ArchiveTasks（只写真正需要新追加的行，见上方排重校验）
     if (archiveRowArrays.length > 0) {
       var archiveStartRow = archiveSheet.getLastRow() + 1;
+      // 【2026-09-23，Known Limitation 11/12 修复】这个函数是手写的批量
+      // setValues()，不经过 upsertRowByKey_/batchUpsertRowsByKey_，属于
+      // 这次 write-path audit 排查出来的独立写入点——之前完全没有纯文本
+      // 保护。跟那两个函数同一个原则：写值之前对 due_time/due_datetime
+      // 这两列显式 setNumberFormat('@')（due_date 不在这里加，理由同
+      // 20_TaskEngine.js materializeTaskRow_ 的注释）。
+      ['due_time', 'due_datetime'].forEach(function (col) {
+        if (archiveHeaderMap.hasOwnProperty(col) &&
+            archiveHeaderMap[col] >= 0 && archiveHeaderMap[col] < archiveColumnCount) {
+          archiveSheet.getRange(archiveStartRow, archiveHeaderMap[col] + 1, archiveRowArrays.length, 1)
+                      .setNumberFormat('@');
+        }
+      });
       archiveSheet.getRange(archiveStartRow, 1, archiveRowArrays.length, archiveColumnCount)
                   .setValues(archiveRowArrays);
     }

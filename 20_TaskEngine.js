@@ -732,7 +732,12 @@ var TaskEngine = (function () {
     }
     if (!task) return;
 
-    upsertRowByKey_(CFG.TASKS_SHEET_NAME, 'task_id', taskId, task);
+    // 【2026-09-23，Known Limitation 11/12 修复】跟 10_ProjectionEngine.js
+    // 的 projectTaskCreated_/projectTaskUpdated_ 同一个风险、同一个防护；
+    // due_date 不在这里加，理由见 00_Known_Limitations.gs「十二」补充段
+    // （Tasks 的 due_date 是建表时就存在的历史列，_ensureSheet_ 建表那
+    // 一刻起已经整块设成纯文本，大概率不受影响，这次不扩大字段范围）。
+    upsertRowByKey_(CFG.TASKS_SHEET_NAME, 'task_id', taskId, task, ['due_time', 'due_datetime']);
 
     // 【Sprint 1 扩展】终态集合新增 CONVERTED/NOT_SELECTED。
     var finalStatus = String(task.status || '').toUpperCase();
@@ -745,7 +750,7 @@ var TaskEngine = (function () {
       }
     } else {
       try {
-        upsertRowByKey_('ActiveTasks', 'task_id', taskId, task);
+        upsertRowByKey_('ActiveTasks', 'task_id', taskId, task, ['due_time', 'due_datetime']);
       } catch (e) {
         Logger.log('[TaskEngine] ActiveTasks 安全网写入失败: ' + e.message);
       }

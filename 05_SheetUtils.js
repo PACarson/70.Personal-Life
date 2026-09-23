@@ -268,9 +268,20 @@ function deleteRowByKey_(sheetName, keyHeader, keyValue) {
  * @param {object[]} rowDataObjArray  每个元素是 { [keyHeader]: value, 其余要写的字段... }
  *                                    数组内 keyValue 不应重复（重建场景下每个
  *                                    task_id/item_id 在 stateMap 里本来就只有一份）
+ * @param {string[]} [plainTextColumns]  可选，跟 upsertRowByKey_ 的同名参数
+ *   是同一个机制（见那边的完整说明 / Known Limitation 11）：写值之前对
+ *   这些列显式 setNumberFormat('@')，杜绝 Google Sheets 把日期/时间形状
+ *   的字符串自动识别成 Date/Time 类型。这里是批量版本，一次性对整段
+ *   range（已存在行的整段 + 新增行的整段，各一次 setNumberFormat 调用，
+ *   不是逐行调用）设格式，不会增加额外的 Sheet I/O 次数。
+ *
+ *   【2026-09-23 新增】11_ProjectionRebuilder.gs 的 rebuildTasksProjection/
+ *   rebuildActiveTasksProjection 全量重建 Tasks/ActiveTasks 时走的正是
+ *   这个函数，不经过 upsertRowByKey_——这次修 Known Limitation 11 之前，
+ *   这条路径完全没有保护，是一个之前没有覆盖到的真实写入点。
  * @returns {{updated:number, appended:number}}
  */
-function batchUpsertRowsByKey_(sheetName, keyHeader, rowDataObjArray) {
+function batchUpsertRowsByKey_(sheetName, keyHeader, rowDataObjArray, plainTextColumns) {
   if (!rowDataObjArray || rowDataObjArray.length === 0) {
     return { updated: 0, appended: 0 };
   }
@@ -334,6 +345,21 @@ function batchUpsertRowsByKey_(sheetName, keyHeader, rowDataObjArray) {
       appended++;
     }
   });
+
+  // 写值之前先落纯文本格式，整段 range 一次性设，见函数注释 / Known
+  // Limitation 11；跟 upsertRowByKey_ 是同一个原则，这里是批量版本。
+  if (plainTextColumns && plainTextColumns.length) {
+    plainTextColumns.forEach(function (col) {
+      if (!headerMap.hasOwnProperty(col)) return;
+      var colIndex1based = headerMap[col] + 1;
+      if (existingRows.length > 0) {
+        sheet.getRange(2, colIndex1based, existingRows.length, 1).setNumberFormat('@');
+      }
+      if (appendedRows.length > 0) {
+        sheet.getRange(lastRow + 1, colIndex1based, appendedRows.length, 1).setNumberFormat('@');
+      }
+    });
+  }
 
   if (existingRows.length > 0) {
     sheet.getRange(2, 1, existingRows.length, numCols).setValues(existingRows);

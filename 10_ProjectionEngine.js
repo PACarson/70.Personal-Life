@@ -200,10 +200,14 @@ var ProjectionEngine = (function () {
     var p = event.payload || {};
     if (!p.task_id) return;
 
-    upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, p);
+    // 【2026-09-23，Known Limitation 11/12 修复】due_time/due_datetime
+    // 需要纯文本保护（due_date 不在这里加——见 20_TaskEngine.js
+    // materializeTaskRow_ 的注释，Known Limitation 12 已经分析过 Tasks
+    // 的 due_date 大概率不受影响，这次不扩大字段范围）。
+    upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, p, ['due_time', 'due_datetime']);
 
     try {
-      upsertRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id, p);
+      upsertRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id, p, ['due_time', 'due_datetime']);
     } catch (e) {
       Logger.log('[ProjectionEngine] ActiveTasks upsert 失败（Sheet 可能尚未建立）: ' + e.message);
     }
@@ -228,7 +232,7 @@ var ProjectionEngine = (function () {
     // TaskFilters 刷新、TaskStatistics 漂移修正三处共用。
     var before = _getRowByKey_(TASKS_SHEET, 'task_id', p.task_id);
 
-    upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, fields);
+    upsertRowByKey_(TASKS_SHEET, 'task_id', p.task_id, fields, ['due_time', 'due_datetime']);
 
     // 只有当任务当前还是非终态才需要同步 ActiveTasks（终态任务本来就不在
     // ActiveTasks 里，upsert 一个不存在的 key 会误新增一行——upsertRowByKey_
@@ -240,7 +244,7 @@ var ProjectionEngine = (function () {
     try {
       var status = before ? String(before.status || '').toUpperCase() : '';
       if (status !== 'DONE' && status !== 'CANCELLED') {
-        upsertRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id, fields);
+        upsertRowByKey_(ACTIVE_TASKS_SHEET, 'task_id', p.task_id, fields, ['due_time', 'due_datetime']);
       }
     } catch (e) {
       Logger.log('[ProjectionEngine] ActiveTasks update 同步失败: ' + e.message);

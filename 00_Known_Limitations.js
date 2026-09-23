@@ -632,6 +632,30 @@
  * 以 Carson 真实环境当前的数据量（Projects 67 行、Tasks 157 行，见
  * 00_Project_State.gs「四十八」）来看，短期内触发的概率很低，但不是
  * 零，值得记录，不假设"不会发生"。
+ *
+ * 【2026-09-23 追记——"真正杜绝"的写入路径修复已实现，STATIC VERIFIED，
+ * LIVE GAS 待验证】上面这段一直悬着的"真正杜绝需要在写入路径本身加
+ * 保护"这次做了：`05_SheetUtils.js` 的 `upsertRowByKey_` /
+ * `batchUpsertRowsByKey_` 新增可选的 `plainTextColumns` 参数，写值
+ * 之前对指定列显式 `setNumberFormat('@')`，不依赖任何提前占位的 range，
+ * 不受这条 Known Limitation 描述的"表长大就会用完"这个上限影响。已经
+ * 排查并接上这个参数的真实写入点：`10_ProjectionEngine.js` 的
+ * `projectProjectCreated_`/`projectProjectUpdated_`/`projectTaskCreated_`/
+ * `projectTaskUpdated_`，`27_ProjectEngine.js` 的
+ * `materializeProjectRow_`（同时覆盖 update 兜底和
+ * `11_ProjectionRebuilder.js` 的 Projects 全量重建），
+ * `20_TaskEngine.js` 的 `materializeTaskRow_`，
+ * `11_ProjectionRebuilder.js` 的 `rebuildTasksProjection`/
+ * `rebuildActiveTasksProjection`。这次的 write-path audit（逐一核对
+ * 全仓库每一处 `upsertRowByKey_`/`batchUpsertRowsByKey_`/直接
+ * `appendRow`/`setValues` 调用）额外发现一处这条 Known Limitation
+ * 本身列出过、但之前实际没有检查过的缺口——`13_ActiveTasksEngine.js`
+ * 的 `runDailyArchive`（Tasks→ArchiveTasks 的每日归档）是手写批量
+ * `setValues()`，完全不经过上面两个函数，之前零保护——这次同一个
+ * 原则补上了。上面 node --check 之外没有、也不可能在 Node 环境验证
+ * "Sheets 是否真的不再自动识别类型"这个平台行为本身，仍然是 LIVE
+ * GAS PENDING，需要 Carson 回到真实环境后用
+ * `59_Tests_DueTimePlainTextProtection.js` 验证。
  */
 
 // ============================================================
@@ -672,6 +696,24 @@
  * `getMaxRows()`（大概率没有，参照「十一」的分析），due_date 应该
  * 一直是安全的——但这是推理，不是已经在真实环境验证过的事实，如实
  * 标注为推理而不是结论。
+ *
+ * 【2026-09-23 追记——只解决了"以后会不会继续损坏"，没有解决"过去是不是
+ * 已经损坏"】这次任务范围明确是 write-time protection（防止未来再发生），
+ * 不是这段一直说的历史数据核实/修复——两者是两件独立的事，不要混为一谈：
+ *   - 已经做的：Tasks 的 due_time/due_datetime 在 create/update/
+ *     materialize 兜底/projection 全量重建这几条真实写入路径上，跟
+ *     Known Limitation「十一」同一个机制（`upsertRowByKey_`/
+ *     `batchUpsertRowsByKey_` 的 `plainTextColumns` 参数）接上了防护，
+ *     STATIC VERIFIED（node --check + Node shim 断言 `upsertRowByKey_`/
+ *     `batchUpsertRowsByKey_` 本身逻辑），LIVE GAS 待验证。due_date 这次
+ *     没有加（上面"补充"段的推理没有变化，也没有新证据推翻它，按 Carson
+ *     的明确指示不扩大这次的字段范围）。
+ *   - 完全没有做、也不允许在这次任务里做：这段最前面提到的"核实方法"
+ *     （去真实环境挑一个真实存在的旧 Task 直接看 due_time 单元格的真实
+ *     类型）——一次都没有执行过，这条 Known Limitation 描述的不确定性
+ *     原样保留，没有被这次修复解决或改变。是否要做这个核实、要不要对
+ *     已经损坏的历史行做批量修复，仍然是需要 Carson 另行决定的独立
+ *     Decision Gate，不因为这次的 write-time 修复而自动变成"已处理"。
  */
 
 // ============================================================
