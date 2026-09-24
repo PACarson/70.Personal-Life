@@ -158,12 +158,25 @@ function getHeaderMap_(sheet) {
  *   内部处理。不传这个参数时行为跟之前完全一样（现有几十个调用点
  *   不用改）。
  *
- *   已知 trade-off：新增行分支为了能在 appendRow() 之前先格式化目标格，
- *   用 lastRow+1 预先算出"即将追加到的行号"——这跟 appendRow() 自己
- *   "原子性找下一个空行"不是同一个操作，单脚本单次执行内没有问题，
- *   真出现并发写同一张表的场景（本项目目前没有这种场景）才有极小概率
- *   猜错行号；这跟 _setPlainTextFormatForNewColumns_ 本身也没上
- *   LockService 是同一个风险等级，不是这次新引入的。
+ *   【2026-09-24 追记——真实环境证实 appendRow() 不尊重预先设置的
+ *   setNumberFormat，已改用 getRange().setValues()】上面 09-23 那次
+ *   修复部署到真实 GAS 后，`runDueTimePlainTextProtectionGate()` 显示
+ *   一个非常干净的现象：Update/Fallback（走已存在行的 setValues 分支）
+ *   全部 PASS，Create（新增行、原来走 appendRow() 分支）全部 FAIL，
+ *   read-back 拿到的还是裸 Date 对象。排查确认：即使 setNumberFormat
+ *   在 appendRow() 之前对目标行调用过，appendRow() 本身往那一行写值
+ *   时依然会按内容自动推断类型，不会尊重那次预先设置的格式——这跟
+ *   "已存在行" 时 setValues() 会尊重预先设置的格式是两种不同的行为，
+ *   之前的分析假设两者一致，这个假设是错的，已经被真实环境的 PASS/FAIL
+ *   对照证据推翻，不是猜测。修复：只要传了 plainTextColumns，新增行
+ *   分支也改成跟已存在行同一个机制——对同一个目标行先
+ *   setNumberFormat 再 getRange().setValues()，不再用 appendRow()。
+ *   没传 plainTextColumns 的新增行分支保留原来的 appendRow()，行为
+ *   跟这次修复之前完全一样（现有几十个不关心这个参数的调用点不受
+ *   影响）——只有主动要纯文本保护的调用点才会切换写入机制，这是
+ *   唯一必要的代价：因为 appendRow() 自己"原子性找下一个空行"这个
+ *   保证，在这次要保住格式对齐的前提下没有办法同时兼顾，两者只能
+ *   选一个，选择了让格式生效。
  */
 function upsertRowByKey_(sheetName, keyHeader, keyValue, rowDataObj, plainTextColumns) {
   var sheet = getSheet_(sheetName);
@@ -202,19 +215,24 @@ function upsertRowByKey_(sheetName, keyHeader, keyValue, rowDataObj, plainTextCo
     }
   }
 
+  var needsExplicitRangeWrite = foundRow > 0 || (plainTextColumns && plainTextColumns.length > 0);
+  var targetRow = foundRow > 0 ? foundRow : (lastRow + 1);
+
   // 写值之前先落纯文本格式，见上面函数注释 / Known Limitation 11。
+  // targetRow 同一个变量既用来格式化也用来写入，两者不可能对不上号。
   if (plainTextColumns && plainTextColumns.length) {
-    var targetRowForFormat = foundRow > 0 ? foundRow : (lastRow + 1);
     plainTextColumns.forEach(function (col) {
       if (headerMap.hasOwnProperty(col)) {
-        sheet.getRange(targetRowForFormat, headerMap[col] + 1).setNumberFormat('@');
+        sheet.getRange(targetRow, headerMap[col] + 1).setNumberFormat('@');
       }
     });
   }
 
-  if (foundRow > 0) {
-    sheet.getRange(foundRow, 1, 1, numCols).setValues([rowArray]);
+  if (needsExplicitRangeWrite) {
+    sheet.getRange(targetRow, 1, 1, numCols).setValues([rowArray]);
   } else {
+    // 没有任何列需要纯文本保护时维持原来的 appendRow()，行为跟这次
+    // 修复之前完全一样。
     sheet.appendRow(rowArray);
   }
 }

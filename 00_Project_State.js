@@ -3349,3 +3349,41 @@
  * 手动跑一次 `testDueFields_SurviveActiveTasksRebuild_()`（重建整张
  * ActiveTasks 表，不要跟日常 Gate 一起频繁跑）。
  */
+
+/**
+ * 五十八、上一条记录的修复第一次真实环境验证：Create 分支 100% FAIL，
+ *         暴露 appendRow() 不尊重预先设置的格式（2026-09-24）
+ *
+ * Carson 部署「五十七」的 8 个文件后第一次真实跑
+ * `runDueTimePlainTextProtectionGate()`：现象非常干净——Update/
+ * Fallback（走已存在行 `setValues()` 分支）2/2 PASS，Create（新增行、
+ * 走 `appendRow()` 分支）2/2 FAIL，Task 和 Project 一致，跟「五十七」
+ * 预期的"应该全过"不符。这正是「五十七」自己承认的"LIVE GAS PENDING，
+ * 没有真的跑过"——这次真的跑了，发现假设有错。
+ *
+ * 根因（已确认，非猜测）：`setNumberFormat('@')` 即使在 `appendRow()`
+ * 之前对目标行调用过，`appendRow()` 往那一行写值时依然按内容自动推断
+ * 类型，不尊重预先设置的格式——这跟"已存在行"场景下 `setValues()` 会
+ * 尊重预先设置的格式不是同一种行为。「五十七」默认两者一致，这个默认
+ * 是错的，PASS/FAIL 的对照直接证明了这一点。审计确认 `batchUpsertRowsByKey_`
+ * 和 `runDailyArchive` 从一开始就没用过 `appendRow()`，不受这个问题
+ * 影响，不需要改。
+ *
+ * 修复：`upsertRowByKey_` 新增行分支，只要传了 `plainTextColumns`，
+ * 改用跟已存在行同一个 `getRange().setValues()`，不再用 `appendRow()`；
+ * 没传这个参数的调用点维持原来的 `appendRow()` 不变（现有几十个不相关
+ * 调用点零影响）。Node shim 补充断言：新逻辑（传参数→setValues）和
+ * 向后兼容回归（不传参数→仍是 appendRow）都验证过，9 项全部 PASS——
+ * 但这仍然只是 SHIM VERIFIED，「五十七」的 SHIM 结果同样全过却还是
+ * 漏了这个问题，这次不重复"SHIM 过 = 真实环境会过"这个已经被打破的
+ * 假设。
+ *
+ * 改动文件：仅 `05_SheetUtils.js`（`upsertRowByKey_`）。
+ * `00_Known_Limitations.js`「十一」追记二、本条。
+ *
+ * LIVE GAS PENDING：需要 Carson 重新部署 `05_SheetUtils.js`，重跑
+ * `runDueTimePlainTextProtectionGate()` 确认 4/4 全过，再重跑
+ * `runTaskToProjectBlockedGate()`。这次测试跑产生的新脏数据行（2 条
+ * FAIL + 2 条 PASS）还没清理，跟「五十七」遗留的一起按 Cleanup
+ * Protocol 处理。
+ */

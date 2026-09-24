@@ -656,6 +656,27 @@
  * "Sheets 是否真的不再自动识别类型"这个平台行为本身，仍然是 LIVE
  * GAS PENDING，需要 Carson 回到真实环境后用
  * `59_Tests_DueTimePlainTextProtection.js` 验证。
+ *
+ * 【2026-09-24 追记二——真实环境第一次跑上面那份 Gate，结果证实上一条
+ * 追记的修复本身不完整】`runDueTimePlainTextProtectionGate()` 真实跑出
+ * 一个非常干净、100% 对齐的现象：Update/Fallback（走已存在行的
+ * `setValues()` 分支）全部 PASS，Create（新增行、原来走
+ * `appendRow()` 分支）全部 FAIL，Task 和 Project 两边一致。根因：
+ * `setNumberFormat('@')` 即使在 `appendRow()` 之前对目标行调用过，
+ * `appendRow()` 自己往那一行写值时依然按内容自动推断类型，不尊重
+ * 那次预先设置的格式——这跟"已存在行"场景下 `setValues()` 会尊重
+ * 预先设置的格式是两种不同的行为，上一条追记默认两者一致，这个默认
+ * 是错的。修复：`upsertRowByKey_` 只要传了 `plainTextColumns`，新增
+ * 行分支也改用跟已存在行同一个 `getRange().setValues()` 机制，不再
+ * 用 `appendRow()`；没传这个参数的新增行分支维持原来的 `appendRow()`
+ * 不变。`batchUpsertRowsByKey_` 和 `13_ActiveTasksEngine.js` 的
+ * `runDailyArchive` 从一开始就是走 `getRange().setValues()`，没有用过
+ * `appendRow()`，这次不受影响，不需要改。Node shim 补了一条新增行走
+ * `getRange().setValues()`（新逻辑）和一条新增行不传参数时仍然走
+ * `appendRow()`（向后兼容回归检查）的断言，两条都 PASS，但这仍然只是
+ * SHIM VERIFIED——这次的教训正是"SHIM 上一轮判定'逻辑没问题'不等于
+ * 真实环境行为符合预期"，所以这一条修复也还是 LIVE GAS PENDING，
+ * 需要 Carson 重新跑一次 `runDueTimePlainTextProtectionGate()` 确认。
  */
 
 // ============================================================
