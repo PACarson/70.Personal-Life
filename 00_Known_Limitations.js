@@ -677,6 +677,31 @@
  * SHIM VERIFIED——这次的教训正是"SHIM 上一轮判定'逻辑没问题'不等于
  * 真实环境行为符合预期"，所以这一条修复也还是 LIVE GAS PENDING，
  * 需要 Carson 重新跑一次 `runDueTimePlainTextProtectionGate()` 确认。
+ *
+ * 【2026-09-24 追记三——LIVE GAS VERIFIED（有明确范围，不是"全部"）】
+ * Carson 部署追记二的 `05_SheetUtils.js` 之后重跑，`runDueTimePlainTextProtectionGate()`
+ * 4/4 PASS，`runTaskToProjectBlockedGate()` 4/4 PASS，随后清理了这几轮
+ * 测试留下的脏数据行。这条 Known Limitation 描述的问题——写入时被
+ * Sheets 自动识别成 Date/Time 类型——在下面这些真实路径上确认已解决：
+ *   - Task create（`projectTaskCreated_`）、Task update（`projectTaskUpdated_`）
+ *   - Project create（`projectProjectCreated_`）
+ *   - Task/Project 的 materialize 兜底（直接调用验证过）
+ *   - Task→Project conversion 全链路（`convertTaskToProject` 的四个
+ *     Gate 用例，含 due_date-only/due_date+due_time/无 due_date 回归/
+ *     反向不映射）
+ * 还没有被这次验证覆盖、状态仍然是 LIVE GAS PENDING（不是"没做"，是
+ * "这次没测到"）：
+ *   - `projectProjectUpdated_`（Project 走正常 update 派发、不经过
+ *     materialize 兜底这条路径）——机制跟已经验证过的 Task update
+ *     共用同一个 `upsertRowByKey_` 已存在行分支，风险低，但没有独立
+ *     测试直接跑过
+ *   - Projection 全量重建（`batchUpsertRowsByKey_` 那条路径）——
+ *     `testDueFields_SurviveActiveTasksRebuild_()` 故意没有放进这次
+ *     跑的 Gate，还没有跑过
+ *   - `13_ActiveTasksEngine.js` 的 `runDailyArchive`——没有专门测试，
+ *     这是每日定时任务，会动真实存量数据，不建议为了测试随意手动触发
+ * 不要把"这条 Known Limitation 已经 LIVE VERIFIED"简化成"这条 Known
+ * Limitation 已经 RESOLVED/CLOSED"——上面三项还是开放状态。
  */
 
 // ============================================================

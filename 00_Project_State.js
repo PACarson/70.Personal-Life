@@ -3387,3 +3387,39 @@
  * FAIL + 2 条 PASS）还没清理，跟「五十七」遗留的一起按 Cleanup
  * Protocol 处理。
  */
+
+/**
+ * 五十九、「五十八」的修复真实环境验证通过：两个 Gate 4/4 + 4/4 全绿
+ *         （2026-09-24，同一天）
+ *
+ * Carson 部署「五十八」的 `05_SheetUtils.js` 之后重跑：
+ * `runDueTimePlainTextProtectionGate()` 4/4 PASS，
+ * `runTaskToProjectBlockedGate()` 4/4 PASS。随后清理了这几轮测试留下
+ * 的全部脏数据行。
+ *
+ * 【LIVE GAS VERIFIED，范围明确列出，不是笼统的"全部验证过"】下面这些
+ * 真实路径确认已解决 Known Limitation「十一」描述的问题：
+ *   - Task create（`projectTaskCreated_`）/ Task update（`projectTaskUpdated_`）
+ *   - Project create（`projectProjectCreated_`）
+ *   - Task/Project 的 materialize 兜底（`materializeTaskRow_`/
+ *     `materializeProjectRow_`，直接调用验证过）
+ *   - Task→Project conversion 全链路（due_date-only、due_date+due_time、
+ *     无 due_date 回归、反向不映射，四个用例）
+ *
+ * 【仍然是 LIVE GAS PENDING，不要误读成"已验证"】
+ *   - `projectProjectUpdated_`（Project 走正常 update 派发、不经过
+ *     materialize 兜底）——机制跟已验证的 Task update 共用同一个
+ *     `upsertRowByKey_` 已存在行分支，风险低，但没有独立测试跑过
+ *   - Projection 全量重建（`batchUpsertRowsByKey_` 路径）——
+ *     `testDueFields_SurviveActiveTasksRebuild_()` 这次同样没有跑，
+ *     还是完全未验证
+ *   - `13_ActiveTasksEngine.js` 的 `runDailyArchive`——没有专门测试，
+ *     每日定时任务，会动真实存量数据，不建议为了测试手动触发
+ *   - Known Limitation「十二」里 Tasks `due_date` 的既有保护（`_ensureSheet_`
+ *     建表时整块设纯文本）——目前仍然只是推理，从未在真实环境直接
+ *     核实过那一列现在的实际单元格格式
+ *   - Known Limitation「十三」——按各轮任务的明确指示，没有、也不会
+ *     在没有 Carson 另行授权的情况下处理
+ *
+ * `00_Known_Limitations.js`「十一」追记三同步记录了同样的范围。
+ */
