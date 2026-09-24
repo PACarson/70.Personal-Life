@@ -3405,14 +3405,17 @@
  *     `materializeProjectRow_`，直接调用验证过）
  *   - Task→Project conversion 全链路（due_date-only、due_date+due_time、
  *     无 due_date 回归、反向不映射，四个用例）
+ *   - 【2026-09-24 追记】Projection 全量重建（`batchUpsertRowsByKey_`
+ *     路径）——Carson 单独跑了 `testDueFields_SurviveActiveTasksRebuild_()`，
+ *     `rebuildActiveTasksProjection()` 真实处理了 211 个活跃任务，测试
+ *     那条任务 PASS（这条测试只直接断言了这一条，不是对全部 211 条
+ *     逐一核验，其它 210 条走的是同一段代码，没有理由不同，但没有
+ *     逐行验证过）
  *
  * 【仍然是 LIVE GAS PENDING，不要误读成"已验证"】
  *   - `projectProjectUpdated_`（Project 走正常 update 派发、不经过
  *     materialize 兜底）——机制跟已验证的 Task update 共用同一个
  *     `upsertRowByKey_` 已存在行分支，风险低，但没有独立测试跑过
- *   - Projection 全量重建（`batchUpsertRowsByKey_` 路径）——
- *     `testDueFields_SurviveActiveTasksRebuild_()` 这次同样没有跑，
- *     还是完全未验证
  *   - `13_ActiveTasksEngine.js` 的 `runDailyArchive`——没有专门测试，
  *     每日定时任务，会动真实存量数据，不建议为了测试手动触发
  *   - Known Limitation「十二」里 Tasks `due_date` 的既有保护（`_ensureSheet_`
@@ -3421,5 +3424,39 @@
  *   - Known Limitation「十三」——按各轮任务的明确指示，没有、也不会
  *     在没有 Carson 另行授权的情况下处理
  *
- * `00_Known_Limitations.js`「十一」追记三同步记录了同样的范围。
+ * `00_Known_Limitations.js`「十一」追记三/四同步记录了同样的范围。
+ */
+
+/**
+ * 六十、全量只读审计推翻了 Known Limitation「十二」里 due_date 的推理
+ *      ——211 行真实数据中，due_time/due_datetime 零污染，
+ *      due_date 有 14 行是裸 Date 对象（2026-09-24）
+ *
+ * Carson 跑了一个 100% 只读、不写不删的全量审计脚本，扫过 ActiveTasks
+ * 现存全部 211 行，直接检验 due_time/due_datetime/due_date 三个字段的
+ * 真实类型：
+ *   - due_time：30 行有值，全部字符串，0 行 Date 对象
+ *   - due_datetime：30 行有值，全部字符串，0 行 Date 对象
+ *   - due_date：47 行字符串，**14 行裸 Date 对象**
+ *
+ * 前两项是「五十七」到「五十九」这次写入时修复的直接、真实数据层面的
+ * 确认——不只是测试用的那几条 accept_test_* 数据，211 行真实存量数据
+ * 本身就是干净的。
+ *
+ * due_date 的 14 行推翻了 Known Limitation「十二」"补充"段的推理（那段
+ * 认为 due_date 建表时就整块设过纯文本，大概率安全）——那是推理，这次
+ * 是真实数据验证过，验证结果是推理错了，已经在「十二」追记二记录。
+ * 审计脚本自己最后打印的"完美通过"结论是脚本自身的统计口径漏洞（只把
+ * due_time/due_datetime 的 Date 对象计入 anomalies，due_date 的 14 个
+ * 从未被计入），不是真的完美通过——细节见「十二」追记二。
+ *
+ * 两件事分开处理，都还没有 Carson 的进一步指示：
+ *   1. 这 14 行现存历史数据——NO AUTOMATIC REPAIR AUTHORIZED，没碰，
+ *      也不会主动碰。
+ *   2. due_date 要不要也纳入跟 due_time/due_datetime 一样的
+ *      `plainTextColumns` 写入时保护（关闭"以后还会不会继续写坏"这
+ *      个未知）——已经提议给 Carson，没有做任何代码改动。
+ *
+ * 提供了一个纯只读诊断脚本（`runActiveTasks211Audit_withDueDateDetail()`，
+ * 不是仓库的一部分）用来列出具体是哪 14 行，供 Carson 需要时使用。
  */

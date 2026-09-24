@@ -689,19 +689,24 @@
  *   - Task→Project conversion 全链路（`convertTaskToProject` 的四个
  *     Gate 用例，含 due_date-only/due_date+due_time/无 due_date 回归/
  *     反向不映射）
+ *   - **【2026-09-24 追记四】Projection 全量重建**（`batchUpsertRowsByKey_`
+ *     那条路径）——Carson 单独手动跑了
+ *     `testDueFields_SurviveActiveTasksRebuild_()`，`rebuildActiveTasksProjection()`
+ *     在真实环境处理了 211 个真实活跃任务，测试用的那条任务 due_time/
+ *     due_datetime 重建后原样读回，PASS。（这条测试本身只直接断言了
+ *     这一条任务，不是对全部 211 条逐一重新核验；重建对每一行走的是
+ *     同一段代码，没有理由认为其它 210 条会有不同表现，但严格说这个
+ *     推论没有被逐行验证过。）
  * 还没有被这次验证覆盖、状态仍然是 LIVE GAS PENDING（不是"没做"，是
  * "这次没测到"）：
  *   - `projectProjectUpdated_`（Project 走正常 update 派发、不经过
  *     materialize 兜底这条路径）——机制跟已经验证过的 Task update
  *     共用同一个 `upsertRowByKey_` 已存在行分支，风险低，但没有独立
  *     测试直接跑过
- *   - Projection 全量重建（`batchUpsertRowsByKey_` 那条路径）——
- *     `testDueFields_SurviveActiveTasksRebuild_()` 故意没有放进这次
- *     跑的 Gate，还没有跑过
  *   - `13_ActiveTasksEngine.js` 的 `runDailyArchive`——没有专门测试，
  *     这是每日定时任务，会动真实存量数据，不建议为了测试随意手动触发
  * 不要把"这条 Known Limitation 已经 LIVE VERIFIED"简化成"这条 Known
- * Limitation 已经 RESOLVED/CLOSED"——上面三项还是开放状态。
+ * Limitation 已经 RESOLVED/CLOSED"——上面两项还是开放状态。
  */
 
 // ============================================================
@@ -760,6 +765,38 @@
  *     原样保留，没有被这次修复解决或改变。是否要做这个核实、要不要对
  *     已经损坏的历史行做批量修复，仍然是需要 Carson 另行决定的独立
  *     Decision Gate，不因为这次的 write-time 修复而自动变成"已处理"。
+ *
+ * 【2026-09-24 追记二——上面"due_date 没有新证据推翻它"这句话，已经被
+ * 推翻，不是还没验证，是验证完发现推理是错的】Carson 跑了一个 100%
+ * 只读的全量审计（`runActiveTasks211Audit()`，扫描 ActiveTasks 现存
+ * 全部 211 行），结果：
+ *   - due_time：30 行有值，30 行都是干净字符串，0 行是 Date 对象。
+ *   - due_datetime：30 行有值，30 行都是干净字符串，0 行是 Date 对象。
+ *   - **due_date：47 行是字符串，14 行是裸 Date 对象。**
+ * 前两项确认这次的写入时修复（Known Limitation「十一」的机制）对
+ * due_time/due_datetime 是真实有效的，211 行真实数据零污染。但
+ * due_date 的 14 行 Date 对象直接推翻了本条最前面"补充"段"大概率不
+ * 受影响...应该一直是安全的"这个推理——那只是推理，这次是真的拿真实
+ * 数据验证过，验证结果是推理错了。
+ *
+ * 审计脚本自己最后打印的"✅✅✅ 完美通过"结论是误导性的：脚本的
+ * anomalies 数组只在 due_time/due_datetime 命中 Date 对象时才 push，
+ * due_date 分支只累加了 `dueDateIsDate` 计数，从来没有 push 进
+ * anomalies，所以最后"if (anomalies.length > 0)"这个判断分支永远看
+ * 不到 due_date 的问题，"完美通过"只是脚本自己的统计口径漏了这一项，
+ * 不代表 due_date 真的没问题——上面打印的原始数字（14 行 Date 对象）
+ * 才是事实，不是那句结论。
+ *
+ * 两件分开的事，不要混着处理：
+ *   1. 这 14 行已经存在的历史数据——跟 Known Limitation「十三」同一个
+ *      原则，NO AUTOMATIC REPAIR AUTHORIZED，没有 Carson 明确授权，
+ *      不猜测原始值、不批量改、不删除。
+ *   2. due_date 未来的写入是不是还会继续产生新的 Date 对象——这是
+ *      **未知**，这次的审计只告诉了"现在已经有 14 行坏了"，没有告诉
+ *      "以后新写入的 due_date 还会不会继续坏"。如果 Carson 决定要
+ *      把 due_date 也纳入跟 due_time/due_datetime 一样的
+ *      `plainTextColumns` 写入时保护，这是一个后续可以做、但需要
+ *      Carson 明确授权的改动——不在这条追记里自行决定或实施。
  */
 
 // ============================================================
