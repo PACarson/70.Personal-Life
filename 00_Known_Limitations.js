@@ -697,16 +697,18 @@
  *     这一条任务，不是对全部 211 条逐一重新核验；重建对每一行走的是
  *     同一段代码，没有理由认为其它 210 条会有不同表现，但严格说这个
  *     推论没有被逐行验证过。）
+ *   - **【2026-09-25 追记五】`projectProjectUpdated_`**（Project 走正常
+ *     update 派发、不经过 materialize 兜底这条路径）——Carson 单独写了
+ *     一个针对性验证，真实环境跑出 due_date/due_time/due_datetime 三个
+ *     字段写入后 `typeof` 都是 string，PASS。这是这次 write-time
+ *     protection 系列里最后一个"共用已验证机制、但没有独立测试跑过"的
+ *     覆盖缺口，现在也有了直接证据。
  * 还没有被这次验证覆盖、状态仍然是 LIVE GAS PENDING（不是"没做"，是
  * "这次没测到"）：
- *   - `projectProjectUpdated_`（Project 走正常 update 派发、不经过
- *     materialize 兜底这条路径）——机制跟已经验证过的 Task update
- *     共用同一个 `upsertRowByKey_` 已存在行分支，风险低，但没有独立
- *     测试直接跑过
  *   - `13_ActiveTasksEngine.js` 的 `runDailyArchive`——没有专门测试，
  *     这是每日定时任务，会动真实存量数据，不建议为了测试随意手动触发
  * 不要把"这条 Known Limitation 已经 LIVE VERIFIED"简化成"这条 Known
- * Limitation 已经 RESOLVED/CLOSED"——上面两项还是开放状态。
+ * Limitation 已经 RESOLVED/CLOSED"——上面这一项还是开放状态。
  */
 
 // ============================================================

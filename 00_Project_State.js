@@ -3411,20 +3411,20 @@
  *     那条任务 PASS（这条测试只直接断言了这一条，不是对全部 211 条
  *     逐一核验，其它 210 条走的是同一段代码，没有理由不同，但没有
  *     逐行验证过）
+ *   - 【2026-09-25 追记】`projectProjectUpdated_`（Project 走正常 update
+ *     派发、不经过 materialize 兜底）——Carson 单独验证过，due_date/
+ *     due_time/due_datetime 三个字段写入后 `typeof` 都是 string，PASS
  *
  * 【仍然是 LIVE GAS PENDING，不要误读成"已验证"】
- *   - `projectProjectUpdated_`（Project 走正常 update 派发、不经过
- *     materialize 兜底）——机制跟已验证的 Task update 共用同一个
- *     `upsertRowByKey_` 已存在行分支，风险低，但没有独立测试跑过
  *   - `13_ActiveTasksEngine.js` 的 `runDailyArchive`——没有专门测试，
  *     每日定时任务，会动真实存量数据，不建议为了测试手动触发
- *   - Known Limitation「十二」里 Tasks `due_date` 的既有保护（`_ensureSheet_`
- *     建表时整块设纯文本）——目前仍然只是推理，从未在真实环境直接
- *     核实过那一列现在的实际单元格格式
  *   - Known Limitation「十三」——按各轮任务的明确指示，没有、也不会
  *     在没有 Carson 另行授权的情况下处理
  *
- * `00_Known_Limitations.js`「十一」追记三/四同步记录了同样的范围。
+ * Task `due_date` 的既有保护——不再是"从未核实过"，「六十」已经用全量
+ * 只读审计核实过，结论是推理错了，14 行现存 Date 对象，见「六十」。
+ *
+ * `00_Known_Limitations.js`「十一」追记三/四/五同步记录了同样的范围。
  */
 
 /**
@@ -3459,4 +3459,31 @@
  *
  * 提供了一个纯只读诊断脚本（`runActiveTasks211Audit_withDueDateDetail()`，
  * 不是仓库的一部分）用来列出具体是哪 14 行，供 Carson 需要时使用。
+ */
+
+/**
+ * 六十一、重跑确认 + projectProjectUpdated_ 补齐验证 + due_date 审计
+ *        14→13 行，"交房租"那条不再出现（2026-09-25）
+ *
+ * Carson 重跑了 `runDueTimePlainTextProtectionGate()`（4/4 PASS）和
+ * `runTaskToProjectBlockedGate()`（4/4 PASS）——跟上次结果一致，没有
+ * 回归。另外单独针对 `projectProjectUpdated_` 写了一个专项验证：真实
+ * 环境下 Project 走正常 update 派发之后，due_date/due_time/due_datetime
+ * 三个字段 `typeof` 都是 string，PASS。这是「五十九」列出的最后一个
+ * "共用已验证机制、没有独立测试跑过"的缺口，现在补齐了，已同步记录到
+ * Known Limitation「十一」追记五。
+ *
+ * 又跑了一次 due_date 全量只读审计：这次是 **13 行**，不是「六十」记录
+ * 的 14 行。逐行比对：其它 13 行的 task_id、title、due_date 值完全
+ * 相同，行号统一往前移了 1（因为上面少了一行）——消失的正是「六十」
+ * 里明确标记成"真实业务数据，没有碰"的那一行：TSK-20260905-0D2575F4
+ * （"交房租"）。这次任务全程没有做任何写入/删除操作，这行消失跟这轮
+ * 审计、跟这次的 write-time protection 修复都没有关系，最可能的解释是
+ * Carson 自己在正常使用里把这个任务处理掉了（比如标记完成，从
+ * ActiveTasks 移出）——但这只是推测，没有跟 Carson 确认过，需要他自己
+ * 确认这是正常使用还是需要留意的事。
+ *
+ * 除了这一行的增减，due_date 现存损坏的事实本身没有变化：剩下这 13 行
+ * 还是裸 Date 对象，跟「六十」记录的一样，没有被这次修复、也没有被
+ * 任何人修改过。
  */
