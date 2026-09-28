@@ -3487,3 +3487,118 @@
  * 还是裸 Date 对象，跟「六十」记录的一样，没有被这次修复、也没有被
  * 任何人修改过。
  */
+
+/**
+ * 六十二、UI Vertical Slice 4（Priority + AI Recommendation）Reassessment
+ *        —— PARTIALLY SUPERSEDED（2026-09-28；只读审计之后的正式记录，
+ *        本条只做文档记录，不涉及任何代码/数据改动）
+ *
+ * 起因：Roadmap Governance Synchronization（2026-09-28）时发现
+ * 00_Roadmap.gs 长期把"Vertical Slice 4（Priority + AI Recommendation）"
+ * 记为"尚未开始"，而「十五」（Track 2 / UI-I3）之后这个说法已经不准确。
+ * Carson 要求先做一次 READ-ONLY 审计、重新判断这个 Slice 现在到底还是什么，
+ * 再把结论正式记录。本条只记录那次只读审计确认过的事实。
+ *
+ * 命名说明（沿用第二条「三十九」已经确立的"带限定词"写法，避免再次
+ * 混淆）：本条说的"Slice 4"专指"UI Vertical Slice 4（Priority + AI
+ * Recommendation）"——2026-08 系列，首次出现在「九」，Open Items 见
+ * 「十二」第 4 项。它跟"UI V2 Plan Slice 4"（Part A：Task→Project
+ * BLOCKED，见「三十二」；Part B：Task→Note，见「三十五」）是同名不同物。
+ *
+ * 一、原始定义（文件证据）
+ *   - 「九」（2026-08-16）：UI Phase 0 只先验证 Note→Task 一个 Vertical
+ *     Slice，"其余（Task→Project、Project→Workflow→Task、Priority+AI
+ *     Recommendation）留到 Slice 1 稳定之后"。
+ *   - 「十二」第 4 项（2026-08-18）：Vertical Slice 4 尚未开始；要用到的三个
+ *     AI 函数（22/47 文件里）本身已经 Contract Verified（见「八」），缺的是
+ *     这一层的 UI Bridge + 前端，"跟 Slice 1-3 是同一个模式"。
+ *   - 问题陈述的来源是「八」（Sprint 4，2026-08-14）：46_AIConnector（全项目
+ *     唯一允许发起外部 AI API 调用的模块）、22_PriorityEngine 的 AI 增量
+ *     （suggestPriorityWithAI_）、47_AIPlanningEngine（suggestNewProject_ =
+ *     AI Project Suggestion；generateWorkflowSuggestion_ = AI Workflow
+ *     Generation）。37_Tests_AIEngines.gs 12/12（2026-08-16）Contract
+ *     Verified，当时状态 Integration Pending。
+ *   - 边界从一开始就是 Architecture Principle 9（AI Suggests, Human
+ *     Confirms）+ ADR-2026-07-24-009（priority / priority_ai_recommended
+ *     双轨字段）。AI 归属：UI Phase 0「九」Option A——UI 归 Personal Life OS
+ *     自己项目，Personal AI Core 保留 AI Infrastructure / Coordination
+ *     Layer 定位。AI Goal Planning 明确不属于本项目（47 文件头 +
+ *     00_Domain_Boundary.gs「一」：Goal 是 Life Execution OS 的对象）。
+ *
+ * 二、审计确认的现状
+ *   1. Priority AI —— ALREADY COMPLETED，经 Track 2 / UI-I3 交付（不是通过
+ *      "Slice 4"这个名字）：「十五」（2026-08-21）ui_suggestPriority +
+ *      ui_index.html 上的 Ask AI Priority / AI Suggestion / Accept /
+ *      Dismiss（2026-09-28 代码检查确认这些控件存在）。双轨字段模型：AI 建议
+ *      只写 priority_ai_recommended；priority 本身只有用户点 Accept 才经既有
+ *      updateTask 改变；priority_ai_recommended 不在
+ *      IDENTITY_AFFECTING_FIELDS。
+ *      验证层次（只写文件里查得到的）：服务端契约真实环境验证——「十五」
+ *      13/14（唯一失败是测试 mock 自己用了 'CRITICAL'，已改 'HIGH'）→「二十」
+ *      14/14（2026-08-25）；runUIBridgeInteractionsGate() 之后在「十七」
+ *      （2026-08-23）、第二条「三十九」、「四十七」（2026-09-11）里作为既有
+ *      regression gate 再次记录为通过；「四十七」之后 Project State 没有再
+ *      记录这个 gate 的重跑。浏览器层面：「二十」明确写了"真实浏览器手动
+ *      验证……本项目未见 Carson 回报这一步的结果"，Project State 里没有单独
+ *      记录 Ask AI / Accept / Dismiss 的浏览器手动验证；本条按 Carson
+ *      2026-09-28 的指示把 Priority AI 记为"完成并经过真实环境验证"，
+ *      上面把文件里可查的验证层次分开写清楚，不把两者混为一谈。
+ *      随附的已知限制（原样保留，不属于本次改动）：Known Limitation「三」
+ *      （2026-08-21 补充，Carson 提出）——suggestPriorityWithAI_ 的 prompt
+ *      和校验数组都只有 HIGH/MEDIUM/LOW，AI 建议够不到 CRITICAL，记录为
+ *      "已知、非阻塞的小缺口"，跟 Carson 确认过、暂不修；「十二」第 7 项也
+ *      有同一条记录。
+ *   2. AI Project Suggestion（47_AIPlanningEngine.suggestNewProject_）——
+ *      PENDING：Contract Verified，Integration Pending，没有 UI Bridge /
+ *      frontend entry。2026-09-28 代码检查：全仓库 .js/.html 里除
+ *      37_Tests_AIEngines.gs 和文档注释外没有任何调用方；50_UIBridge.gs、
+ *      ui_index.html、06_TaskIntentParser.gs 均无入口。「八」之后 Project
+ *      State 没有再提到过这个文件。
+ *   3. AI Workflow Generation（47_AIPlanningEngine.
+ *      generateWorkflowSuggestion_）——PENDING：同上。
+ *   4. 现有记录里对这两项未来集成的已知提醒（只记录，不做设计）：
+ *      (a)「八」：没有 Integration/Failure/Regression Tests 覆盖"人类确认后
+ *          走 27/28/20 创建实体"这条链路，这条链路本身也还不存在。
+ *      (b) Known Limitation「四」（2026-08-21 补充）：Priority 这条从头到尾
+ *          只碰一个已存在 Task 的字段，不存在"创建一半"的中间状态；
+ *          suggestNewProject_ / generateWorkflowSuggestion_ 未来真正接
+ *          编排逻辑时，关于 orphan entity 风险的推理需要重新评估，不能
+ *          直接套用 Priority 这条的结论。
+ *      (c) 00_ADR.gs 里没有专门针对这两项 UI 集成的 ADR（只有
+ *          ADR-2026-07-24-021 Sprint 4 Recovery）。
+ *   5. AI 自动创建/自动执行：不属于范围，继续遵守 Architecture Principle 9。
+ *
+ * 三、分类结论
+ *   UI Vertical Slice 4（Priority + AI Recommendation）状态：
+ *   PARTIALLY SUPERSEDED。
+ *     - Priority AI: ALREADY COMPLETED
+ *     - AI Project Suggestion: PENDING
+ *     - AI Workflow Generation: PENDING
+ *   不再把剩余工作称为完整的"Vertical Slice 4 — Priority + AI"。历史记录
+ *   （「九」「十二」）原样保留，不删除、不改写。
+ *
+ * 四、新的候选工作项（进入当前候选池，不是排期）
+ *   "AI Planning Suggestions — Project + Workflow"：包含 AI Project
+ *   Suggestion UI integration + AI Workflow Generation UI integration。
+ *   它不是 Next Slice / Next Priority，没有被排期；是否做、什么时候做、
+ *   按什么顺序，留给后续 roadmap decision（Known Limitation「四」原文也把
+ *   这类排期明确留给 00_Roadmap.gs）。
+ *   Naming / numbering: NEEDS DECISION——本条不创造新的 Slice 编号。"Slice 4"
+ *   在本文件里已经有两个含义（见上面的命名说明），第二条「三十九」也
+ *   记录过"Slice 3"同名混淆。
+ *
+ * 五、连带记录（只记录，不决策）
+ *   - 「十二」第 1 项（改名 Life OS）：当时写的是建议——"等这一整轮 UI
+ *     Vertical Slice（1-4）都稳定后再单独做一次 Rename Migration"，不是
+ *     Carson 的决定，Carson 当时也还没有回复。Slice 4 重新分类之后，这条
+ *     建议的前提算不算已经满足：NEEDS DECISION，本次不判断。代码现状不变：
+ *     文件头仍是"Personal Life OS v5.2"，Library Identifier 仍是
+ *     PersonalLifeOS。
+ *
+ * 六、本次范围
+ *   只做文档记录（本条 + 00_Roadmap.gs 同步）。
+ *   Runtime code changed: NO / Production data changed: NO / Tests executed:
+ *   NO / New feature work: NO / Schema changed: NO。没有修改 AI/Priority
+ *   行为、Recurring、due_date、EventDefinitions、Testing Coverage、
+ *   ActiveTasks。
+ */
