@@ -191,8 +191,11 @@
  *    /monthly 这类指令去调用它们。
  *
  * 2. 22_PriorityEngine.suggestPriority(task)
- *    Status: Implemented（按 Priority Score ≥80→CRITICAL / ≥55→HIGH /
- *    ≥25→MEDIUM / 否则 LOW 给建议标签），/priority 指令的回复文案
+ *    Status: Implemented（按 Priority Score ≥70→HIGH / ≥40→MEDIUM /
+ *    否则 LOW 给建议标签——当前实现没有 CRITICAL 分支；manual priority
+ *    字段本身仍然允许 CRITICAL，见 TASK_PRIORITIES，是不同路径，不要混为
+ *    一谈【2026-09-30 核实代码后更正：此前这里错误写成"≥80→CRITICAL/
+ *    ≥55→HIGH/≥25→MEDIUM"，不是当前代码的真实分档】），/priority 指令的回复文案
  *    （06_TaskIntentParser._buildPriorityReply_）目前只展示原始
  *    Priority Score 和任务自己已有的 manual priority，不调用
  *    suggestPriority，也就不会把"建议标签"显示给用户。
@@ -202,8 +205,10 @@
  * 目前只能回 HIGH/MEDIUM/LOW 三档——prompt 里显式把合法值写死成
  * '"priority": "HIGH"|"MEDIUM"|"LOW"'，校验也只认这三个（validPriorities
  * 数组不含 CRITICAL），意味着不管任务多紧急，AI 建议永远够不到
- * CRITICAL，跟本条上面 suggestPriority() 纯公式那条（能给到 CRITICAL）
- * 不对称。已跟 Carson 确认是已知、非阻塞的小缺口，暂不在本次改动范围内
+ * CRITICAL——跟本条上面 suggestPriority() 纯公式那条现状一致，两条路径
+ * 目前都只能到 HIGH，不是此前这里记录的"不对称"（上一版这里把
+ * suggestPriority() 错误描述成"能给到 CRITICAL"，2026-09-30 核实代码后
+ * 已更正，见上面第 2 项）。已跟 Carson 确认是已知、非阻塞的小缺口，暂不在本次改动范围内
  * 修——真要修，改的是 22_PriorityEngine.gs 的 prompt 文案 + 校验数组，
  * 不是 UIBridge/前端能修的（UI-I3 只是如实展示 Engine 给出的建议，不
  * 应该在 Bridge 层悄悄给 AI 的合法值范围打补丁）。

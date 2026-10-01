@@ -3602,3 +3602,94 @@
  *   行为、Recurring、due_date、EventDefinitions、Testing Coverage、
  *   ActiveTasks。
  */
+
+/**
+ * 六十三、Priority Contract Reconciliation —— CLOSED / UNRESOLVED BY
+ *        DESIGN（2026-09-30）
+ *
+ * 编号说明：这是目前这份文件（截至「六十二」）的下一个顺序号。我这边
+ * 没办法确认 Carson 真实项目文件是否在「六十二」之后独立新增过别的
+ * 条目——如果有，这条应该顺延成相应的下一个号；Roadmap 里目前没有引用
+ * 这个编号，不需要跟着改。
+ *
+ * Status: CLOSED / UNRESOLVED BY DESIGN
+ *
+ * Scope: Priority formula / API / CRITICAL lineage reconciliation
+ *        （22_PriorityEngine.computeUrgencyScore/computePriorityScore/
+ *        suggestPriority 的公式与契约溯源，起于 22_PriorityEngine
+ *        Boundary Test Coverage 工作中发现的三项边界 discrepancy，
+ *        经两轮独立 read-only 调查）。
+ *
+ * Conclusion: Source of Truth could not be determined from verified
+ *             approval or supersession evidence.
+ *
+ * 不是：bug / implementation failure / missing test / failed
+ * reconciliation / accidental omission / 对当前 production 行为的
+ * 批准 / 对 Governance 公式的批准。是：证据已经调查到当前可合理确定的
+ * 边界，但没有足够的正式 decision / approval / supersession 证据去
+ * 选择任一 Priority Contract，因此明确不裁决。
+ *
+ * Preserved Findings：
+ *
+ * A. Production lineage —— NO VERIFIED PRODUCTION CONTRACT APPROVAL
+ *    FOUND（urgency×0.6+importance×0.4、5段 urgency 分值、固定
+ *    overdue=100、suggestPriority 70/40 阈值，均找不到批准记录；
+ *    Sprint 1/Sprint 3 正式交付范围和验收测试清单都不含
+ *    PriorityEngine）。
+ *
+ * B. Governance lineage —— NO VERIFIED GOVERNANCE CONTRACT APPROVAL
+ *    FOUND（0.5/0.5、7段 urgency、overdue clamp(30)、recurring×0.9、
+ *    80/55/25 阈值，均找不到批准记录；00_Command_Reference.gs 跟
+ *    00_Architecture_Review.gs 的 LAST_UPDATED 是同一天，不是两个
+ *    互相独立印证的来源）。
+ *
+ * C. Supersession —— NO VERIFIED SUPERSESSION EVIDENCE FOUND（没有
+ *    找到任何一边取代另一边的 ADR 或记录）。
+ *
+ * D. Current CRITICAL fact（现状，不是契约决定）：TASK_PRIORITIES
+ *    支持 CRITICAL；user-selected priority 可以使用 CRITICAL；formula
+ *    suggestPriority() 当前不会产生 CRITICAL；AI recommendation 当前
+ *    也不会产生 CRITICAL。00_Known_Limitations.gs「三」此前把
+ *    suggestPriority() 错误描述成"能给到 CRITICAL"，已于 2026-09-30
+ *    单独纠正，这条 closure 不重新打开那次纠正，也不在此基础上做任何
+ *    新的契约判断。
+ *
+ * Public API lineage —— 同样 unresolved：00_Project_Constitution.gs
+ *    记录的 computeUrgencyScore(task, now?) 跟生产代码实际的
+ *    computeUrgencyScore(dueDate) 之间没有找到迁移/变更记录，NO
+ *    VERIFIED MIGRATION RECORD；已确认这个 mismatch 目前没有任何外部
+ *    调用方依赖它，不影响系统运行。
+ *
+ * Test Status：
+ *    PASS —— No due_date、Boundary day count（60_Tests_
+ *    PriorityEngineBoundaries.gs，对真实未改动的 22_PriorityEngine.js
+ *    做过 Node vm 执行验证）。
+ *    BLOCKED BY CONTRACT —— Overdue clamp(30)、Recurring discount、
+ *    显式 final clamp/Math.min(100)。这三项 blocked 是因为对应
+ *    behavior 还没有确定的正式 contract，不是 test infrastructure
+ *    failure，不是测试没写完。
+ *
+ * Closure Meaning：Current production implementation remains
+ *    unchanged and is NOT hereby approved as the canonical Priority
+ *    Contract。Governance formula also remains unresolved and is NOT
+ *    hereby approved as the canonical Priority Contract。Priority
+ *    Contract remains formally unresolved。
+ *
+ * Reopen condition：Reopen only upon explicit Priority Contract
+ *    decision, approval, or verified supersession evidence（Human
+ *    Decision / Priority Contract ADR / explicit Architecture
+ *    Decision / verified historical approval record / verified
+ *    supersession evidence）。不因为测试还没写完、某人觉得某套公式比较
+ *    合理、Governance 文件看起来比较完整、production code 已经运行
+ *    很久、AI Priority 有 CRITICAL 问题、或新功能需要 Priority 而
+ *    自动 reopen。
+ *
+ * Production: No production changes（本轮及此前两轮 Lineage
+ *    Reconciliation 全程只读；唯一一次真实文件改动是上一轮
+ *    00_Known_Limitations.gs 的 CRITICAL 事实纠正，不属于这次
+ *    closure 的范围，也没有被这次 closure 重新打开）。
+ *
+ * 本次 closure 不在 00_Roadmap.gs 里新增任何条目——"UNRESOLVED BY
+ * DESIGN" 不等于"以后一定要做"，不自动产生 Priority implementation /
+ * refactor / test / AI CRITICAL 任何新 roadmap item。
+ */

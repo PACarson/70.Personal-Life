@@ -93,13 +93,17 @@
  *       过**（Project State「五十二」如实记录）；但其核心写入机制
  *       （Task/Project create/update、Task→Project conversion、
  *       Projection 全量重建）已经通过平行的 due_time/due_datetime
- *       write-time protection 那一轮工作（Known Limitation「十一」）
- *       被 LIVE GAS VERIFIED（Project State「五十七」～「五十九」）——
- *       两件事不是同一回事，不要合并成"ADR-031 已完整验证"。
- *     - due_time/due_datetime write-time 纯文本保护（Known Limitation
- *       「十一」）：LIVE GAS VERIFIED，全部真实写入路径确认。
+ *       write-time protection 那一轮工作（Known Limitation「十一」，即
+ *       _setPlainTextFormatForNewColumns_ 保护有生命周期上限那一条）被
+ *       LIVE GAS VERIFIED（Project State「五十七」～「五十九」）——两件
+ *       事不是同一回事，不要合并成"ADR-031 已完整验证"。
+ *     - due_time/due_datetime write-time 纯文本保护（同一条 Known
+ *       Limitation「十一」的修复）：LIVE GAS VERIFIED，全部真实写入路径
+ *       确认。
  *     - due_date 同一层保护：**未纳入**，13 行历史损坏数据仍未修复
- *       （Known Limitation「十三」，见「七、Known / Deferred Items」）。
+ *       （Known Limitation「十二」，见「七、Known / Deferred Items」；
+ *       不是「十三」——「十三」是 due_time 的历史时区精度问题，见下方
+ *       该条本身）。
  *     - Recurring Monthly Task Done→Next Occurrence 事故（2026-09-28）：
  *       已排查关闭，非系统 bug（用户操作层面的解释）。
  *   最后更新（本文件）：2026-09-28
@@ -267,8 +271,9 @@
 // ============================================================
 
 /**
- *   - Known Limitation「十三」：due_date 现存 13 行历史损坏数据
- *     （裸 Date 对象）。NO REPAIR AUTHORIZED，一直挂着。
+ *   - Known Limitation「十二」：due_date 现存 13 行历史损坏数据
+ *     （裸 Date 对象，Project State「六十」/「六十一」的真实审计确认）。
+ *     NO REPAIR AUTHORIZED，一直挂着。
  *
  *   - due_date 是否纳入跟 due_time/due_datetime 相同的写入时纯文本
  *     保护：已提议给 Carson，NEEDS DECISION，未决策，未改代码。
@@ -276,13 +281,13 @@
  *   - 13_ActiveTasksEngine.runDailyArchive：没有专门测试过（低风险，
  *     每日定时任务，不建议手动触发测试）。
  *
- *   - due_time 历史时区精度上限（Known Limitation「十一」补充）：
- *     Google Sheets 1899-12-30 序列日期锚点在新加坡/马来西亚 1899 年
- *     历史 UTC 偏移下（约 +6:55），读时校正一个已经被误判成 Date
- *     对象的 due_time 会产生约 65 分钟系统性偏差——这是"读时恢复"这条
- *     路径本身在这个时区下的精度上限，不是代码 bug，只影响"due_time
- *     已经被误判需要读时补救"这一种情况。是否处理、怎么处理，留给
- *     Carson。
+ *   - due_time 历史时区精度上限（Known Limitation「十三」，独立条目，
+ *     不是「十一」的补充——2026-09-20 新增）：Google Sheets 1899-12-30
+ *     序列日期锚点在新加坡/马来西亚 1899 年历史 UTC 偏移下（约 +6:55），
+ *     读时校正一个已经被误判成 Date 对象的 due_time 会产生约 65 分钟
+ *     系统性偏差——这是"读时恢复"这条路径本身在这个时区下的精度上限，
+ *     不是代码 bug，只影响"due_time 已经被误判需要读时补救"这一种情况。
+ *     是否处理、怎么处理，留给 Carson。
  *
  *   - Known Limitation「三」（2026-08-21 补充，Carson 提出）：
  *     22_PriorityEngine.suggestPriorityWithAI_() 的 prompt 和校验数组
