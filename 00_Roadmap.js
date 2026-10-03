@@ -7,7 +7,7 @@
  * 00_Known_Limitations.gs（已知问题）、00_ADR.gs（决策记录）。本文件跟
  * 00_Project_State.gs 一样是"快照"，每次更新覆盖旧内容，不是日志。
  *
- * LAST_UPDATED: 2026-09-28（Governance Synchronization Pass，纯文档
+ * LAST_UPDATED: 2026-09-30（Governance Synchronization Pass，纯文档
  * 同步，不涉及任何 runtime code / production data 改动）——上一次更新
  * 是 2026-07-13，中间横跨的真实交付（UI V2 Implementation Plan 全部
  * 5 个 Slice、Drag Ordering/UI-I6、ADR-2026-09-18-031 Project Deadline
@@ -106,7 +106,7 @@
  *       该条本身）。
  *     - Recurring Monthly Task Done→Next Occurrence 事故（2026-09-28）：
  *       已排查关闭，非系统 bug（用户操作层面的解释）。
- *   最后更新（本文件）：2026-09-28
+ *   最后更新（本文件）：2026-09-30
  */
 
 // ============================================================
