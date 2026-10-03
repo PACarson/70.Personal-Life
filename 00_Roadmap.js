@@ -252,14 +252,31 @@
  *     （21_RecurringEngine.gs → 09_IdempotencyManager.gs），长期目标
  *     是不再增加。
  *
- *   - Testing Coverage 缺口：V4 新增文件里 5 个纯函数 Engine 零测试
- *     覆盖，Architecture Review 唯一还没关闭的发现。UNKNOWN / NEEDS
- *     DECISION——没有在 Project State 后续记录里找到"已补齐"或"已
- *     决定暂缓+期限"的证据，需要 Carson 确认现状。
+ *   - Testing Coverage 缺口（2026-09-30 更正范围，此前这里把范围
+ *     写小了）：真实范围是 V4 原生 12 个文件零测试覆盖（含
+ *     10_ProjectionEngine/11_ProjectionRebuilder部分/12_TaskQueryEngine/
+ *     13_ActiveTasksEngine/15_Setup/20_TaskEngine/21_RecurringEngine/
+ *     22_PriorityEngine/23_SearchEngine/24_ViewEngine/25_DashboardEngine/
+ *     26_AnalyticsEngine）；Architecture Review 建议的优先顺序是先
+ *     22-26 这 5 个纯函数 Domain Engine（成本最低），再
+ *     12_TaskQueryEngine Contract Test，Application 层（20/13/09）最后——
+ *     5 这个数字说的是"优先处理哪 5 个"，不是"总共只缺 5 个"。
+ *     NEEDS DECISION——没有在 Project State 后续记录里找到"已补齐"或
+ *     "已决定暂缓+期限"的证据。22_PriorityEngine 的部分边界已经在
+ *     60_Tests_PriorityEngineBoundaries.gs 补了 2 类（见该文件/
+ *     Project State「六十三」），其余 10 个文件仍是 0。
  *
- *   - ActiveTasks 表维护了但查询路径从未真正读取（走 _readAllTasks_()
- *     全表扫描）：不紧急的性能优化，UNKNOWN / NEEDS DECISION，同样
- *     没找到后续处理记录。
+ *   - ActiveTasks 查询路径（2026-09-30 更正——此前这句话是从
+ *     2026-07-13 旧版本原样带过来、从未核实过，跟代码现状不符）：
+ *     `12_TaskQueryEngine._readActiveTasks_`已经存在，并且已经真实接入
+ *     `getTodayTasks`/`getTomorrowTasks`/`getWeekTasks`/`getMonthTasks`/
+ *     `getUpcomingTasks`/`getOverdueTasks`/`getRecurringTasks`这7个
+ *     非终态视图查询，外加一处`onlyNeedsActiveTasks`动态选择。仍然走
+ *     `_readAllTasks_`全表的（`getCancelledTasks`/`getArchivedTasksInline`/
+ *     search/`AnalyticsEngine.computeStatistics`）是结构性地需要
+ *     终态/历史数据，不是遗漏。这项原来设想的优化工作看起来已经完成，
+ *     NEEDS DECISION 的是要不要重新核实一遍确认真的没有遗漏、然后正式
+ *     从候选池移除，而不是继续当作"待做的优化"。
  *
  *   - 25_DashboardEngine.gs 返回纯文本而非结构化数据：待 Personal AI
  *     Core 真正需要消费时再处理，暂不需要现在动手。

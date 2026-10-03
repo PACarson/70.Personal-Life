@@ -3693,3 +3693,54 @@
  * DESIGN" 不等于"以后一定要做"，不自动产生 Priority implementation /
  * refactor / test / AI CRITICAL 任何新 roadmap item。
  */
+
+/**
+ * 六十四、Recurring Monthly Task Done→Next Occurrence 事故 —— CLOSED
+ *        （决定时间：本窗口更早阶段；正式写入本文件：2026-09-30）
+ *
+ * 补记说明：这条决定在本窗口里已经由 Carson 明确确认过，但当时只以聊天
+ * 文本形式交付给 Carson 自己贴回真实项目，没有被写进这份我维护的
+ * Project State 文件——这次做全窗口核对时发现这个缺口，现在补上，不是
+ * 这次新做的调查或新的结论，内容跟当时完全一致。
+ *
+ * Task: TSK-20260905-0D2575F4 —— 交房租
+ *   - Created: 2026-09-04
+ *   - recurring at creation: ""（从创建那一刻起就是空字符串，不是
+ *     09-25完成时才变空——两条Event之间没有任何TASK_UPDATED）
+ *   - recurring at completion: ""
+ *   - Completed: 2026-09-25
+ *   - RecurringEngine.spawnNextIfNeeded() 命中现有 guard：
+ *     `if (!task.recurring || !task.due_date) return null;`——第一行
+ *     就 return，没有任何 Logger 记录
+ *   - Result: no next occurrence created；Carson 09-26 手动创建了十月
+ *     那一条
+ *
+ * Conclusion（Carson 确认）：本次没有证据证明 RecurringEngine 存在
+ * bug。最合理解释是创建 Task 时没有选择 Monthly recurring；Carson 本人
+ * 认为存在忘记选择的可能。Root cause: not a system bug。
+ *
+ *   - RecurringEngine change: NO
+ *   - Create-path change: NO
+ *   - Historical data repair: NO
+ *   - Due-date migration: NO
+ *   - Production code changes: NO
+ *   - Production data changes: NO
+ *
+ * Create-path 只读代码审计（ui_index.html 表单元素/JS 取值时序/
+ * CFG.TASK_RECURRING 白名单/google.script.run 实际调用参数）当时全部
+ * 查过，没有发现代码缺口。
+ *
+ * 排查过程中另外发现、跟这次事故本身无关、独立存在、目前完全没有写进
+ * 任何 governance 文件的两处代码事实（只记录发现，这次 closure 不处理，
+ * 也不单方面升级成 Known Limitation——是否需要正式入档，留给 Carson 决定）：
+ *   (a) `RecurringEngine.spawnNextIfNeeded()`可能返回的
+ *       `{spawn_error:true,...}`信号，从`20_TaskEngine.completeTask()`
+ *       到`ui_completeTask()`到`ui_index.html`前端，没有任何一层真正
+ *       读取过它——不管续期是成功、静默失败还是报错失败，用户在 UI 上
+ *       看到的都是同一种"完成成功"。
+ *   (b) `09_TemporalParser.js`的 monthly 续期用
+ *       `d.setMonth(d.getMonth()+1)`，当 anchor day 在目标月份不存在时
+ *       （比如31号遇到30天的月份），JS Date 会静默溢出到下个月初——文件
+ *       自己的注释已经记录这是已知、未修的限制，不是这次新发现，这次
+ *       只是在排查这次事故时重新确认过一次。
+ */

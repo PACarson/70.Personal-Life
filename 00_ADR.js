@@ -2416,3 +2416,72 @@
  *   怎么处理，是一个新的、留给 Carson 判断的问题，不在本次授权范围
  *   内自行决定。
  */
+
+
+// ============================================================
+// ADR-2026-09-30-032：Priority Score Formula —— Reconciliation
+//                      Closed, NO DECISION MADE（非正式架构决定，记录
+//                      调查结论本身）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-09-30-032
+ * Status          : NOT A DECISION —— Investigated, Closed Unresolved
+ *                   by Design（这条不批准任何一套公式，也不否定任何
+ *                   一套公式；记录的是"调查过，证据不足以裁决，正式
+ *                   关闭、不继续猜测"这个治理动作本身）
+ * Decision Date   : (none —— 本条没有做出决定，这里不填决定日期）
+ * Record Date     : 2026-09-30
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 22_PriorityEngine.gs（computeUrgencyScore/
+ *                   computePriorityScore/suggestPriority/
+ *                   rankByPriority——本条不改动，仅记录现状）
+ * Related Records : Project State「六十三」（Priority Contract
+ *                   Reconciliation —— CLOSED / UNRESOLVED BY DESIGN，
+ *                   完整证据链、Evidence Matrix、Source-of-Truth
+ *                   Determination 全部记录在那一条，本条只做 ADR Log
+ *                   层面的索引，不重复展开）；00_Known_Limitations.gs
+ *                   「三」（2026-09-30 已单独纠正 suggestPriority()
+ *                   "能给到 CRITICAL" 这一处事实性错误，跟本条是两件
+ *                   独立的事，本条不重新打开那次纠正）。
+ *
+ * Context
+ *   22_PriorityEngine.js 当前生产实现（urgency×0.6+importance×0.4、
+ *   5段 urgency、固定 overdue=100、suggestPriority 70/40 阈值、不处理
+ *   recurring）跟 00_Command_Reference.gs 记录的公式（0.5/0.5、7段
+ *   urgency、overdue clamp(30)、recurring×0.9、100封顶、80/55/25阈值）
+ *   长期不一致。经两轮独立 read-only 调查（lineage + supersession
+ *   搜索），确认：
+ *     - 两边都找不到任何批准/决策记录（Sprint 1/3 正式交付范围和验收
+ *       测试清单都不含 PriorityEngine；没有任何 Priority 公式相关的
+ *       ADR）。
+ *     - 00_Command_Reference.gs 跟 00_Architecture_Review.gs 的
+ *       LAST_UPDATED 是同一天（2026-07-13），不是两个互相独立印证的
+ *       来源。
+ *     - 没有找到任何一边 supersede 另一边的记录。
+ *
+ * Decision
+ *   没有决定。本条正式记录"证据不足，不裁决"这个状态本身，防止未来
+ *   有人误以为"没有 ADR = 没人认真查过"。
+ *
+ * Consequences
+ *   - Current production implementation remains unchanged and is NOT
+ *     hereby approved as the canonical Priority Contract。
+ *   - Governance formula (00_Command_Reference.gs) also remains
+ *     unresolved and is NOT hereby approved as the canonical Priority
+ *     Contract。
+ *   - 22_PriorityEngine Boundary Test Coverage（
+ *     60_Tests_PriorityEngineBoundaries.gs）已完成的 2 类测试（No
+ *     due_date、Boundary day count）继续有效；Overdue clamp(30)、
+ *     Recurring discount、显式 Math.min(100) 这 3 类继续 BLOCKED BY
+ *     CONTRACT，不是 test infrastructure 问题。
+ *   - 不自动产生任何 Roadmap item（Priority implementation/refactor/
+ *     test/AI CRITICAL 均不因本条自动排期）。
+ *
+ * Reopen Condition
+ *   只有出现新的、明确的 decision / approval / supersession evidence
+ *   才重新打开——不因为测试还没写完、某套公式看起来更合理、Governance
+ *   文件看起来更完整、production code 已经运行很久、AI Priority 有
+ *   CRITICAL 问题、或新功能需要 Priority 而自动 reopen。
+ */
