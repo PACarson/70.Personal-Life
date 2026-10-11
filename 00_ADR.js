@@ -2485,3 +2485,240 @@
  *   文件看起来更完整、production code 已经运行很久、AI Priority 有
  *   CRITICAL 问题、或新功能需要 Priority 而自动 reopen。
  */
+
+// ============================================================
+// ADR-2026-10-06-033：Testing Coverage —— 23/24/25/26 Deterministic
+//                      Coverage 的 Scope、Contract Evidence Standard
+//                      与 Closure Decisions
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-10-06-033
+ * Status          : Accepted（范围仅限本 Work Item——"Testing Coverage:
+ *                   23 / 24 / 25 / 26 deterministic coverage"。不是项目级
+ *                   通用测试标准；是否推广，见 Consequences 里的 PENDING 项）
+ * Decision Date   : 2026-10-06（Carson 的 Scope Decision，以及随后的
+ *                   Human Decision & Closure）
+ * Record Date     : 2026-10-11（Carson 要求把本窗口已形成的决定持久化进
+ *                   ADR Log 时补记。Project State「六十五」当时写的
+ *                   "新增 ADR: NO"是 closure 当时的状态，不是错误——本条
+ *                   是之后才补记的，两者不矛盾）
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 23_SearchEngine / 24_ViewEngine / 25_DashboardEngine /
+ *                   26_AnalyticsEngine.gs ——只新增测试，Production 代码
+ *                   零改动；新增 61_Tests_SearchEngine.gs、
+ *                   62_Tests_ViewEngine.gs、63_Tests_DashboardEngine.gs、
+ *                   64_Tests_AnalyticsEngine.gs
+ * Related Records : Project State「六十五」（Closure Record 与测试结果）；
+ *                   00_Architecture_Review.gs Finding C1-1（测试覆盖缺口）；
+ *                   00_Roadmap.gs「六、Architecture Evolution」Testing
+ *                   Coverage 缺口；ADR-2026-09-30-032（Priority Contract
+ *                   ——本条不重新打开它）；Known Limitations「十四」
+ *                   「十五」「十六」「十八」
+ *
+ * Context
+ *   00_Architecture_Review.gs Finding C1-1（2026-07-11，MEDIUM）指出 V4
+ *   原生 12 个文件缺少测试覆盖，建议顺序是先 22–26 五个纯函数 Engine，
+ *   再 12_TaskQueryEngine Contract Test，Application 层最后；
+ *   00_Roadmap.gs 把它标成 NEEDS DECISION。2026-10-06，Carson 把
+ *   "Testing Coverage"授权为下一个 Work Item，先做 Pre-work Integrity
+ *   Gate，结果是 SCOPE MISMATCH：handoff「五」只有候选名字、没有 scope 和
+ *   验收边界；Roadmap"其余 10 个文件仍是 0"与现状不符（10/11/12/20 已有
+ *   集成层覆盖——按测试文件静态扫描所得，没有逐函数盘点）；
+ *   12_TaskQueryEngine 没有任何文件定义 Contract Test 应包含什么。因此
+ *   需要 Carson 先给出正式的 scope decision。
+ *
+ * Decision（Carson，2026-10-06。以下是对他 Scope Decision 与 Human
+ * Decision & Closure 两份指令的忠实记录，不含 assistant 自行增补的内容）
+ *
+ *   D1 Scope：只限 23_SearchEngine、24_ViewEngine、25_DashboardEngine、
+ *      26 号 Engine 的确定性纯函数 coverage。（Scope Decision 里写的是
+ *      "26_StatisticsEngine.js"，仓库里实际存在的是 26_AnalyticsEngine.js，
+ *      公开函数 computeStatistics；按他列出的覆盖点判断是同一个 Engine，
+ *      没有创建任何 StatisticsEngine 文件。）测试尽量固定 now、用 plain
+ *      in-memory data，不依赖真实 Sheet / 外部 API，不触发生产写入，不修改
+ *      Production Contract。
+ *
+ *   D2 Contract Evidence Standard（仅适用本 Work Item 的上述四个 Engine）：
+ *      不要求每个测试行为都有独立 ADR；如果 (1) Engine Contract / 文件头
+ *      说明、(2) 00_Command_Reference.gs、(3) 当前 Production Code 三者一致，
+ *      即视为本轮测试实施的充分行为证据。测试的目的是验证"已经存在且三者
+ *      一致"的行为，不是重新批准这些行为。三者出现实质冲突 → BLOCKED BY
+ *      CONTRACT / SCOPE，不得自行选择其中一个版本作为正确版本。
+ *
+ *   D3 Implementation Rule："Test existing behavior; do not invent
+ *      behavior."——任何 case 如果发现 Contract 含糊、Engine Contract 与
+ *      Command Reference 冲突、代码与文档冲突、需要真实 Sheet、需要外部
+ *      API、或会隐含地建立新 contract，则只 BLOCK 这一个 case，继续做无
+ *      歧义的 case，不因某个 case BLOCKED 而停止整个 Work Item。新测试文件
+ *      沿用现有编号规则；不重构现有测试，不修改已通过的历史测试（除非发现
+ *      明确的 factual/test defect）。
+ *
+ *   D4 Explicitly BLOCKED / OUT OF SCOPE（本 Work Item 内不实施）：
+ *      - Priority 全部维持现状：overdue clamp、recurring discount、显式
+ *        最终 clamp、rankByPriority() 排序行为断言、Today 多任务排序断言
+ *        （Priority Contract —— CLOSED / UNRESOLVED BY DESIGN，见
+ *        ADR-2026-09-30-032）
+ *      - 21_RecurringEngine：spawn_error、setMonth overflow 行为
+ *      - 12_TaskQueryEngine Contract Test（目前没有正式定义 contract
+ *        package，不得自行设计）
+ *      - Weekly Dashboard / Monthly Dashboard 的内容行为（原因：Pre-work
+ *        阶段发现"今日已完成"逻辑疑点、"即将到来 (7天内)"标签与实现 /
+ *        Command Reference 不一致，见 Known Limitations「十六」——先不通过
+ *        测试把其中任何一个行为固化成 contract）
+ *      - runDailyArchive、runDiagnostics、13、15、任何真实外部 API 测试
+ *
+ *   D5 Security Finding 处理规则：Test.gs 的 setupGeminiConfig 中疑似真实的
+ *      AI API credential——本 Work Item 内不复制、不打印、不修改 Test.gs、
+ *      不 rotate / revoke、不混入测试实施；只在报告里记录为"POTENTIAL
+ *      SECRET EXPOSURE — FOLLOW-UP REQUIRED"，并且明确写成"疑似"（是否真实、
+ *      是否 active 均未确认）。见 Known Limitations「十八」。
+ *
+ *   D6 Closure Decisions（Human Decision & Closure）：
+ *      (a) Priority 既有测试 testUrgencyScore_BoundaryDayCount_ 在
+ *          America/New_York 失败（既有 test helper 用 new Date('yyyy-MM-dd')
+ *          按 UTC 解析，在 UTC 以西时区可能发生日期偏移）——DEFERRED ——
+ *          NOT PART OF THIS WORK ITEM；不修改
+ *          60_Tests_PriorityEngineBoundaries、22_PriorityEngine、任何
+ *          timezone helper；保留为 KNOWN TEST INFRASTRUCTURE / TIMEZONE
+ *          FOLLOW-UP（见 Known Limitations「十五」）。
+ *      (b) CONVERTED / NOT_SELECTED 终态语义——BLOCKED —— CONTRACT
+ *          UNRESOLVED：Production code / 内部注释把它们视为终态，Command
+ *          Reference G2(a) 明确写的是 DONE / CANCELLED；不修改 Production /
+ *          Command Reference / Architecture Review，不修改测试去选版本，
+ *          不把这两个状态加进终态排除测试；保留 DONE / CANCELLED coverage；
+ *          未来要决定它们的语义，另行建立 decision（见 Known Limitations
+ *          「十四」）。
+ *      (c) Weekly / Monthly 的 build() routing 测试保留（只验证 dispatch，
+ *          不对 Dashboard 内容作任何 assertion）；Weekly / Monthly 内容行为
+ *          继续 BLOCKED。
+ *      (d) 接受 61–64 共 38 个新测试与 mutation verification 结果；不再增加
+ *          新的 test cases；不重新打开 Priority Contract。
+ *      (e) 最终状态 "TESTING COVERAGE — CLOSED FOR THIS SCOPE"，明确不等于
+ *          "ALL TESTING COVERAGE COMPLETE"：当前授权的 23 / 24 / 25 / 26
+ *          deterministic coverage scope 已完成；剩余项目因明确的 contract /
+ *          infrastructure / security follow-up 而保留。
+ *
+ * Consequences / Result
+ *   - 实现：61_Tests_SearchEngine（10）、62_Tests_ViewEngine（13）、
+ *     63_Tests_DashboardEngine（6）、64_Tests_AnalyticsEngine（9），共 38
+ *     个测试函数；Production / 已有测试 / 其它治理文件零改动（逐文件与上传
+ *     的项目 zip 比对确认）。
+ *   - Verification Level：SIM VERIFIED——通过 Node/vm shim 对真实、未修改的
+ *     Production 源文件执行，38/38 PASS（UTC、Asia/Taipei、
+ *     Pacific/Auckland、America/New_York 四个时区下，4 个新 gate 均通过）；
+ *     NOT LIVE GAS VERIFIED，没有在真实 Apps Script 环境里跑过。Mutation
+ *     verification：对 Production 临时副本做 10 处破坏性改动，新测试全部
+ *     检出（首轮 9/10，漏掉 ViewEngine.upcoming 的 23:59:59.999 精确边界，
+ *     补一个用例后 10/10）。
+ *   - 本条不批准任何被测行为为 contract：测试只是对"三方一致的现状"的回归
+ *     保护。Weekly / Monthly 内容、Priority、CONVERTED / NOT_SELECTED 语义
+ *     均没有因本条被固化。
+ *   - 不自动产生新的 Roadmap Work Item；Roadmap 的 Testing Coverage 状态
+ *     据此同步（见 00_Roadmap.gs「六」）。
+ *
+ * PENDING（尚未决定——不要当作已批准）
+ *   - D2 的"三方一致即足够证据"这条标准是否推广到本 Work Item 之外（例如
+ *     12_TaskQueryEngine 或 Application 层）：未决定。
+ *   - CONVERTED / NOT_SELECTED 终态语义：未决定。
+ *   - Priority 测试时区缺陷是否修、何时修：未决定（DEFERRED）。
+ *   - 疑似 credential 的核实与处理：未做（独立 follow-up，由 Carson 处理）。
+ *
+ * Reopen Condition
+ *   只有 Carson 发出新的、明确的 decision 才推进上面任何一个 PENDING 项；
+ *   不因"覆盖率看起来还不够"或"某个函数还没有测试"而自动补测试。
+ */
+
+// ============================================================
+// ADR-2026-10-11-034：EventDefinitions 拆分 / Event Vocabulary
+//                      Authority —— Investigated, OPEN, NO DECISION
+//                      MADE（非正式架构决定，记录调查结论与待决问题）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-10-11-034
+ * Status          : NOT A DECISION —— Investigated; Authority
+ *                   UNRESOLVED; Scope NOT YET AUTHORIZED; **OPEN**
+ *                   （跟 ADR-2026-09-30-032 不同：032 是"证据不足，正式
+ *                   关闭、不继续猜测"；本条没有关闭，而是调查完成后停在
+ *                   "需要 Carson 做 Human Decision"这个位置。本条不批准、
+ *                   也不否定任何 EventDefinitions 方案）
+ * Decision Date   : (none —— 本条没有做出决定，这里不填决定日期）
+ * Record Date     : 2026-10-11
+ * Investigation   : 2026-10-07 ~ 2026-10-08（日期由沙盒文件时间戳推断，
+ *                   不是 Carson 提供的日期）
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 02_EventBus.gs / 10_ProjectionEngine.gs（dispatch、
+ *                   TIMELINE_ENTITY_MAP）/ 00_Event_Flow.gs /
+ *                   00_Project_Constitution.gs 零之五——本条不改动，仅记录
+ *                   现状
+ * Related Records : Project State「六十六」（完整证据链、对账表、Evidence
+ *                   Citations，本条只做 ADR Log 层面的索引，不重复展开）；
+ *                   Roadmap「三」第 4 项；Known Limitations「十七」；
+ *                   ADR-2026-07-06-002（Schema Authority——原文不在本
+ *                   仓库，HISTORICAL REFERENCE UNVERIFIED）
+ *
+ * Context
+ *   handoff「五」候选项"EventDefinitions 拆分"。Carson 要求先做 Pre-work
+ *   Integrity Gate（不 coding、不改文件）→ 结果 SCOPE MISMATCH；随后要求
+ *   Event Vocabulary Authority Investigation（read-only）→ FINAL
+ *   RECONCILIATION COMPLETE。Roadmap / Constitution 里叫它
+ *   04_EventDefinitions.gs（Constitution 零之五写的是"目前不要求单独建"，
+ *   从未创建过）；Carson 的 Pre-work 指令里写的文件名 13_EventDefinitions.js
+ *   在仓库里不存在（13_ 是 13_ActiveTasksEngine）。
+ *
+ * Decision
+ *   没有决定。本条正式记录以下状态，防止未来误以为"调查过 = 已授权"：
+ *     Event Vocabulary Authority    : UNRESOLVED / NOT AUTHORIZED
+ *     04_EventDefinitions Authority : UNRESOLVED / NOT AUTHORIZED
+ *                                     （不是已批准的 architecture slot）
+ *     Implementation Authorization  : UNRESOLVED / NOT AUTHORIZED
+ *     Acceptance Scope              : UNRESOLVED / NOT AUTHORIZED
+ *     Trigger Standard              : UNRESOLVED（三套说法的出处与状态见
+ *                                     Project State「六十六」）
+ *
+ * Evidence Index（对账事实——不是 implementation requirement）
+ *   Published（EventBus.publish 字面量）29；Dispatcher
+ *   （10_ProjectionEngine.dispatch 的 case）29；Formal Documentation
+ *   （Standard 格式定义块）11；Timeline map 26；deriveFromEvent（6 个按
+ *   实体划分的函数合计）28。
+ *   Published − Formal Documentation = 19；Formal Documentation −
+ *   Published = 1（REMINDER_SENT，Source Module 为 Reminder OS 跨项目）；
+ *   Published − Dispatcher = REMINDER_REQUESTED；Dispatcher − Published =
+ *   REMINDER_SENT；Published − Timeline = NOTE_UPDATED、
+ *   REMINDER_REQUESTED、VIEW_ORDER_UPDATED；Published − 全部
+ *   deriveFromEvent = REMINDER_REQUESTED、VIEW_ORDER_UPDATED。
+ *   V5.0 ARCHIVE — NOT AVAILABLE / NOT VERIFIED。Roadmap 2026-09-28 记录的
+ *   "28 种"，重新核实（去注释后的字面量统计）是 29 种。
+ *
+ * Consequences
+ *   - 不创建 04_EventDefinitions 或任何 EventDefinitions 文件；不修改
+ *     00_Event_Flow / 02_EventBus / Timeline map / deriveFromEvent / 任何
+ *     publisher；不补 19 个事件的定义；不推导 payload。
+ *   - "29 / 11 / 19"是对账事实，"部分事件没有测试"是覆盖事实，都不自动转化为
+ *     implementation requirement 或 Roadmap Work Item。
+ *   - 发现的文档/代码不一致（TASK_UPDATED 第二个发布方、REMINDER_SENT 的写入
+ *     方说法、02_EventBus 文件头没有事件清单等）只记录，不修。
+ *
+ * PENDING HUMAN DECISIONS（assistant 整理的待决问题，不是已批准的决定）
+ *   P1 "拆分"具体指什么：带常量/registry 的代码文件？只有文档注释的文件？
+ *      补全 00_Event_Flow？还是其它？
+ *   P2 触发标准以哪一套为准（Constitution 的"02_EventBus 文件头放不下" /
+ *      Roadmap 的"事件类型数量 > 10" / handoff 的"数量 + 变化频率 + 消费方
+ *      数量"），或另定。
+ *   P3 谁是 Event Vocabulary 的 source of truth（Constitution 零之五 /
+ *      00_Event_Flow / 生产代码 / 新文件），以及跨项目事件（Core 的
+ *      Inventory 事件、Reminder OS 的 REMINDER_SENT）是否在范围内。
+ *   P4 19 个没有正式定义的已发布事件是否纳入范围；若纳入，payload 的证据
+ *      来源是什么（v5.0 存档不可得）。
+ *   P5 handoff 提到的"变化频率、消费方数量"两个维度的出处（"Decision
+ *      Brief"不在仓库里）是否仍然适用。
+ *   P6 对已记录的不一致（TASK_UPDATED 双发布方 vs "唯一发布方"；
+ *      REMINDER_SENT 写入方说法；02_EventBus 文件头）是否、何时、如何处理。
+ *
+ * Resolution Condition
+ *   只有 Carson 对上面的待决问题做出明确的 Human Decision，才进入下一阶段；
+ *   在那之前不 coding、不排期。
+ */

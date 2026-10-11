@@ -3744,3 +3744,362 @@
  *       自己的注释已经记录这是已知、未修的限制，不是这次新发现，这次
  *       只是在排查这次事故时重新确认过一次。
  */
+
+/**
+ * 六十五、Testing Coverage（23 / 24 / 25 / 26 Deterministic Coverage）
+ *        —— CLOSED FOR THIS SCOPE（2026-10-06）
+ *
+ * 编号说明：这是目前这份文件（截至「六十四」）的下一个顺序号，没有跳号、
+ * 没有覆盖任何已有条目。Roadmap 里目前没有引用这个编号，不需要跟着改。
+ *
+ * Status: CLOSED FOR THIS SCOPE
+ * Implemented Coverage: PASS
+ *
+ * 重要区分：CLOSED FOR THIS SCOPE ≠ ALL TESTING COVERAGE COMPLETE。
+ * 本条表示：当前授权的 23 / 24 / 25 / 26 deterministic coverage scope 已
+ * 完成；其余项目因明确的 contract / infrastructure / security follow-up
+ * 而保留。这不是整个项目 Testing Coverage 的永久完成。
+ *
+ * Source: handoff「五」候选项 Testing Coverage → Carson 2026-10-06 正式
+ * 授权为 Work Item；Scope Decision 把范围限定为 23_SearchEngine /
+ * 24_ViewEngine / 25_DashboardEngine / 26（实际文件名是
+ * 26_AnalyticsEngine.gs，Scope Decision 里写的 26_StatisticsEngine 指
+ * 同一个 Engine）的确定性纯函数。
+ *
+ * Evidence standard：Engine Contract / 文件头说明、00_Command_Reference.gs、
+ * 当前 Production Code 三者一致，视为测试实施的充分行为证据——测试验证
+ * 已存在且三者一致的行为，不是重新批准这些行为。
+ *
+ * Completed Coverage（逐文件结果）：
+ *   - 61_Tests_SearchEngine.gs       — 10/10 PASS
+ *   - 62_Tests_ViewEngine.gs         — 13/13 PASS
+ *   - 63_Tests_DashboardEngine.gs    —  6/6  PASS
+ *   - 64_Tests_AnalyticsEngine.gs    —  9/9  PASS
+ *   合计：38/38 new tests PASS。
+ *
+ * Verification Level：SIM VERIFIED。
+ *   通过一个不属于本仓库的最小 Node/vm shim，对真实、未修改的
+ *   Production 源文件完整执行过。NOT LIVE GAS VERIFIED——没有在真实
+ *   Apps Script 环境里跑过；这四个 Engine 本身是纯函数，不读写 Sheet。
+ *
+ * Mutation verification：已做并被 Carson 接受。对 Production 文件的
+ *   临时副本做了 10 处破坏性改动，新测试全部检出；首轮 9/10 检出，漏掉的
+ *   是 ViewEngine.upcoming 的"恰好 23:59:59.999"精确边界，补一个用例后
+ *   检出。变异只发生在临时副本上，不是真实文件。
+ *
+ * Production：No Production implementation was changed。
+ *   Runtime code changed: NO / Production data changed: NO / Schema
+ *   changed: NO / Tests executed: YES（Node/vm，SIM VERIFIED）/ 已有
+ *   测试文件改动: NO / 新增 ADR: NO / 新增 Roadmap Work Item: NO。
+ *
+ * Scope Boundary —— 本轮没有覆盖（DEFERRED / CONTRACT UNRESOLVED，不是
+ * Testing Coverage implementation failure）：
+ *   - Priority unresolved behavior（见「六十三」，Priority Contract
+ *     仍是 CLOSED / UNRESOLVED BY DESIGN，本条不重新打开）
+ *   - Recurring contract（21_RecurringEngine）
+ *   - TaskQuery Contract Test（12_TaskQueryEngine，目前没有正式定义的
+ *     contract package）
+ *   - Weekly Dashboard content behavior
+ *   - Monthly Dashboard content behavior
+ *   - CONVERTED / NOT_SELECTED terminal-state semantics
+ *   备注：63 里保留的 Weekly/Monthly 用例只验证
+ *   build('weekly'|'monthly') 是否 dispatch 到对应函数，不对这两个
+ *   Dashboard 的业务内容作任何 assertion，属于已授权的 build() routing
+ *   coverage。
+ *
+ * Preserved Follow-ups（三项相互独立，本条不解决）：
+ *
+ *   A. CONVERTED / NOT_SELECTED
+ *      Status: BLOCKED — CONTRACT UNRESOLVED
+ *      Production code / 24_ViewEngine 内部注释把这两个状态视为终态；
+ *      00_Command_Reference.gs G2(a) 明确写的是 DONE / CANCELLED。两者
+ *      存在 contract evidence mismatch，尚未做任何决定，不得自行选择其中
+ *      一个版本。62 只覆盖 DONE / CANCELLED 的终态排除，没有把这两个状态
+ *      加进任何测试。未来要决定它们的语义，另行建立 decision。
+ *
+ *   B. Priority Test Timezone Issue
+ *      Status: KNOWN TEST INFRASTRUCTURE / TIMEZONE FOLLOW-UP
+ *      60_Tests_PriorityEngineBoundaries.gs 的
+ *      testUrgencyScore_BoundaryDayCount_ 在 America/New_York 失败、在
+ *      UTC 通过；原因是既有 test helper 用 new Date('yyyy-MM-dd')（按
+ *      UTC 解析），在 UTC 以西时区可能发生日期偏移。60 未改动，
+ *      22_PriorityEngine.gs 未改动，本条不修复。
+ *
+ *   C. Potential Secret Exposure
+ *      Status: POTENTIAL SECRET EXPOSURE — FOLLOW-UP REQUIRED
+ *      涉及 Test.gs 的 setupGeminiConfig 里疑似真实的 AI API credential；
+ *      是否为真实、是否仍然 active 均未确认。credential 内容不在此记录。
+ *      本条不修改 Test.gs，也不 rotate / revoke。
+ *
+ * Integrity（只读核对，对照上传的项目 zip 逐文件比对）：Production 文件、
+ *   已有测试（含 60）、治理文件均无改动；本 Work Item 唯一新增的测试文件
+ *   是 61–64；本条是对这份 Project State 文件的唯一一次追加。
+ *
+ * 本条不在 00_Roadmap.gs 里新增或修改任何条目，不新增 ADR；各 follow-up
+ * 不因本 closure 自动 reopen 或自动产生新的 Work Item。
+ */
+
+/**
+ * 六十六、EventDefinitions 拆分 —— Pre-work Integrity Gate 与 Event
+ *        Vocabulary Authority Investigation（READ-ONLY）
+ *        —— OPEN：AUTHORITY UNRESOLVED / SCOPE NOT YET AUTHORIZED
+ *        （调查 2026-10-07 ~ 2026-10-08，日期由沙盒时间戳推断；
+ *         记录 2026-10-11）
+ *
+ * 编号说明：这是在"上传的项目 zip（2026-10-03 快照，最后一条是「六十四」）
+ * + 本窗口已交付的「六十五」"之后的下一个顺序号，没有跳号、没有覆盖任何
+ * 已有条目。如果 Carson 的真实项目在这之后还有别的窗口追加过条目，贴回前
+ * 先核对编号，不要覆盖。
+ *
+ * Status:
+ *   Pre-work Integrity Gate        : SCOPE MISMATCH（按 B 类同时归档为
+ *                                    SCOPE NOT YET AUTHORIZED）
+ *   Event Vocabulary Investigation : FINAL RECONCILIATION COMPLETE
+ *   Event Vocabulary Authority     : UNRESOLVED / NOT AUTHORIZED
+ *   04_EventDefinitions Authority  : UNRESOLVED / NOT AUTHORIZED
+ *   Implementation Authorization   : UNRESOLVED / NOT AUTHORIZED
+ *   Acceptance Scope               : UNRESOLVED / NOT AUTHORIZED
+ *   Trigger Standard               : UNRESOLVED
+ * 本条不是 EventDefinitions 的 closure——它仍是 Roadmap 候选，停在"等待
+ * Carson 的 Human Decision"，不是 Next Slice，不自动产生任何实施工作。
+ *
+ * Source / Authorization：handoff「五」候选项"EventDefinitions 拆分"。
+ * Carson 要求先做 Pre-work Integrity Gate（禁止 coding / 改文件），随后
+ * 要求 Event Vocabulary Authority Investigation，最后要求"收敛后停止，等待
+ * Human Decision"。全程 read-only。注意：Carson 指令里写的文件名是
+ * 13_EventDefinitions.js——该文件在仓库里不存在（13_ 是
+ * 13_ActiveTasksEngine）；治理文件里提的是 04_EventDefinitions.gs，同样
+ * 从未创建过。
+ *
+ * ── 一、Pre-work Gate 结论（为什么是 SCOPE MISMATCH）─────────────────
+ *   - handoff：「EventDefinitions 独立文件拆分——数量条件已满足（28种），
+ *     另外两个判断维度（变化频率、消费方数量）没有核实，没有开始。」
+ *   - Roadmap「三」第 4 项：04_EventDefinitions.gs，条件"事件类型数量 > 10"
+ *     已满足；明确写"满足条件不代表自动成为 Next Slice"。
+ *   - Constitution 零之五（第 490 行）：目前不要求单独建；如果以后事件类型
+ *     多到 02_EventBus.gs 文件头注释放不下，再考虑拆出独立文件。
+ *   - 代码现状：02_EventBus.js 文件头里根本没有事件类型清单（见「四」）。
+ *   - 没有 ADR / Project State / Architecture Review 的 decision 或
+ *     acceptance criteria；没有任何部分实现；没有 supersession 记录。
+ *
+ * ── 二、四层对账（去注释后重新核实；Layer 的定义见 ADR-2026-10-11-034）─
+ *   A. Published（生产代码里字面量 EventBus.publish）：29。没有非字面量
+ *      调用，也没有只在测试里发布的类型。
+ *   B. Dispatcher：02_EventBus.js 里没有任何事件类型分支，只在第 203 行调用
+ *      ProjectionEngine.dispatch(event)；真正的 dispatcher 是
+ *      10_ProjectionEngine.dispatch()（第 141 行起）：29 个 case，另有
+ *      default: break。
+ *   C. Formal Documentation（Standard 格式定义块，逐块核对 8 个字段齐全）：
+ *      11 = Constitution 零之五 5 个（TASK_CREATED / UPDATED / COMPLETED /
+ *      CANCELLED / REMINDER_SENT）+ 00_Event_Flow.gs 6 个（BUSINESS_RULE_
+ *      CREATED、WORKFLOW_TEMPLATE_CAPTURED / FROZEN / DEPRECATED、
+ *      WORKFLOW_INSTANCE_CREATED、PROJECT_CONVERTED_TO_TASK）。Constitution
+ *      「(三)」（第 932 行）只把"零之五 现行具体事件目录（v5.0 起新增/改名
+ *      部分）"转移给 00_Event_Flow.gs，后者只覆盖 v5.1 的 6 个。
+ *   D. Consumer / Projection（只是 consumer 证据，不是 canonical
+ *      vocabulary）：TIMELINE_ENTITY_MAP（10_ProjectionEngine.js 第 100 行
+ *      起）26 个 key；6 个按实体划分的 deriveFromEvent（Task 8 含
+ *      REMINDER_SENT、Project 6、Workflow 4、Note 4、Review 1、
+ *      BusinessRule 5）合计 28 个事件。部分覆盖是设计上的：
+ *      02_EventBus.js 第 251–254 行写明其余类型会落到 default 被忽略。
+ *      （此前口头说过"deriveFromEvent 只有 8 个 case"——那只是
+ *      20_TaskEngine 这一份，已更正。）
+ *   差集：
+ *      Published ∩ Dispatcher = 28；Published − Dispatcher =
+ *        {REMINDER_REQUESTED}；Dispatcher − Published = {REMINDER_SENT}
+ *      Published ∩ Formal = 10；Published − Formal = 19；
+ *        Formal − Published = {REMINDER_SENT}
+ *      Published − Timeline = {NOTE_UPDATED, REMINDER_REQUESTED,
+ *        VIEW_ORDER_UPDATED}；Timeline − Published = {}
+ *      Published − 全部 deriveFromEvent = {REMINDER_REQUESTED,
+ *        VIEW_ORDER_UPDATED}
+ *   Published − Formal 的 19 个：NOTE_ARCHIVED、NOTE_CONVERTED、
+ *   NOTE_CREATED、NOTE_UPDATED、PROJECT_ARCHIVED、PROJECT_CANCELLED、
+ *   PROJECT_COMPLETED、PROJECT_CREATED、PROJECT_UPDATED、
+ *   REMINDER_REQUESTED、REVIEW_GENERATED、TASK_CONVERTED_TO_NOTE、
+ *   TASK_CONVERTED_TO_PROJECT、TASK_NOT_SELECTED、VIEW_ORDER_UPDATED、
+ *   WORKFLOW_CANCELLED、WORKFLOW_FINISHED、WORKFLOW_STARTED、
+ *   WORKFLOW_UPDATED。其中 13 个被 00_Event_Flow.gs 头部点名为"v5.0 事件
+ *   （定义不变，见 v5.0 存档版本）"；另 6 个连这个声明都没有：
+ *   NOTE_ARCHIVED、NOTE_UPDATED、TASK_CONVERTED_TO_NOTE、
+ *   TASK_NOT_SELECTED、VIEW_ORDER_UPDATED、WORKFLOW_UPDATED。
+ *   Roadmap 2026-09-28 记录的"28 种"，重新核实是 29 种。
+ *
+ * ── 三、统一对账表（P=Published D=Dispatcher F=Formal Doc T=Timeline
+ *      R=任一 deriveFromEvent；† = 00_Event_Flow 头部点名为 v5.0 事件）──
+ *   Event                          P D F T R   备注
+ *   BUSINESS_RULE_CREATED          ✓ ✓ ✓ ✓ ✓
+ *   NOTE_ARCHIVED                  ✓ ✓ — ✓ ✓   无 † 声明
+ *   NOTE_CONVERTED                 ✓ ✓ — ✓ ✓   †
+ *   NOTE_CREATED                   ✓ ✓ — ✓ ✓   †
+ *   NOTE_UPDATED                   ✓ ✓ — — ✓   无 † 声明；不在 map，未找到理由
+ *   PROJECT_ARCHIVED               ✓ ✓ — ✓ ✓   †
+ *   PROJECT_CANCELLED              ✓ ✓ — ✓ ✓   †
+ *   PROJECT_COMPLETED              ✓ ✓ — ✓ ✓   †
+ *   PROJECT_CONVERTED_TO_TASK      ✓ ✓ ✓ ✓ ✓
+ *   PROJECT_CREATED                ✓ ✓ — ✓ ✓   †
+ *   PROJECT_UPDATED                ✓ ✓ — ✓ ✓   †；同模块 2 处发布
+ *   REMINDER_REQUESTED             ✓ — — — —   †；43_ReminderConnector 2 处
+ *   REMINDER_SENT                  — ✓ ✓ — ✓   本仓库无发布点；Reminder OS
+ *   REVIEW_GENERATED               ✓ ✓ — ✓ ✓   †
+ *   TASK_CANCELLED                 ✓ ✓ ✓ ✓ ✓
+ *   TASK_COMPLETED                 ✓ ✓ ✓ ✓ ✓
+ *   TASK_CONVERTED_TO_NOTE         ✓ ✓ — ✓ ✓   无 † 声明
+ *   TASK_CONVERTED_TO_PROJECT      ✓ ✓ — ✓ ✓   †
+ *   TASK_CREATED                   ✓ ✓ ✓ ✓ ✓
+ *   TASK_NOT_SELECTED              ✓ ✓ — ✓ ✓   无 † 声明
+ *   TASK_UPDATED                   ✓ ✓ ✓ ✓ ✓   两个发布方（见「四」）
+ *   VIEW_ORDER_UPDATED             ✓ ✓ — — —   无 † 声明；Timeline 有意排除
+ *   WORKFLOW_CANCELLED             ✓ ✓ — ✓ ✓   †
+ *   WORKFLOW_FINISHED              ✓ ✓ — ✓ ✓   †
+ *   WORKFLOW_INSTANCE_CREATED      ✓ ✓ ✓ ✓ ✓
+ *   WORKFLOW_STARTED               ✓ ✓ — ✓ ✓   †
+ *   WORKFLOW_TEMPLATE_CAPTURED     ✓ ✓ ✓ ✓ ✓
+ *   WORKFLOW_TEMPLATE_DEPRECATED   ✓ ✓ ✓ ✓ ✓
+ *   WORKFLOW_TEMPLATE_FROZEN       ✓ ✓ ✓ ✓ ✓
+ *   WORKFLOW_UPDATED               ✓ ✓ — ✓ ✓   无 † 声明；同模块 2 处发布
+ *   合计                           29 29 11 26 28
+ *   VIEW_ORDER_UPDATED 不在 Timeline map：有意排除，见
+ *   10_ProjectionEngine.js 第 130–136 行注释与 00_Drag_Ordering_ADR.gs
+ *   第 698–701 行；REMINDER_SENT 同样不在 map（同一先例）。
+ *
+ * ── 四、文档与代码的不一致（只记录，不修，不裁决）─────────────────────
+ *   M1 事件清单在哪里：Constitution P4 映射（第 720–724 行）说"Event
+ *      Definitions → 02_EventBus.gs 文件头注释里的事件类型清单（5 个）"；
+ *      00_Architecture.gs 第 182 行说"文件头新增事件类型清单，完整规格见
+ *      00_Event_Flow.gs"；00_File_Map.gs 第 51–52 行说"新增 15 个事件类型的
+ *      文件头文档"。实际 02_EventBus.js 第 1–65 行的文件头（标题仍是
+ *      Productivity OS v4.6）没有清单，只在第 32 行顺带点了 4 个名字
+ *      （TASK_CREATED/COMPLETED/CANCELLED/REMINDER_SENT，没有
+ *      TASK_UPDATED）；整个文件没有 switch / case / 类型校验。5 个事件的
+ *      正式定义实际在 Constitution 零之五（第 513–589 行）。分类：
+ *      documentation mismatch（设计包 v5.0/v5.1 的计划没有在文件头落地；
+ *      是被放弃还是没做，没有记录，无法判断）。不是 production mismatch。
+ *   M2 TASK_UPDATED：Constitution 第 553–554 行写 Source Module 是
+ *      20_TaskEngine.updateTask（"唯一发布方，不经过 IdempotencyManager"）；
+ *      实际发布点有两处：20_TaskEngine.js 第 334 行（updateTask，source 标签
+ *      'TaskEngine'）和 28_WorkflowEngine.js 第 272 行
+ *      （handleBranchResolution_，WAITING policy，source 标签
+ *      'WorkflowEngine'，payload 为 task_id、status:'WAITING'、
+ *      updated_time）。两边公共字段只有 task_id 和 updated_time；status 只
+ *      出现在 Workflow 那一边；Constitution 的 payload 清单既没有 status 也
+ *      没有 updated_time。没有找到解释第二发布方的治理记录——
+ *      ADR-2026-07-24-008（Branch Workflow）只定义 WAITING 这个 policy，
+ *      没提事件发布；唯一说明是 28 里的代码注释（称其为"例外"）。
+ *      分类：documentation mismatch（正式定义早于 Workflow Engine，没有
+ *      更新）；该例外是否有意，没有治理记录。
+ *   M3 REMINDER_REQUESTED：43_ReminderConnector.js 第 48、66 行两处发布；
+ *      没有 dispatcher case、没有 Timeline map 条目、没有任何
+ *      deriveFromEvent 分支、没有 Standard 格式定义（只在 00_Event_Flow
+ *      头部被点名）；其它文档里有非 Standard 格式的描述
+ *      （00_Architecture_Review_ProjectWorkflow_Reminder_Integration.gs、
+ *      00_Implementation_Plan_TaskReminder_EventConsumer.gs、
+ *      00_Domain_Boundary.gs 第 240 行附近："只发布 REMINDER_REQUESTED"）；
+ *      36_Tests_Sprint3Acceptance.js 第 278–280 行的注释说它不该出现在本项目
+ *      Timeline。本记录不判断它是否"应该"有 dispatcher case。
+ *   M4 REMINDER_SENT：有正式定义（Constitution 第 580–589 行，Source
+ *      Module 为 Reminder OS 跨项目）、有 dispatcher case
+ *      （10_ProjectionEngine.js 第 149 行）、有 deriveFromEvent 分支
+ *      （20_TaskEngine.js 第 706 行）；本仓库没有发布点，也不在 Timeline
+ *      map——这不是错误。但治理文字对"谁写入"的说法没有被调和：定义块说
+ *      Source Module 是 Reminder OS；Constitution P3（第 666 行）说"本项目
+ *      只追加自己的 TASK_ 开头和 REMINDER_SENT 事件"；02_EventBus.js 第
+ *      32–34 行说这份文件是 Task/Reminder 事件唯一的写入路径。可能只是
+ *      "source module"与"写入路径"的用词差异，没有任何文件说明，无法判断。
+ *      Events 表还是共享表：Core 的 Inventory 事件也写在同一张表里，不在本
+ *      仓库的词汇范围内。
+ *
+ * ── 五、触发标准（"何时拆 EventDefinitions"）有三套说法，没有唯一 authority ─
+ *   - Constitution 零之五（第 490 行）：事件类型多到 02_EventBus.gs 文件头
+ *     注释放不下，再考虑拆出。出处：V4.3（日期没有记录，早于
+ *     2026-07-06）；是标准文本，用词是"考虑"，不是批准的决定；Constitution
+ *     「(五)」对账表只管"栏位格式"（STILL CURRENT）和"具体事件清单"
+ *     （AUTHORITY TRANSFERRED），没有覆盖这句触发条件；它的前提（文件头里有
+ *     清单）与代码不符（M1）。
+ *   - Roadmap「三」第 4 项：事件类型数量 > 10。"原定阈值"出自 2026-07-13 的旧
+ *     版 Roadmap，旧版不在仓库里，来源无法核实；Roadmap 自称是候选清单。
+ *   - handoff（2026-09-30）：数量条件满足，另需"变化频率、消费方数量"。出处
+ *     是"Next Work Item Decision Brief"，不在仓库里；仓库里治理文件没有这两个
+ *     维度的原文，只有 ADR-2026-07-06-002 里 04_Schema.gs 拆分条件的二手
+ *     引用（00_Architecture_Review.gs 第 1100、1224 行，只引用了三个条件中的
+ *     一个："半年内变化 3 次以上"）。
+ *   TRIGGER STANDARD — UNRESOLVED。
+ *
+ * ── 六、Historical References（无法验证，不猜内容）────────────────────
+ *   - ADR-2026-07-06-002（Schema Authority）：HISTORICAL REFERENCE NOT
+ *     FOUND。00_ADR.js 是 Life OS v5.2 的 ADR Log，编号从
+ *     ADR-2026-07-24-001 起，没有任何 2026-07-06 条目（第 148 行把
+ *     "Productivity OS ADR-2026-07-06"当作外部引用）。仅存二手引用：
+ *     Constitution V4.3 变更说明（第 55 行）、00_Data_Ownership.gs 第 16 行
+ *     （Events 表唯一写入者是 02_EventBus.gs——这是表的写入权，不是事件
+ *     词汇权）、00_Architecture_Review.gs 第 1099、1224 行（04_Schema.gs 拆分
+ *     条件）。没有一条二手引用说它定义了 Event Schema / Event Vocabulary 的
+ *     authority；没有 supersession 记录，只有"延伸"。
+ *   - V5.0 ARCHIVE — NOT AVAILABLE / NOT VERIFIED：仓库里没有名字含 v5 /
+ *     archive / 存档的文件；只有 00_ADR.js 第 18 行和 00_Event_Flow.js 第 16
+ *     行引用它；任何文件里都没有这些 v5.0 事件的标准格式定义块。Apps Script
+ *     Library 与 zip / handoff 之外的历史资料本次无法访问。不据此推导 19 个
+ *     事件的 payload。
+ *   - 04_EventDefinitions 槽位：全仓库只出现两次（Constitution 第 490 行
+ *     "目前不要求单独建"；Roadmap 第 170 行候选 + 条件）。没有 ADR、没有
+ *     保留编号的证据、没有取消/改号的证据；04 是 01–29 里唯一缺号，
+ *     00_File_Map.gs 的编号策略没有提到它；另有 04_Schema.gs（仅
+ *     Architecture Review 里的假设）和 04_Main.gs（Core 项目的文件）两个
+ *     同前缀名字。结论：只是 planning placeholder，没有被批准过。
+ *
+ * ── 七、现有测试对事件词汇的覆盖（静态扫描，未运行 GAS 测试）─────────
+ *   - 没有 EventDefinitions 测试、事件词汇 / registry / dispatcher 词汇 /
+ *     "已文档化事件清单"测试。
+ *   - 直接按类型断言 Events 表：只有 54_Tests_TaskToNoteConversion.js
+ *     （getAllEvents，第 192、241 行）断言恰好 1 条 TASK_CONVERTED_TO_NOTE，
+ *     并做 deriveFromEvent 重放一致性检查。
+ *   - 断言 Timeline 的 event_type：35（PROJECT_CREATED）、36
+ *     （TASK_CONVERTED_TO_PROJECT；REMINDER_REQUESTED 不应出现在 Timeline，
+ *     只是警告）。39 把 TASK_CREATED / TASK_UPDATED 当夹具喂给
+ *     deriveFromEvent。
+ *   - 按函数名静态追踪，没有任何测试触达：NOTE_ARCHIVED、REVIEW_GENERATED、
+ *     WORKFLOW_CANCELLED；REMINDER_SENT 本仓库没有发布点。这只是 coverage
+ *     事实，不自动转化为"必须补测试"。
+ *
+ * ── 八、Final Answers（Carson 要求的四个问题）──────────────────────
+ *   Q1 是否存在已证明的 single authoritative Event Vocabulary source？
+ *      NO。格式规范的 authority 是 Constitution 零之五；具体清单名义上转给
+ *      00_Event_Flow.gs，但它只有 6 个且指向不可得的存档；生产代码是唯一的
+ *      完整枚举，但那是事实，不是 contract。
+ *   Q2 是否存在已批准的 04_EventDefinitions architecture slot？ NO。
+ *   Q3 是否有足够 governance authority 开始建立 EventDefinitions？ NO。
+ *   Q4 是否可以定义可靠的 EventDefinitions acceptance scope？ NO。
+ *
+ * ── 九、PENDING HUMAN DECISIONS（assistant 整理，不是已批准的决定）─────
+ *   P1 "拆分"指什么；P2 触发标准以哪套为准；P3 谁是 source of truth、跨项目
+ *   事件是否在范围内；P4 19 个无正式定义的事件是否纳入、payload 的证据来源；
+ *   P5 handoff 的"变化频率、消费方数量"两个维度出处与适用性；P6 对 M1–M4
+ *   是否、何时、如何处理。逐条措辞见 ADR-2026-10-11-034。
+ *
+ * ── 十、Integrity、与「六十五」的关系、本次同步写入的治理记录 ───────────
+ *   Runtime code changed: NO / Production data changed: NO / Schema
+ *   changed: NO / 新增测试: NO / Tests executed: 只有调查用的 Node/vm 一次性
+ *   探针（不在仓库里）/ EventDefinitions 相关文件创建: NO。
+ *   本次 Checkpoint 持久化（Carson 要求把本窗口已形成的决定写进治理文件，
+ *   2026-10-11）同时写入：ADR-2026-10-06-033（Testing Coverage 的 scope、
+ *   证据标准与 closure 决定）、ADR-2026-10-11-034（本条调查的 NOT A
+ *   DECISION / OPEN 记录）、Known Limitations「十四」至「十八」、Roadmap
+ *   「三」第 4 项 / 「六」Testing Coverage / 「七」的状态同步。「六十五」
+ *   当时写的"新增 ADR: NO / 不在 Roadmap 里新增或修改任何条目"描述的是
+ *   closure 当时的状态，不是错误；它之后才有 ADR-033 和 Roadmap 同步，两者
+ *   不矛盾。本窗口较早还有一次 00_Roadmap.gs 的 Metadata Sync（Carson 授权
+ *   的最小修改：LAST_UPDATED 与第 109 行日期；第 18 行"至「六十二」"是对
+ *   2026-09-28 那一轮依据范围的历史描述，刻意保留）。
+ *   Handoff：00_Session_Handoff_Checkpoint_2026-10-11.gs。
+ *
+ * Evidence Citations（以上行号均对照 2026-10-03 zip 快照逐条核对过）：
+ *   00_Project_Constitution.gs 第 490、513–589、553–554、580、666、
+ *   720–724、932、1003 行；00_Architecture.gs 第 182 行；00_File_Map.gs 第
+ *   51–52 行；00_Event_Flow.gs 第 16 行；00_ADR.gs 第 18、148 行；
+ *   02_EventBus.gs 第 3、32–34、203、251–254 行；10_ProjectionEngine.gs 第
+ *   100–137、130–136、141、149 行；20_TaskEngine.gs 第 334、706 行；
+ *   28_WorkflowEngine.gs 第 244、272 行；43_ReminderConnector.gs 第 48、66
+ *   行；00_Drag_Ordering_ADR.gs 第 698–701 行；00_Architecture_Review.gs 第
+ *   1099–1101、1224 行；36_Tests_Sprint3Acceptance.gs 第 278–280 行；
+ *   54_Tests_TaskToNoteConversion.gs 第 192、241 行。
+ */

@@ -7,7 +7,20 @@
  * 00_Known_Limitations.gs（已知问题）、00_ADR.gs（决策记录）。本文件跟
  * 00_Project_State.gs 一样是"快照"，每次更新覆盖旧内容，不是日志。
  *
- * LAST_UPDATED: 2026-09-30（Governance Synchronization Pass，纯文档
+ * LAST_UPDATED: 2026-10-11（Checkpoint 治理持久化，纯文档同步，不涉及任何
+ * runtime code / production data 改动）——本次只同步三处状态：(1)「三」第 4
+ * 项 EventDefinitions：Pre-work Gate + Event Vocabulary Authority
+ * Investigation 已完成，Authority UNRESOLVED / SCOPE NOT YET AUTHORIZED
+ *（Project State「六十六」、ADR-2026-10-11-034）；(2)「六」Testing Coverage
+ * 缺口：23/24/25/26 deterministic coverage 已 CLOSED FOR THIS SCOPE
+ *（Project State「六十五」、ADR-2026-10-06-033）；(3)「七」新增对 Known
+ * Limitations「十四」至「十八」的状态索引。其余条目没有因本次重新审查——
+ * LAST_UPDATED 只表示本文件最后一次被改动的日期，不代表每一项内容都在当天
+ * 重新核实过。下面"全文依据 00_Project_State.gs 真实记录（至「六十二」，
+ * 2026-09-28）"这句是对 2026-09-28 那一轮依据范围的历史描述，刻意保留，
+ * 没有机械替换成「六十六」。
+ *
+ * PREVIOUS_UPDATE: 2026-09-30（Governance Synchronization Pass，纯文档
  * 同步，不涉及任何 runtime code / production data 改动）——上一次更新
  * 是 2026-07-13，中间横跨的真实交付（UI V2 Implementation Plan 全部
  * 5 个 Slice、Drag Ordering/UI-I6、ADR-2026-09-18-031 Project Deadline
@@ -106,7 +119,7 @@
  *       该条本身）。
  *     - Recurring Monthly Task Done→Next Occurrence 事故（2026-09-28）：
  *       已排查关闭，非系统 bug（用户操作层面的解释）。
- *   最后更新（本文件）：2026-09-30
+ *   最后更新（本文件）：2026-10-11
  */
 
 // ============================================================
@@ -174,6 +187,18 @@
  *      VIEW_ORDER_UPDATED），远超原定阈值。这是四项里唯一一个"条件已
  *      客观满足"的候选，但满足条件不代表自动成为 Next Slice——是否
  *      现在做、什么时候做，仍然是 Carson 的选择。
+ *      【2026-10-11 状态更新】Pre-work Integrity Gate + Event Vocabulary
+ *      Authority Investigation（read-only）已完成，结论：SCOPE NOT YET
+ *      AUTHORIZED / Event Vocabulary Authority UNRESOLVED——没有已批准的
+ *      "04_EventDefinitions"architecture slot（Constitution 零之五写的是
+ *      "目前不要求单独建"，从未创建过，也没有 ADR）；"何时拆"有三套互相不一
+ *      致的说法（Constitution："02_EventBus 文件头放不下"；本条上面的："事件
+ *      类型数量 > 10"；handoff："数量 + 变化频率 + 消费方数量"），TRIGGER
+ *      STANDARD — UNRESOLVED；上面的"28 种"重新核实为 29 种（去注释后的字面
+ *      量统计）；仓库里没有名为 13_EventDefinitions 的文件（13_ 是
+ *      13_ActiveTasksEngine）。仍然只是候选，不是 Next Slice，不自动产生
+ *      任何实施工作。待 Carson 决定的问题见 ADR-2026-10-11-034 的 PENDING
+ *      HUMAN DECISIONS，完整证据见 Project State「六十六」。
  *
  *   另外两项不在 2026-07-13 旧列表里，但同样是 Project State 明确记录
  *   的候选：
@@ -265,6 +290,18 @@
  *     "已决定暂缓+期限"的证据。22_PriorityEngine 的部分边界已经在
  *     60_Tests_PriorityEngineBoundaries.gs 补了 2 类（见该文件/
  *     Project State「六十三」），其余 10 个文件仍是 0。
+ *     【2026-10-11 状态更新——上面这句"其余 10 个文件仍是 0"已过期】
+ *     23_SearchEngine / 24_ViewEngine / 25_DashboardEngine /
+ *     26_AnalyticsEngine 的确定性纯函数 coverage 已由 61–64 四个测试文件
+ *     （共 38 个测试，SIM VERIFIED，非 LIVE GAS VERIFIED）完成，状态
+ *     CLOSED FOR THIS SCOPE（Project State「六十五」、ADR-2026-10-06-033）；
+ *     这不等于 ALL TESTING COVERAGE COMPLETE。仍未覆盖且各有明确原因：
+ *     12_TaskQueryEngine Contract Test（没有正式 contract package）、
+ *     21_RecurringEngine（spawn_error / setMonth 未决）、Weekly/Monthly
+ *     Dashboard 内容（Known Limitation「十六」）、22_PriorityEngine 的 3 类
+ *     边界（ADR-2026-09-30-032）、CONVERTED / NOT_SELECTED 终态语义
+ *     （Known Limitation「十四」）。另外：10/11/12/20 并非"零覆盖"——35/36/
+ *     38/39/51/53–59 里有集成层覆盖（按测试文件静态扫描，不是逐函数盘点）。
  *
  *   - ActiveTasks 查询路径（2026-09-30 更正——此前这句话是从
  *     2026-07-13 旧版本原样带过来、从未核实过，跟代码现状不符）：
@@ -321,4 +358,18 @@
  *     已经不重要，没有证据支持任何一种判断）：
  *       (a) 19_BusinessRuleQueryEngine.gs 缺"列出全部 Template"读接口；
  *       (b) 28_WorkflowEngine.gs 缺 updateWorkflow。
+ *
+ *   - Known Limitations「十四」至「十八」（2026-10-11 新增，只记录状态，不代表
+ *     启动处理；均没有 Carson 的处理决定）：
+ *       十四 CONVERTED / NOT_SELECTED 是否算终态——代码与 Command Reference
+ *            G2(a) 措辞不一致，BLOCKED — CONTRACT UNRESOLVED；
+ *       十五 60_Tests_PriorityEngineBoundaries 的日期 helper 在 UTC 以西时区
+ *            偏一天，DEFERRED（KNOWN TEST INFRASTRUCTURE / TIMEZONE
+ *            FOLLOW-UP）；
+ *       十六 Weekly/Monthly Dashboard 内容两处疑点（"今日已完成"恒为 0、
+ *            "即将到来 (7天内)"无 7 天上限），未修，只记录；
+ *       十七 Event Vocabulary 的治理空白与不一致，OPEN（见「三」第 4 项、
+ *            ADR-2026-10-11-034）；
+ *       十八 Test.gs 的 setupGeminiConfig 疑似凭证暴露，FOLLOW-UP REQUIRED
+ *            （独立 follow-up，凭证内容不记录）。
  */

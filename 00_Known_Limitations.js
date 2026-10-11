@@ -851,3 +851,148 @@
  * 本身对这个时区有精度上限"这个事实，决定要不要处理、怎么处理，
  * 留给 Carson。
  */
+
+// ============================================================
+// 十四、CONVERTED / NOT_SELECTED 是否属于"终态"——代码与 Command
+//     Reference 的措辞不一致，BLOCKED —— CONTRACT UNRESOLVED
+//     （2026-10-11 记录；来自 Testing Coverage 的 Human Decision，
+//     2026-10-06）
+// ============================================================
+
+/**
+ * 事实（只记录，不修，不裁决）：
+ *   - 24_ViewEngine.js 的 `_isNonTerminal_`（第 79–82 行）把 DONE、
+ *     CANCELLED、CONVERTED、NOT_SELECTED 四个状态都当作终态排除；它上方的
+ *     注释说明这是 2026-09-02 Slice 2 的"防御性收紧"——现有调用路径下
+ *     projectTaskConvertedToProject_ / projectTaskNotSelected_ 已经把这两种
+ *     状态的 Task 从 ActiveTasks 物理删除，所以今天在七个高频视图里观察不到
+ *     泄漏。
+ *   - 00_Command_Reference.gs G2(a)（第 69–71 行）对同一批视图的描述是
+ *     "一律排除 status=DONE 或 CANCELLED"，并且点名引用 `_isNonTerminal_`
+ *     作为实现位置，没有提到 CONVERTED / NOT_SELECTED。
+ *   - 没有找到任何 decision 说明以哪一边为准。
+ *
+ * 状态：BLOCKED —— CONTRACT UNRESOLVED（Carson 2026-10-06 的 Human
+ * Decision）。不得自行选择其中一个版本；不修改 Production / Command
+ * Reference / Architecture Review；62_Tests_ViewEngine 只覆盖 DONE /
+ * CANCELLED 的终态排除，没有把这两个状态加进任何测试。未来要决定它们的
+ * 语义，另行建立 decision。记录见 ADR-2026-10-06-033 D6(b)、Project State
+ * 「六十五」。
+ */
+
+// ============================================================
+// 十五、60_Tests_PriorityEngineBoundaries 的日期 helper 在 UTC 以西
+//     时区会偏一天（KNOWN TEST INFRASTRUCTURE / TIMEZONE FOLLOW-UP，
+//     DEFERRED，2026-10-11 记录）
+// ============================================================
+
+/**
+ * 事实：
+ *   - `_pebDatePlusDays_`（60_Tests_PriorityEngineBoundaries.js 第 54–58
+ *     行）用 `new Date('yyyy-MM-dd')` 解析日期字符串（按 UTC 零点解析），
+ *     再用本地 setDate、按 Session 脚本时区格式化；在 UTC 以西的时区，UTC
+ *     零点对应前一天的本地日期，于是"今天 + N 天"会偏一天。
+ *   - Node/vm 模拟（SIM）里：TZ=America/New_York 时
+ *     testUrgencyScore_BoundaryDayCount_ FAIL；TZ=UTC、Asia/Taipei、
+ *     Pacific/Auckland 时 PASS。没有在真实 GAS 里复现——只有真实脚本时区是
+ *     UTC 以西才可能受影响（这是推断，未验证；「十三」里提到的格式化时区是
+ *     Asia/Singapore）。
+ *   - 这是既有测试自己的基础设施缺陷，不是 22_PriorityEngine 的问题。
+ *
+ * 状态：DEFERRED —— NOT PART OF THIS WORK ITEM（Carson 2026-10-06）。
+ * 不修改 60_Tests_PriorityEngineBoundaries、22_PriorityEngine、任何时区
+ * helper；新增的 61–64 测试不受影响（SIM 里四个时区下均 PASS）。记录见
+ * ADR-2026-10-06-033 D6(a)。
+ */
+
+// ============================================================
+// 十六、Weekly / Monthly Dashboard 的内容有两处疑点——静态阅读发现，
+//     Node 模拟复现，未修复，仅记录（2026-10-11）
+// ============================================================
+
+/**
+ * 背景：见「三」——buildWeeklyDashboard / buildMonthlyDashboard 是 Internal
+ * Capability，目前没有 Telegram 指令路由到它们（/dashboard 只接 'today'），
+ * 所以下面两点今天不会被最终用户直接看到。
+ *
+ * 观察（针对 25_DashboardEngine.js 的 buildWeeklyDashboard，第 122–135 行）：
+ *   1. "今日已完成"：用 `ViewEngine.today(allTasks)` 的结果再过滤
+ *      status === 'DONE'；但 `today()` 内部走 `_isNonTerminal_`，已经把 DONE
+ *      排除，所以这个过滤结果恒为空，该行永远是 0。Node 模拟里：1 个今天
+ *      到期且已 DONE 的任务 → "今日已完成: 0"。
+ *   2. "即将到来 (7天内)"：标签写 7 天内，但调用的 `ViewEngine.upcoming()`
+ *      没有 7 天上限（只要求严格晚于今天 23:59:59.999）；Command Reference
+ *      V4（第 120–123 行）对 upcoming 的定义也没有上限。Node 模拟里 20 天后
+ *      到期的任务被计入"即将到来 (7天内): 1"。
+ *   （Monthly Dashboard 本次没有做同样的逐项核对。）
+ *
+ * 状态：只是观察，没有裁决哪一边是"正确行为"，没有修改任何代码。验证方式
+ * 只有静态阅读和 Node/vm 模拟（SIM），不是 LIVE GAS VERIFIED。
+ * 63_Tests_DashboardEngine 对 Weekly / Monthly 只验证 build() 的 dispatch，
+ * 不对内容作任何 assertion（Carson 2026-10-06：先不要通过测试把其中任何一个
+ * 行为固化成 contract）。记录见 ADR-2026-10-06-033 D4。
+ */
+
+// ============================================================
+// 十七、Event Vocabulary 的治理空白与不一致——Investigated, OPEN,
+//     NO DECISION MADE（2026-10-11 记录；完整证据见 Project State
+//     「六十六」、ADR-2026-10-11-034）
+// ============================================================
+
+/**
+ * 只记录事实，不裁决、不修、不自动转化为 implementation requirement：
+ *   1. 没有已证明的 single authoritative Event Vocabulary source。生产代码
+ *      里字面量发布的事件类型有 29 种；有 Standard 格式正式定义的只有 11 个
+ *      （Constitution 零之五 5 个 + 00_Event_Flow.gs 6 个）；19 个已发布事件
+ *      没有正式定义——其中 13 个被 00_Event_Flow.gs 头部点名为"v5.0 事件，
+ *      定义见 v5.0 存档版本"，该存档不在仓库里（V5.0 ARCHIVE — NOT
+ *      AVAILABLE / NOT VERIFIED）；另 6 个连这个声明都没有：NOTE_ARCHIVED、
+ *      NOTE_UPDATED、TASK_CONVERTED_TO_NOTE、TASK_NOT_SELECTED、
+ *      VIEW_ORDER_UPDATED、WORKFLOW_UPDATED。
+ *   2. Constitution P4 映射（第 720–724 行）、00_Architecture.gs 第 182 行、
+ *      00_File_Map.gs 第 51–52 行都说"事件类型清单在 02_EventBus.gs 文件头"；
+ *      实际 02_EventBus.js 文件头（标题仍是 Productivity OS v4.6）没有这份
+ *      清单，只在第 32 行顺带点了 4 个事件名。5 个事件的正式定义实际写在
+ *      Constitution 零之五。
+ *   3. TASK_UPDATED：Constitution（第 553–554 行）写 Source Module 是
+ *      20_TaskEngine.updateTask（"唯一发布方，不经过 IdempotencyManager"）；
+ *      实际还有 28_WorkflowEngine.handleBranchResolution_（第 272 行）在
+ *      WAITING policy 时发布，payload 是 task_id、status:'WAITING'、
+ *      updated_time；Constitution 的 TASK_UPDATED payload 清单里没有 status，
+ *      也没有 updated_time。没有找到解释这个第二发布方的治理记录，只有 28 里
+ *      的代码注释称其为"例外"。
+ *   4. REMINDER_SENT：Constitution 定义块写 Source Module 为 Reminder OS
+ *      （跨项目发布，本项目只消费/投影）；Constitution P3（第 666 行）与
+ *      02_EventBus.js 第 32–34 行的措辞读起来像是本项目是写入路径——两种说法
+ *      没有被调和，可能只是"source module"与"写入路径"的用词差异，无法判断。
+ *      本仓库没有发布点本身不是错误。
+ *   5. ADR-2026-07-06-002（Schema Authority）原文不在本仓库
+ *      （HISTORICAL REFERENCE UNVERIFIED），只有二手引用，且没有一条二手
+ *      引用说它管 Event Vocabulary。
+ *   6. "拆分 EventDefinitions"的触发标准有三套互相不一致的说法，没有唯一
+ *      有效的一套：TRIGGER STANDARD — UNRESOLVED。
+ */
+
+// ============================================================
+// 十八、Test.gs 的 setupGeminiConfig 里疑似真实的 AI API credential
+//     ——POTENTIAL SECRET EXPOSURE — FOLLOW-UP REQUIRED（2026-10-11
+//     记录；2026-10-06 Testing Coverage 的 Pre-work 阶段发现）
+// ============================================================
+
+/**
+ * 事实：Testing Coverage 的 Pre-work 只读检查时，在 Test.gs 的
+ * setupGeminiConfig 里看到一个形态上像真实 AI API key 的字符串。是否为
+ * 真实凭证、是否仍然 active：**均未确认**（这里只能写"疑似"，不声称已经
+ * 泄露，也不声称已经失效）。
+ *
+ * 刻意没有做的事（Carson 的决定，2026-10-06）：不复制、不在任何报告 /
+ * 治理文件里打印凭证内容；不修改 Test.gs；不 rotate / revoke；不把这个
+ * 问题混入 Testing Coverage 的实施。凭证内容也不应该出现在本文件或任何
+ * Project State / ADR 里。
+ *
+ * 状态：POTENTIAL SECRET EXPOSURE — FOLLOW-UP REQUIRED（独立 follow-up，
+ * 由 Carson 决定如何处理）。assistant 的建议（不是已批准的决定）：由 Carson
+ * 在 AI provider 控制台确认这个 key 是否真实且仍有效；如果是，先在 provider
+ * 侧 rotate / revoke，再另行决定如何把它从源码里移除（例如改走 Script
+ * Properties）——这件事不在 Testing Coverage 的范围内。
+ */
