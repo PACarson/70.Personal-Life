@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compliance OS — Operator Console</title>
+  <style>
+    :root {
+      --ink: #16211f;
+      --ink-soft: #4a5854;
+      --paper: #f6f4ee;
+      --paper-raised: #ffffff;
+      --rule: #d9d3c4;
+      --verified: #0f5c4f;
+      --verified-bg: #e3efe9;
+      --flagged: #8a5a12;
+      --flagged-bg: #f4ead6;
+      --failed: #8c2f26;
+      --failed-bg: #f6e5e1;
+      --pending: #6b665c;
+      --pending-bg: #eae6da;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+      --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 28px 20px 80px;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; }
+
+    header.masthead {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: 12px;
+      margin-bottom: 24px;
+    }
+    header.masthead h1 {
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      margin: 0;
+    }
+    header.masthead .subtitle {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+
+    section { margin-bottom: 28px; }
+    h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-soft);
+      margin: 0 0 10px;
+      font-weight: 600;
+    }
+
+    /* ---- Dashboard: dashed border = Projection (EP4: Fact vs Projection) ---- */
+    .dash-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+    }
+    .dash-card {
+      background: var(--paper-raised);
+      border: 1.5px dashed var(--rule);
+      border-radius: 3px;
+      padding: 12px 14px;
+    }
+    .dash-card .label {
+      font-size: 11px;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .dash-card .value {
+      font-family: var(--mono);
+      font-size: 20px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+    .dash-card .value.currency::before { content: "RM "; font-size: 13px; color: var(--ink-soft); }
+    .dash-note {
+      font-size: 11px;
+      color: var(--ink-soft);
+      margin-top: 8px;
+      font-style: italic;
+    }
+
+    /* ---- Import panel ---- */
+    .panel {
+      background: var(--paper-raised);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 16px;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input[type=text] {
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 8px 10px;
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      background: var(--paper);
+      color: var(--ink);
+      flex: 1;
+      min-width: 220px;
+    }
+    input[type=text]:focus, button:focus, textarea:focus, summary:focus {
+      outline: 2px solid var(--verified);
+      outline-offset: 1px;
+    }
+    button {
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 3px;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      cursor: pointer;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--ink);
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.small { padding: 4px 10px; font-size: 12px; }
+    .hint { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
+    select.sort-select {
+      font-family: var(--sans);
+      font-size: 12px;
+      padding: 4px 8px;
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    select.sort-select:focus { outline: 2px solid var(--verified); outline-offset: 1px; }
+
+    /* ---- PDF Import Recovery Center（2026-10-07，ADR-006 的 UI 部分） ---- */
+    .rec-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+    button.rec-tab.active { background: var(--ink); color: var(--paper); }
+    .rec-count { font-family: var(--mono); font-size: 11px; opacity: 0.85; }
+    .rec-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-soft); }
+    .rec-note { font-size: 12px; color: var(--flagged); background: var(--flagged-bg); border: 1px solid var(--flagged); border-radius: 3px; padding: 8px 10px; margin-top: 12px; }
+    .rec-error { font-size: 12px; color: var(--failed); background: var(--failed-bg); border: 1px solid var(--failed); border-radius: 3px; padding: 8px 10px; margin-top: 12px; }
+    .rec-run { margin-top: 12px; padding: 10px 12px; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 4px; font-size: 12px; }
+    ul.file-list li.rec-item { align-items: flex-start; }
+    input.rec-check { margin-top: 3px; }
+
+    /* ---- Results list ---- */
+    ul.file-list { list-style: none; margin: 12px 0 0; padding: 0; }
+    ul.file-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 4px;
+      border-bottom: 1px solid var(--rule);
+      font-size: 13px;
+    }
+    ul.file-list li:last-child { border-bottom: none; }
+    .file-name { font-family: var(--mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-detail { font-size: 11px; color: var(--ink-soft); }
+
+    /* Verified = stamp（实心、粗体、微旋转，像盖章）；其他都是浅底徽章 */
+    .badge {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 2px;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .badge.stamp {
+      background: var(--verified-bg);
+      color: var(--verified);
+      border: 1.5px solid var(--verified);
+      transform: rotate(-1.5deg);
+      display: inline-block;
+    }
+    .badge.flagged { background: var(--flagged-bg); color: var(--flagged); border: 1px solid var(--flagged); }
+    .badge.failed { background: var(--failed-bg); color: var(--failed); border: 1px solid var(--failed); }
+    .badge.pending { background: var(--pending-bg); color: var(--pending); border: 1px dashed var(--pending); }
+
+    .recon-note {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-soft);
+      border: 1px dashed var(--rule);
+      padding: 1px 6px;
+      border-radius: 2px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 28px 10px;
+      color: var(--ink-soft);
+      font-size: 13px;
+      border: 1.5px dashed var(--rule);
+      border-radius: 4px;
+    }
+
+    details.fallback {
+      border-top: 1px dashed var(--rule);
+      padding-top: 14px;
+      margin-top: 32px;
+    }
+    details.fallback summary {
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+    }
+    details.fallback .panel { margin-top: 12px; }
+    textarea {
+      width: 100%;
+      min-height: 110px;
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 10px;
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      background: var(--paper);
+      color: var(--ink);
+      resize: vertical;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--ink);
+      color: var(--paper);
+      padding: 10px 18px;
+      border-radius: 4px;
+      font-size: 13px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .toast.show { opacity: 1; }
+
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,0.35);
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: -2px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+      .toast { transition: none; }
+    }
+
+    /* ---- 月度总览：年份/月份导览 + 月度细节 + Compliance Projection ---- */
+    .year-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .year-row:last-child { margin-bottom: 0; }
+    .year-label { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); width: 40px; flex-shrink: 0; }
+    .month-pill {
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--rule);
+      background: var(--paper-raised);
+      color: var(--ink-soft);
+      cursor: pointer;
+    }
+    .month-pill.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .alloc-warning {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border: 1.5px dashed var(--flagged);
+      background: var(--flagged-bg);
+      color: var(--flagged);
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .alloc-warning ul { margin-top: 6px; }
+    .compliance-value.not-configured { font-size: 12px; color: var(--ink-soft); font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="masthead">
+      <h1>Compliance OS — Operator Console</h1>
+      <span class="subtitle">ADR-003 · Real Data Pilot</span>
+    </header>
+
+    <section>
+      <h2>Verified Income — 现况</h2>
+      <div id="dashboard" class="dash-grid">
+        <div class="dash-card"><div class="label">载入中</div><div class="value">—</div></div>
+      </div>
+      <div class="dash-note">虚线卡片 = Projection（即时算，不是存好的汇总表）；下方清单里的实心图章 = Verified 的官方记录本身</div>
+    </section>
+
+    <section>
+      <h2>月度总览</h2>
+      <div id="dataQualityBanner"></div>
+      <div id="monthlyNav"></div>
+      <div id="monthlyDetail"></div>
+    </section>
+
+    <section>
+      <h2>从 Google Drive 汇入</h2>
+      <div class="panel">
+        <div class="row">
+          <input id="folderIdInput" type="text" placeholder="Drive Folder ID（网址列 folders/ 后面那一串）">
+          <button id="scanBtn" class="secondary">扫描资料夹</button>
+          <button id="importBtn">批次汇入未处理的文件</button>
+        </div>
+        <div class="hint">扫描只列出还没汇入的 PDF（用 drive_file_id 去重，不用重新下载已经处理过的文件）。批次汇入会自动重建下面的 Monthly/YTD。</div>
+      </div>
+
+      <div id="scanResults"></div>
+      <div id="importResults"></div>
+    </section>
+
+    <section id="recoverySection">
+      <h2>PDF 汇入恢复中心</h2>
+      <div class="panel">
+        <div class="row">
+          <button id="recoveryRefreshBtn" class="secondary" onclick="loadRecoveryStatus()">刷新状态</button>
+          <input id="recoveryFilter" type="text" placeholder="筛选：文件名 / document id / 期间 / 失败原因（空白分隔 = 每个词都要命中）" oninput="recoverySetFilter(this.value)">
+        </div>
+        <div class="hint">列出 Documents 里每一份文件现在的处理状况——不用重新扫描 Drive、不会触发任何抽取。<b>Pending</b> = 证据资料夹里还没有这份文件的抽取证据；<b>Failed</b> = 抽取尝试过、但没走到 Verified Income（原因取自最新一份证据档）；<b>Completed</b> = 已经进了 Verified Income。重试一律手动：没有自动重试，也没有「全部重试」。要点「刷新状态」才会读取（后端对每份文件要查一次证据资料夹）。</div>
+      </div>
+      <div id="recoveryStatusLine"></div>
+      <div id="recoveryTabs"></div>
+      <div id="recoveryActions"></div>
+      <div id="recoverySummary"></div>
+      <div id="recoveryList"></div>
+    </section>
+
+    <details class="fallback">
+      <summary>Debug / Fallback — 手动贴 Statement 文字</summary>
+      <div class="panel">
+        <div class="hint" style="margin-top:0">不是主要流程——只在 Drive 汇入卡住、需要单独测一份文字的时候用。</div>
+        <textarea id="manualText" placeholder="贴上 Grab Weekly Statement 的纯文字内容…"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button id="manualBtn" class="secondary">手动汇入这份文字</button>
+        </div>
+        <div id="manualResult"></div>
+      </div>
+    </details>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    var state = { scan: null, lastFolderId: '', monthlySummaries: [], selectedMonth: null, scanSort: 'original' };
+    var MONTH_NAMES = ['', '一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+    // PDF Import Recovery Center 的前端状态（2026-10-07）。data = consoleGetRecoveryStatus 的回传；selected 以 documentId 当 key。
+    state.recovery = { data: null, loading: false, busy: false, busyLabel: '', error: '', tab: 'failed', filter: '', selected: {}, lastRun: null, loadedAt: null };
+    var RECOVERY_TABS = [['failed', 'Failed'], ['pending', 'Pending'], ['completed', 'Completed']];
+
+    function showToast(msg) {
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(function () { t.classList.remove('show'); }, 2600);
+    }
+
+    function money(n) {
+      if (typeof n !== 'number') return '—';
+      return n.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function stageBadge(stage) {
+      if (stage === 'Verified' || stage === 'Already_Verified') {
+        return '<span class="badge stamp">Verified</span>' + (stage === 'Already_Verified' ? '<span class="file-detail">已存在，未重复发布</span>' : '');
+      }
+      if (stage === 'Skipped_Duplicate') return '<span class="badge pending">重复，已跳过</span>';
+      if (stage === 'Extraction_Failed') return '<span class="badge failed">抽取失败</span>';
+      if (stage === 'Parse_Failed') return '<span class="badge failed">解析失败</span>';
+      if (stage === 'Verify_Failed') return '<span class="badge failed">发布失败</span>';
+      return '<span class="badge failed">' + stage + '</span>';
+    }
+
+    function reconBadge(reconciliationStatus) {
+      if (!reconciliationStatus) return '';
+      var label = { Not_Performed: '未对账', Matched: '对账一致', Discrepancy_Flagged: '对账有差异' }[reconciliationStatus] || reconciliationStatus;
+      return '<span class="recon-note">' + label + '</span>';
+    }
+
+    function renderDashboard(d) {
+      var el = document.getElementById('dashboard');
+      // 2026-09-27：防御性 guard——理论上 loadDashboard() 已经把
+      // consoleGetDashboard 回传的 JSON 字符串解析回物件了，这里只防真的
+      // 收到 null/undefined 的情况（例如以后又发生类似的传输问题），让
+      // Console 显示明确提示，而不是整个白屏卡在"载入中"却没有任何线索。
+      if (!d) {
+        showToast('读取现况失败：后端未回传有效资料（dashboard 为 null）');
+        el.innerHTML = '<div class="empty-state">未能读取到现况数据，请重新整理页面再试一次。</div>';
+        return;
+      }
+      var summaries = d.monthlySummaries || [];
+      var currentYm = new Date().toISOString().slice(0, 7);
+      var currentMonth = summaries.find(function (m) { return m.year_month === currentYm; });
+      // 2026-08-23 修正（审计报告 Medium-1）：本月收入以前只认「跟今天日历
+      // 月份完全一致」的那笔——回填历史月份（例如现在是 8 月，汇入的是 7
+      // 月的 Statement）时会一直显示 0.00，即使下面月度导览其实有资料，
+      // 容易让人误以为汇入失败。当月没有资料时改显示最近一个有资料的月份，
+      // 并标注是哪个月，不是不明不白的 0.00。
+      var latestMonth = summaries.length
+        ? summaries.slice().sort(function (a, b) { return a.year_month < b.year_month ? 1 : -1; })[0]
+        : null;
+      var recentLabel = currentMonth ? '本月收入' : (latestMonth ? '最近有资料月份（' + latestMonth.year_month + '）' : '本月收入');
+      var recentValue = currentMonth ? currentMonth.net : (latestMonth ? latestMonth.net : 0);
+      el.innerHTML = [
+        card('YTD 总收入', d.ytd ? money(d.ytd.net) : '0.00', true),
+        card(recentLabel, money(recentValue), true),
+        card('累计 Verified 笔数', d.totalVerifiedCount != null ? String(d.totalVerifiedCount) : '0', false),
+        card('涵盖月份数', summaries ? String(summaries.length) : '0', false)
+      ].join('');
+
+      state.monthlySummaries = summaries;
+      renderDataQualityBanner(d.invalidPeriodIncomeIds || []);
+      // 保持目前选中的月份（例如刚汇入完重建），除非它已经不存在；否则预设选最新月份
+      if (!state.selectedMonth || !state.monthlySummaries.some(function (m) { return m.year_month === state.selectedMonth; })) {
+        var sorted = state.monthlySummaries.slice().sort(function (a, b) { return a.year_month < b.year_month ? 1 : -1; });
+        state.selectedMonth = sorted.length ? sorted[0].year_month : null;
+      }
+      renderMonthlyNav(state.monthlySummaries, state.selectedMonth);
+      renderMonthlyDetail(state.monthlySummaries.find(function (m) { return m.year_month === state.selectedMonth; }) || null);
+    }
+    function card(label, value, isCurrency) {
+      return '<div class="dash-card"><div class="label">' + label + '</div><div class="value' + (isCurrency ? ' currency' : '') + '">' + value + '</div></div>';
+    }
+
+    function renderDataQualityBanner(invalidPeriodIncomeIds) {
+      var el = document.getElementById('dataQualityBanner');
+      if (!invalidPeriodIncomeIds.length) { el.innerHTML = ''; return; }
+      el.innerHTML =
+        '<div class="alloc-warning" style="border-color:var(--failed);background:var(--failed-bg);color:var(--failed)">' +
+          '<strong>⚠ ' + invalidPeriodIncomeIds.length + ' 笔 Verified Income 读不出合法的期间（period_start/period_end），已从所有月度汇总中排除：</strong>' +
+          '<div class="file-detail" style="margin-top:4px">' + invalidPeriodIncomeIds.map(escapeHtml).join('、') + '</div>' +
+          '<div class="file-detail" style="margin-top:4px">通常是 Sheet 里残留了改版前的旧资料、或栏位被手动改动过——去 Verified_Income 分页核对这几笔的栏位是否对齐，不是系统会自动猜的东西。</div>' +
+        '</div>';
+    }
+
+    function renderMonthlyNav(summaries, selectedMonth) {
+      var el = document.getElementById('monthlyNav');
+      if (!summaries.length) {
+        el.innerHTML = '<div class="empty-state">还没有任何月份的 Verified Income——汇入几份 Statement 之后这里会按年份/月份列出来。</div>';
+        return;
+      }
+      var byYear = {};
+      summaries.forEach(function (m) {
+        var y = m.year_month.slice(0, 4);
+        (byYear[y] = byYear[y] || []).push(m);
+      });
+      var years = Object.keys(byYear).sort().reverse();
+      el.innerHTML = years.map(function (y) {
+        var pills = byYear[y].sort(function (a, b) { return a.year_month < b.year_month ? -1 : 1; }).map(function (m) {
+          var monthNum = parseInt(m.year_month.slice(5, 7), 10);
+          var flag = (m.needs_allocation && m.needs_allocation.length) ? ' ⚠' : '';
+          var cls = 'month-pill' + (m.year_month === selectedMonth ? ' active' : '');
+          return '<button class="' + cls + '" onclick="selectMonth(\'' + m.year_month + '\')">' + MONTH_NAMES[monthNum] + flag + '</button>';
+        }).join('');
+        return '<div class="year-row"><span class="year-label">' + y + '</span>' + pills + '</div>';
+      }).join('');
+    }
+
+    function selectMonth(yearMonth) {
+      state.selectedMonth = yearMonth;
+      renderMonthlyNav(state.monthlySummaries, state.selectedMonth);
+      renderMonthlyDetail(state.monthlySummaries.find(function (m) { return m.year_month === yearMonth; }) || null);
+    }
+
+    function renderMonthlyDetail(summary) {
+      var el = document.getElementById('monthlyDetail');
+      if (!summary) { el.innerHTML = ''; return; }
+      var cp = summary.compliance_projection || {};
+      var gross = summary.net_delivery_income + summary.incentive + summary.tip + summary.other_payments;
+
+      var warningsHtml = (summary.needs_allocation && summary.needs_allocation.length)
+        ? '<div class="alloc-warning"><strong>⚠ ' + summary.needs_allocation.length + ' 份 Statement 横跨月份，尚未计入任何月份的 Net Income：</strong>' +
+          '<ul class="file-list">' + summary.needs_allocation.map(function (n) {
+            return '<li id="da-' + escapeHtml(n.income_id) + '">' +
+              '<span class="file-name">' + escapeHtml(n.income_id) + '</span>' +
+              '<span class="file-detail">' + escapeHtml(n.period_start) + ' → ' + escapeHtml(n.period_end) + '（横跨 ' + n.months.map(escapeHtml).join(' / ') + '）</span>' +
+              '<button class="small secondary" onclick="startDailyAllocationConfirm(\'' + escapeJs(n.income_id) + '\', \'' + escapeJs(n.period_start) + '\', \'' + escapeJs(n.period_end) + '\')">Run Daily Allocation</button>' +
+            '</li>';
+          }).join('') + '</ul></div>'
+        : '';
+
+      var statementsHtml = summary._computed_from.length
+        ? '<ul class="file-list">' + summary._computed_from.map(function (id) {
+            return '<li><span class="file-name">' + id + '</span><button class="small secondary" onclick="showIncomeDetail(\'' + id + '\')">追溯来源</button></li>';
+          }).join('') + '</ul>'
+        : '<div class="empty-state">这个月没有完全落在月内、可计入 Net Income 的 Statement。</div>';
+
+      el.innerHTML =
+        '<div class="panel">' +
+          '<h2 style="margin-top:0">' + summary.year_month + ' 月度摘要</h2>' +
+          '<div class="dash-grid">' +
+            card('Statements', String(summary.week_count), false) +
+            card('Gross Income', money(gross), true) +
+            card('Deduction', money(summary.total_deductions), true) +
+            card('Net Income', money(summary.net), true) +
+          '</div>' +
+          warningsHtml +
+          '<h2 style="margin-top:20px">Compliance Projection</h2>' +
+          '<div class="dash-grid">' +
+            complianceCard('SOCSO' + (cp.socso && cp.socso.plan ? '（' + cp.socso.plan + '）' : ''), cp.socso) +
+            complianceCard('EPF', cp.epf) +
+            complianceCard('Tax', cp.tax) +
+          '</div>' +
+          '<div class="dash-note">这一整块都是 Projection，不是官方缴费记录——真正的 SOCSO/EPF/LHDN 缴费记录以后会作为独立的 Official Record 存进来对照</div>' +
+          '<h2 style="margin-top:20px">Included Statements</h2>' +
+          statementsHtml +
+        '</div>' +
+        '<div id="incomeDetailModal"></div>';
+    }
+
+    function complianceCard(label, entry) {
+      if (!entry) return card(label, '—', false);
+      if (entry.status === 'Not_Configured') {
+        return '<div class="dash-card"><div class="label">' + label + '</div><div class="compliance-value not-configured">Not Configured</div></div>';
+      }
+      return card(label, money(entry.amount), true);
+    }
+
+    function showIncomeDetail(incomeId) {
+      var modal = document.getElementById('incomeDetailModal');
+      modal.innerHTML = '<div class="panel" style="margin-top:12px">读取中…</div>';
+      google.script.run
+        .withSuccessHandler(function (detail) {
+          if (!detail || !detail.income) {
+            modal.innerHTML = '<div class="panel" style="margin-top:12px">找不到这笔记录。</div>';
+            return;
+          }
+          var inc = detail.income;
+          var driveLink = detail.document && detail.document.driveFileId
+            ? '<a href="https://drive.google.com/file/d/' + detail.document.driveFileId + '/view" target="_blank" rel="noopener">在 Drive 打开原始 PDF ↗</a>'
+            : '<span class="file-detail">没有对应的 Documents 记录（可能是手动贴上的文字）</span>';
+          modal.innerHTML =
+            '<div class="panel" style="margin-top:12px">' +
+              '<div class="row" style="justify-content:space-between">' +
+                '<strong class="file-name">' + escapeHtml(inc.income_id) + '</strong>' +
+                '<button class="small secondary" onclick="document.getElementById(\'incomeDetailModal\').innerHTML=\'\'">关闭</button>' +
+              '</div>' +
+              '<div class="file-detail" style="margin-top:6px">Statement 期间：' + escapeHtml(inc.period_start) + ' → ' + escapeHtml(inc.period_end) + '（' + escapeHtml(inc.period) + '）</div>' +
+              '<div class="dash-grid" style="margin-top:10px">' +
+                card('Net Delivery', money(inc.net_delivery_income), true) +
+                card('Incentive', money(inc.incentive), true) +
+                card('Tip', money(inc.tip), true) +
+                card('Other', money(inc.other_payments), true) +
+              '</div>' +
+              '<div class="file-detail" style="margin-top:10px">Verified at：' + escapeHtml(inc.verified_at) + ' · Extractor：' + escapeHtml(inc.extractor_id || '—') + '</div>' +
+              '<div style="margin-top:10px">' + driveLink + '</div>' +
+            '</div>';
+        })
+        .withFailureHandler(function (err) {
+          modal.innerHTML = '<div class="panel" style="margin-top:12px">读取失败：' + escapeHtml(err.message) + '</div>';
+        })
+        .consoleGetIncomeDetail(incomeId);
+    }
+
+    /**
+     * 扫描结果排序——纯函数，不改动传入的阵列：state.scan.files 保持 Drive 回传的原始
+     * 顺序（retryOne 靠 id 找项目、不依赖顺序，但原始顺序要留着才能随时切回去）。
+     * mode: 'original'（预设，维持原始顺序）| 'name_asc' | 'name_desc'；未知的 mode 一律当
+     * 'original'，不抛错。文件名用 numeric、不分大小写比较（"W9" 排在 "W10" 前面）；
+     * 同名时用原始顺序当 tie-breaker，排序稳定、可预期（降序时同名也不会被反转）。
+     */
+    function sortScanFiles(files, mode) {
+      var list = (files || []).map(function (f, i) { return { f: f, i: i }; });
+      if (mode === 'name_asc' || mode === 'name_desc') {
+        var dir = mode === 'name_asc' ? 1 : -1;
+        list.sort(function (a, b) {
+          var an = String(a.f && a.f.name != null ? a.f.name : '');
+          var bn = String(b.f && b.f.name != null ? b.f.name : '');
+          var c = an.localeCompare(bn, 'en', { numeric: true, sensitivity: 'base' });
+          return c !== 0 ? c * dir : a.i - b.i;
+        });
+      }
+      return list.map(function (x) { return x.f; });
+    }
+
+    function changeScanSort(mode) {
+      state.scanSort = mode;
+      if (state.scan) renderScanResults(state.scan);
+    }
+
+    function renderScanResults(scan) {
+      var el = document.getElementById('scanResults');
+      if (!scan.files.length) {
+        el.innerHTML = '<div class="empty-state">这个资料夹里没有找到 PDF。</div>';
+        return;
+      }
+      var todo = scan.files.filter(function (f) { return !f.alreadyImported; });
+      var done = scan.files.length - todo.length;
+      var items = sortScanFiles(scan.files, state.scanSort).map(function (f) {
+        var badge = f.alreadyImported
+          ? '<span class="badge pending">已汇入</span>'
+          : '<span class="badge flagged">待处理</span>';
+        return '<li><span class="file-name">' + escapeHtml(f.name) + '</span>' + badge + '</li>';
+      }).join('');
+      var sortOptions = [
+        ['original', '原始顺序（Drive 回传）'],
+        ['name_asc', '文件名 A → Z（升序）'],
+        ['name_desc', '文件名 Z → A（降序）']
+      ].map(function (o) {
+        return '<option value="' + o[0] + '"' + (state.scanSort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('');
+      el.innerHTML = '<h2 style="margin-top:16px">扫描结果 — ' + scan.files.length + ' 份 PDF，' + todo.length + ' 份待处理，' + done + ' 份已汇入</h2>' +
+        '<div class="row" style="margin-top:8px"><label class="hint" style="margin:0" for="scanSortSelect">排序</label>' +
+        '<select id="scanSortSelect" class="sort-select" onchange="changeScanSort(this.value)">' + sortOptions + '</select></div>' +
+        '<ul class="file-list">' + items + '</ul>';
+    }
+
+    function renderImportResults(batch) {
+      var el = document.getElementById('importResults');
+      if (!batch.results.length) {
+        el.innerHTML = '<div class="empty-state">扫描到 ' + batch.scannedCount + ' 份 PDF，全部都已经汇入过，没有新的要处理。</div>';
+        renderDashboard(batch.rebuild);
+        return;
+      }
+      var items = batch.results.map(function (r) {
+        var retryBtn = (r.stage.indexOf('Failed') !== -1 || r.stage === 'Unexpected_Error')
+          ? '<button class="small secondary" onclick="retryOne(\'' + r.fileId + '\', \'' + escapeJs(r.fileName) + '\')">Retry</button>'
+          : '';
+        var detail = r.error ? '<div class="file-detail">' + escapeHtml(r.error) + '</div>' : (r.incomeId ? '<div class="file-detail">' + r.incomeId + ' · RM ' + money(r.net) + '</div>' : '');
+        return '<li>' +
+          '<div style="flex:1;min-width:0">' +
+            '<span class="file-name">' + escapeHtml(r.fileName) + '</span>' + detail +
+          '</div>' +
+          stageBadge(r.stage) + reconBadge(r.reconciliationStatus) + retryBtn +
+        '</li>';
+      }).join('');
+      el.innerHTML = '<h2 style="margin-top:16px">汇入结果</h2><ul class="file-list" id="importList">' + items + '</ul>';
+      renderDashboard(batch.rebuild);
+    }
+
+    function escapeHtml(s) {
+      var d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+    function escapeJs(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+    function setBusy(btn, busy, busyLabel) {
+      if (busy) {
+        btn.dataset.originalLabel = btn.textContent;
+        btn.innerHTML = '<span class="spinner"></span> ' + busyLabel;
+        btn.disabled = true;
+      } else {
+        btn.textContent = btn.dataset.originalLabel || btn.textContent;
+        btn.disabled = false;
+      }
+    }
+
+    function loadDashboard() {
+      // 2026-09-27：consoleGetDashboard 现在回传 JSON 字符串，不是物件本身
+      // （见 170_OperatorConsole.js 同日修复说明——真实 GAS 环境下
+      // google.script.run 直接传物件会静默变成 null）。这里解析回物件再
+      // 交给 renderDashboard；同时兼容 raw 万一本来就是物件的情况，不
+      // 假设一定是字符串。
+      google.script.run.withSuccessHandler(function (raw) {
+        var d = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+        renderDashboard(d);
+      }).withFailureHandler(function (err) {
+        showToast('读取现况失败：' + err.message);
+      }).consoleGetDashboard();
+    }
+
+    document.getElementById('scanBtn').addEventListener('click', function () {
+      var btn = this;
+      var folderId = document.getElementById('folderIdInput').value.trim();
+      if (!folderId) { showToast('请先填 Drive Folder ID'); return; }
+      setBusy(btn, true, '扫描中…');
+      google.script.run
+        .withSuccessHandler(function (scan) {
+          setBusy(btn, false);
+          state.scan = scan;
+          google.script.run.consoleSaveLastFolderId(folderId);
+          renderScanResults(scan);
+        })
+        .withFailureHandler(function (err) {
+          setBusy(btn, false);
+          showToast('扫描失败：' + err.message);
+        })
+        .consoleScanFolder(folderId);
+    });
+
+    document.getElementById('importBtn').addEventListener('click', function () {
+      var btn = this;
+      var folderId = document.getElementById('folderIdInput').value.trim();
+      if (!folderId) { showToast('请先填 Drive Folder ID'); return; }
+      setBusy(btn, true, '汇入中，文件数量多的话会需要一点时间…');
+      google.script.run
+        .withSuccessHandler(function (batch) {
+          setBusy(btn, false);
+          renderImportResults(batch);
+          showToast('批次汇入完成：' + batch.attemptedCount + ' 份处理完毕');
+        })
+        .withFailureHandler(function (err) {
+          setBusy(btn, false);
+          showToast('批次汇入失败：' + err.message);
+        })
+        .consoleBatchImport(folderId);
+    });
+
+    function retryOne(fileId, fileName) {
+      showToast('重试中：' + fileName);
+      google.script.run
+        .withSuccessHandler(function (result) {
+          showToast(result.stage === 'Verified' ? '重试成功：' + fileName : '重试后仍是：' + result.stage);
+          renderDashboard(result.rebuild);
+          // 只更新这一笔在清单里的显示，不用整批重新渲染
+          if (state.scan) {
+            var f = state.scan.files.find(function (x) { return x.id === fileId; });
+            if (f && result.stage === 'Verified') f.alreadyImported = true;
+          }
+        })
+        .withFailureHandler(function (err) { showToast('重试失败：' + err.message); })
+        .consoleRetryFile(fileId, fileName);
+    }
+
+    // ---- PDF Import Recovery Center UI（2026-10-07；ADR-006 的 UI 部分——后端 consoleGetRecoveryStatus /
+    // consoleRetrySelectedFiles 2026-10-02 已写好，这里一行没动）----
+    // 范围刻意守在 ADR-006「实作范围」写的那几样：Pending/Failed/Completed 分页、单档 Retry、选取多档 Retry、Filter、
+    // Refresh。不做自动重试、不做「全部重试」。只显示后端回传的状态、不自己推断（CMP-P10）；一律手动点「刷新状态」
+    // 才读取，不在页面载入时自动打后端（后端对每份文件要查一次 Drive 证据资料夹，不拖慢页面载入）。
+    function escapeHtmlAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    // 放进 onclick="f('…')" 的字串参数：先 escapeJs（单引号、反斜线）再 escapeHtmlAttr（双引号、< > &）——
+    // 浏览器先解 HTML 实体、再把结果当 JS 解析，所以是这个顺序才安全。
+    function jsArg(s) { return escapeHtmlAttr(escapeJs(s)); }
+
+    function recoveryIsTab(tab) { return tab === 'failed' || tab === 'pending' || tab === 'completed'; }
+    function recoveryIsRetryTab(tab) { return tab === 'failed' || tab === 'pending'; }
+    function recoveryItemsForTab(data, tab) {
+      if (!data || !recoveryIsTab(tab)) return [];
+      return Array.isArray(data[tab]) ? data[tab] : [];
+    }
+    function recoveryCanRetry(item) { return !!(item && item.driveFileId); }
+
+    // Filter：不分大小写；空白分隔的每个词都要命中（AND）；比对 路径/document id/drive file id/期间/失败原因/income id 等。
+    function recoveryMatchesFilter(item, filterText) {
+      var words = String(filterText || '').toLowerCase().split(/\s+/).filter(function (w) { return w; });
+      if (!words.length) return true;
+      var hay = [item.drivePath, item.documentId, item.driveFileId, item.period, item.lastError, item.documentType, item.source, (item.incomeIds || []).join(' ')]
+        .map(function (x) { return x == null ? '' : String(x); }).join('\n').toLowerCase();
+      return words.every(function (w) { return hay.indexOf(w) !== -1; });
+    }
+    function recoveryVisibleItems(data, tab, filterText) {
+      return recoveryItemsForTab(data, tab).filter(function (it) { return recoveryMatchesFilter(it, filterText); });
+    }
+    // 「重试选中的」只会动：选中的 ∩ 目前这个分页+筛选下看得到的 ∩ 真的能重试的（有 drive file id、而且是 Pending/Failed 分页）。
+    // 被筛掉看不到的选取不会被偷偷重试。
+    function recoverySelectedRefs(rec) {
+      if (!recoveryIsRetryTab(rec.tab)) return [];
+      return recoveryVisibleItems(rec.data, rec.tab, rec.filter)
+        .filter(function (it) { return rec.selected[it.documentId] && recoveryCanRetry(it); })
+        .map(function (it) { return { fileId: it.driveFileId, fileName: it.drivePath || it.documentId }; });
+    }
+    function recoveryFindItem(data, docId) {
+      var lists = [recoveryItemsForTab(data, 'pending'), recoveryItemsForTab(data, 'failed')];
+      for (var i = 0; i < lists.length; i++) {
+        for (var j = 0; j < lists[i].length; j++) { if (lists[i][j].documentId === docId) return lists[i][j]; }
+      }
+      return null;
+    }
+    function formatAttemptTime(iso) {
+      if (!iso) return '—';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return String(iso); // 后端 sanitize 过的纯日期（本地午夜的 Date）
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      function p(n) { return (n < 10 ? '0' : '') + n; }
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    function renderRecoveryStatusLine(rec) {
+      if (rec.loading) return '<div class="hint">读取中…（后端对每份文件查一次证据资料夹，文件多的话要几秒）</div>';
+      var parts = '';
+      if (rec.error) parts += '<div class="rec-error">' + escapeHtml(rec.error) + (rec.data ? '（下面显示的是上一次读取的结果）' : '') + '</div>';
+      if (!rec.data) return parts || '<div class="hint">还没有读取——点「刷新状态」。</div>';
+      parts += '<div class="hint">已读取：Failed ' + rec.data.failed.length + ' · Pending ' + rec.data.pending.length + ' · Completed ' + rec.data.completed.length + (rec.loadedAt ? '（' + escapeHtml(formatAttemptTime(rec.loadedAt)) + '）' : '') + '</div>';
+      if (rec.data.evidenceFolderConfigured === false) {
+        parts += '<div class="rec-note">证据资料夹没有接上（Script Properties 的 EXTRACTION_EVIDENCE_FOLDER_ID 没设定）——后端分不出「尝试过但失败」跟「还没试」，所有还没完成的文件都只能归在 Pending；这不代表它们没被尝试过。</div>';
+      }
+      return parts;
+    }
+    function renderRecoveryTabs(rec) {
+      return '<div class="rec-tabs">' + RECOVERY_TABS.map(function (t) {
+        var n = recoveryItemsForTab(rec.data, t[0]).length;
+        return '<button class="rec-tab secondary' + (rec.tab === t[0] ? ' active' : '') + '" onclick="recoverySetTab(\'' + t[0] + '\')">' + t[1] + ' <span class="rec-count">' + n + '</span></button>';
+      }).join('') + '</div>';
+    }
+    function renderRecoveryActions(rec) {
+      if (!rec.data || !recoveryIsRetryTab(rec.tab)) return '';
+      var n = recoverySelectedRefs(rec).length;
+      var dis = (rec.busy || rec.loading || n === 0) ? ' disabled' : '';
+      return '<div class="rec-bar"><span>已选 ' + n + ' 份（只算目前列表里看得到、而且能重试的）</span>' +
+        '<button class="small"' + dis + ' onclick="recoveryRetrySelected()">重试选中的 ' + n + ' 份</button>' +
+        (rec.busy ? '<span><span class="spinner"></span> ' + escapeHtml(rec.busyLabel) + '</span>' : '') + '</div>';
+    }
+    function renderRecoverySummary(rec) {
+      var run = rec.lastRun;
+      if (!run) return '';
+      var head = '最近一次重试：处理了 ' + run.attemptedCount + ' 份' + (run.remainingCount ? '，还剩 ' + run.remainingCount + ' 份没处理' : '');
+      var warn = run.stoppedEarly
+        ? '<div class="rec-note">时间预算用完，提早停止（不是失败）：还剩 ' + run.remainingCount + ' 份没处理，它们仍然保持选中——再点一次「重试选中的」就会接着处理。</div>'
+        : '';
+      var items = (run.results || []).map(function (r) {
+        var detail = r.error
+          ? '<div class="file-detail">' + escapeHtml(r.error) + '</div>'
+          : (r.incomeId ? '<div class="file-detail">' + escapeHtml(r.incomeId) + ' · RM ' + money(r.net) + '</div>' : '');
+        return '<li><div style="flex:1;min-width:0"><span class="file-name">' + escapeHtml(r.fileName) + '</span>' + detail + '</div>' + stageBadge(r.stage) + reconBadge(r.reconciliationStatus) + '</li>';
+      }).join('');
+      return '<div class="rec-run"><strong>' + head + '</strong>' + warn + (items ? '<ul class="file-list">' + items + '</ul>' : '') + '</div>';
+    }
+    function renderRecoveryItem(it, tab, rec) {
+      var retryTab = recoveryIsRetryTab(tab);
+      var canRetry = retryTab && recoveryCanRetry(it);
+      var locked = rec.busy || rec.loading;
+      var box = retryTab
+        ? '<input type="checkbox" class="rec-check"' + ((!canRetry || locked) ? ' disabled' : '') + ((canRetry && rec.selected[it.documentId]) ? ' checked' : '') + ' onchange="recoveryToggle(\'' + jsArg(it.documentId) + '\', this.checked)">'
+        : '';
+      var badge = tab === 'failed' ? '<span class="badge failed">Failed</span>' : (tab === 'pending' ? '<span class="badge pending">Pending</span>' : '<span class="badge stamp">Verified</span>');
+      var meta = [it.documentId, tab === 'completed' ? '' : it.period].filter(function (x) { return x; }).map(escapeHtml).join(' · ');
+      var lines = '';
+      if (tab === 'failed') {
+        lines += '<div class="file-detail">失败原因：' + escapeHtml(it.lastError) + '</div>';
+        lines += '<div class="file-detail">最近一次尝试 ' + escapeHtml(formatAttemptTime(it.lastAttemptAt)) + ' · 证据档共 ' + (it.attemptCount == null ? '?' : escapeHtml(it.attemptCount)) + ' 份（每份代表一次抽取尝试）</div>';
+      } else if (tab === 'pending') {
+        lines += '<div class="file-detail">' + (it.evidenceUnavailable
+          ? '证据资料夹没接上，判断不出是否尝试过'
+          : '证据资料夹里还没有这份文件的抽取证据（还没真正试过，或上次执行在抽取之前就被中断）') + '</div>';
+      } else {
+        lines += '<div class="file-detail">' + escapeHtml((it.incomeIds || []).join(', ')) + (it.period ? ' · ' + escapeHtml(it.period) : '') + '</div>';
+      }
+      if (retryTab && !canRetry) lines += '<div class="file-detail">缺少 Drive file id，无法从这里重试</div>';
+      var btn = canRetry
+        ? '<button class="small secondary"' + (locked ? ' disabled' : '') + ' onclick="recoveryRetryOne(\'' + jsArg(it.documentId) + '\')">Retry</button>'
+        : '';
+      return '<li class="rec-item">' + box + '<div style="flex:1;min-width:0"><span class="file-name">' + escapeHtml(it.drivePath || it.documentId) + '</span>' +
+        (meta ? '<div class="file-detail">' + meta + '</div>' : '') + lines + '</div>' + badge + btn + '</li>';
+    }
+    function renderRecoveryList(rec) {
+      if (!rec.data) return '';
+      var all = recoveryItemsForTab(rec.data, rec.tab);
+      var visible = recoveryVisibleItems(rec.data, rec.tab, rec.filter);
+      if (!all.length) return '<div class="empty-state">目前没有 ' + rec.tab + ' 的文件。</div>';
+      if (!visible.length) return '<div class="empty-state">没有符合筛选条件的文件（这个分页的 ' + all.length + ' 份都被筛掉了）。</div>';
+      var header = '';
+      if (recoveryIsRetryTab(rec.tab)) {
+        var retryable = visible.filter(recoveryCanRetry);
+        var allChecked = retryable.length > 0 && retryable.every(function (it) { return rec.selected[it.documentId]; });
+        header = '<label class="rec-bar" style="margin:12px 0 0"><input type="checkbox"' + ((!retryable.length || rec.busy || rec.loading) ? ' disabled' : '') + (allChecked ? ' checked' : '') + ' onchange="recoveryToggleAllVisible(this.checked)"> 全选目前列出的 ' + retryable.length + ' 份</label>';
+      }
+      return header + '<ul class="file-list">' + visible.map(function (it) { return renderRecoveryItem(it, rec.tab, rec); }).join('') + '</ul>';
+    }
+    function renderRecovery() {
+      var rec = state.recovery;
+      document.getElementById('recoveryStatusLine').innerHTML = renderRecoveryStatusLine(rec);
+      document.getElementById('recoveryTabs').innerHTML = rec.data ? renderRecoveryTabs(rec) : '';
+      document.getElementById('recoveryActions').innerHTML = renderRecoveryActions(rec);
+      document.getElementById('recoverySummary').innerHTML = renderRecoverySummary(rec);
+      document.getElementById('recoveryList').innerHTML = renderRecoveryList(rec);
+      document.getElementById('recoveryRefreshBtn').disabled = !!(rec.loading || rec.busy);
+    }
+
+    function recoverySetTab(tab) {
+      if (!recoveryIsTab(tab)) return;
+      state.recovery.tab = tab;
+      renderRecovery();
+    }
+    function recoverySetFilter(text) {
+      state.recovery.filter = String(text || '');
+      renderRecovery();
+    }
+    function recoveryToggle(docId, checked) {
+      var rec = state.recovery;
+      if (checked) { rec.selected[docId] = true; } else { delete rec.selected[docId]; }
+      renderRecovery();
+    }
+    function recoveryToggleAllVisible(checked) {
+      var rec = state.recovery;
+      if (!recoveryIsRetryTab(rec.tab)) return;
+      recoveryVisibleItems(rec.data, rec.tab, rec.filter).filter(recoveryCanRetry).forEach(function (it) {
+        if (checked) { rec.selected[it.documentId] = true; } else { delete rec.selected[it.documentId]; }
+      });
+      renderRecovery();
+    }
+    // 跟 retryOne 同一个做法：重试成功的，把扫描结果清单里对应那笔标成已汇入（只改资料，不重新渲染扫描清单）
+    function recoveryMarkImported(results) {
+      if (!state.scan) return;
+      results.forEach(function (r) {
+        if (r && (r.stage === 'Verified' || r.stage === 'Already_Verified')) {
+          var f = state.scan.files.find(function (x) { return x.id === r.fileId; });
+          if (f) f.alreadyImported = true;
+        }
+      });
+    }
+
+    function loadRecoveryStatus() {
+      var rec = state.recovery;
+      if (rec.loading || rec.busy) return;
+      rec.loading = true;
+      rec.error = '';
+      renderRecovery();
+      google.script.run
+        .withSuccessHandler(function (raw) {
+          rec.loading = false;
+          var d = raw;
+          // 兼容后端哪天改成回传 JSON 字串（跟 loadDashboard 同一个保险）；null / 格式不对 = 明确显示错误，不崩
+          try { d = (typeof raw === 'string') ? JSON.parse(raw) : raw; } catch (e) { d = null; }
+          if (!d || !Array.isArray(d.pending) || !Array.isArray(d.failed) || !Array.isArray(d.completed)) {
+            rec.error = '后端回传的资料格式不对（收到 ' + (d === null ? 'null' : typeof d) + '）——真实 GAS 下 google.script.run 传不出去的值会静默变成 null（见 2026-09-27 consoleGetDashboard 的修复说明）。';
+            renderRecovery();
+            return;
+          }
+          var firstLoad = !rec.data;
+          rec.data = d;
+          rec.loadedAt = new Date().toISOString();
+          if (firstLoad) rec.tab = d.failed.length ? 'failed' : (d.pending.length ? 'pending' : 'completed');
+          // 已经不在 Pending/Failed 里的选取（例如刚重试成功、已经变成 Completed 的）清掉
+          Object.keys(rec.selected).forEach(function (id) { if (!recoveryFindItem(d, id)) delete rec.selected[id]; });
+          renderRecovery();
+        })
+        .withFailureHandler(function (err) {
+          rec.loading = false;
+          rec.error = '读取失败：' + (err && err.message ? err.message : err);
+          renderRecovery();
+        })
+        .consoleGetRecoveryStatus();
+    }
+
+    function recoveryRetryOne(docId) {
+      var rec = state.recovery;
+      var it = recoveryFindItem(rec.data, docId);
+      if (!it || !recoveryCanRetry(it) || rec.busy || rec.loading) return;
+      var fileName = it.drivePath || it.documentId;
+      rec.busy = true;
+      rec.busyLabel = '重试中：' + fileName + '（可能要几十秒）';
+      renderRecovery();
+      google.script.run
+        .withSuccessHandler(function (result) {
+          rec.busy = false;
+          var ok = !!(result && (result.stage === 'Verified' || result.stage === 'Already_Verified'));
+          showToast(ok ? '重试成功：' + fileName : '重试后仍是：' + (result ? result.stage : '（后端回传是空的）'));
+          if (result && result.rebuild) renderDashboard(result.rebuild);
+          recoveryMarkImported([result]);
+          rec.lastRun = result ? { attemptedCount: 1, remainingCount: 0, stoppedEarly: false, results: [result] } : null;
+          delete rec.selected[docId];
+          loadRecoveryStatus(); // 重新读一次，让它自己移到该去的分页（成功 → Completed；失败 → Failed 的原因/次数会更新）
+        })
+        .withFailureHandler(function (err) {
+          rec.busy = false;
+          showToast('重试失败：' + (err && err.message ? err.message : err));
+          renderRecovery();
+        })
+        .consoleRetryFile(it.driveFileId, fileName);
+    }
+
+    function recoveryRetrySelected() {
+      var rec = state.recovery;
+      if (rec.busy || rec.loading) return;
+      var refs = recoverySelectedRefs(rec);
+      if (!refs.length) { showToast('还没有选任何可以重试的文件'); return; }
+      rec.busy = true;
+      rec.busyLabel = '批次重试中：' + refs.length + ' 份（每份可能要几十秒，请不要关闭页面）';
+      renderRecovery();
+      google.script.run
+        .withSuccessHandler(function (res) {
+          rec.busy = false;
+          if (!res || !Array.isArray(res.results)) {
+            // 回传是空的（google.script.run 传输失败的样子）：批次可能已经部分执行了——不假装知道结果，重新读一次现况
+            showToast('后端回传是空的——批次可能已经部分执行，正在重新读取现况');
+            rec.lastRun = null;
+            loadRecoveryStatus();
+            return;
+          }
+          var results = res.results.filter(Boolean);
+          rec.lastRun = { attemptedCount: res.attemptedCount, remainingCount: res.remainingCount, stoppedEarly: !!res.stoppedEarly, results: results };
+          // 处理过的从选取里拿掉（成功的会变 Completed；失败的要使用者重新判断要不要再选）；没处理到的继续保持选中
+          var attempted = {};
+          results.forEach(function (r) { attempted[r.fileId] = true; });
+          recoveryItemsForTab(rec.data, 'pending').concat(recoveryItemsForTab(rec.data, 'failed')).forEach(function (it) {
+            if (attempted[it.driveFileId]) delete rec.selected[it.documentId];
+          });
+          if (res.rebuild) renderDashboard(res.rebuild);
+          recoveryMarkImported(results);
+          showToast('批次重试完成：处理 ' + res.attemptedCount + ' 份' + (res.stoppedEarly ? '，时间预算用完提早停止，还剩 ' + res.remainingCount + ' 份' : ''));
+          loadRecoveryStatus();
+        })
+        .withFailureHandler(function (err) {
+          rec.busy = false;
+          showToast('批次重试失败：' + (err && err.message ? err.message : err));
+          renderRecovery();
+        })
+        .consoleRetrySelectedFiles(refs);
+    }
+
+    // ---- Daily Allocation（2026-09-15，只改这份 .html，consoleRunDailyAllocation
+    // 后端本身未改一行）：needs_allocation 清单里每一笔旁边的 Run 按钮走
+    // 「点击→显示 income_id+确认→确认后才真的呼叫→照实显示后端回传结果」
+    // 三段式，不是点了就直接执行。幂等性完全交给后端既有的 skip-if-已
+    // Fully_Allocated 守卫，这里只用 disabled 按钮防止使用者在同一次呼叫
+    // 还没回来之前又点第二次，不是自己另外发明一套幂等判断。 ----
+    function startDailyAllocationConfirm(incomeId, periodStart, periodEnd) {
+      var li = document.getElementById('da-' + incomeId);
+      if (!li) return;
+      li.innerHTML =
+        '<div style="width:100%">' +
+          '<div class="file-detail">确定要为 <strong>' + escapeHtml(incomeId) + '</strong>（' + escapeHtml(periodStart) + ' → ' + escapeHtml(periodEnd) + '）执行 Daily Allocation 吗？会重新呼叫 Gemini 抽取这份 statement 的逐笔订单，把订单收入正确分到对应月份。</div>' +
+          '<div class="row" style="margin-top:8px">' +
+            '<button class="small" id="da-confirm-' + escapeHtml(incomeId) + '" onclick="runDailyAllocation(\'' + escapeJs(incomeId) + '\', \'' + escapeJs(periodStart) + '\', \'' + escapeJs(periodEnd) + '\')">确认执行</button>' +
+            '<button class="small secondary" onclick="cancelDailyAllocationConfirm(\'' + escapeJs(incomeId) + '\', \'' + escapeJs(periodStart) + '\', \'' + escapeJs(periodEnd) + '\')">取消</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    function cancelDailyAllocationConfirm(incomeId, periodStart, periodEnd) {
+      var li = document.getElementById('da-' + incomeId);
+      if (!li) return;
+      li.innerHTML =
+        '<span class="file-name">' + escapeHtml(incomeId) + '</span>' +
+        '<span class="file-detail">' + escapeHtml(periodStart) + ' → ' + escapeHtml(periodEnd) + '</span>' +
+        '<button class="small secondary" onclick="startDailyAllocationConfirm(\'' + escapeJs(incomeId) + '\', \'' + escapeJs(periodStart) + '\', \'' + escapeJs(periodEnd) + '\')">Run Daily Allocation</button>';
+    }
+
+    function runDailyAllocation(incomeId, periodStart, periodEnd) {
+      var li = document.getElementById('da-' + incomeId);
+      if (!li) return;
+      // 呼叫期间把这一笔换成明确的「执行中」状态，不留任何按钮可点——
+      // 防止使用者在这次真实呼叫（真的会打 Gemini，可能要几分钟）还没
+      // 回来之前又点一次造成两个重叠的呼叫同时在跑。
+      li.innerHTML = '<div class="file-detail"><span class="spinner"></span> 执行中，会真的呼叫 Gemini 重新抽取，可能需要几分钟…</div>';
+      google.script.run
+        .withSuccessHandler(function (result) {
+          renderDailyAllocationResult(incomeId, periodStart, periodEnd, result);
+        })
+        .withFailureHandler(function (err) {
+          renderDailyAllocationResult(incomeId, periodStart, periodEnd, { status: 'Error', error: err.message });
+        })
+        .consoleRunDailyAllocation(incomeId);
+    }
+
+    function renderDailyAllocationResult(incomeId, periodStart, periodEnd, result) {
+      var li = document.getElementById('da-' + incomeId);
+      if (!li) return;
+      // 照后端实际回传的 status/allocationStatus 显示，不自己推断成功——
+      // 只有 status==='Done' 且 allocationStatus==='Fully_Allocated' 才算
+      // 真正成功；Done+Needs_Review 是「跑完了但没有真的分配成功」，跟
+      // 成功不是同一件事，不能显示成同一种徽章。
+      var badge, detail;
+      if (result.status === 'Error') {
+        badge = '<span class="badge failed">Error</span>';
+        detail = escapeHtml(result.error || '未知错误');
+      } else if (result.status === 'Skipped') {
+        badge = '<span class="badge pending">Skipped</span>';
+        detail = escapeHtml(result.reason || '');
+      } else if (result.status === 'Done' && result.allocationStatus === 'Fully_Allocated') {
+        badge = '<span class="badge stamp">Fully_Allocated</span>';
+        detail = result.skipped
+          ? '之前已经处理过，沿用既有结果，没有重复写入'
+          : '成功写入 ' + (result.rowsWritten != null ? result.rowsWritten : '?') + ' 笔 Daily_Allocation';
+      } else if (result.status === 'Done') {
+        badge = '<span class="badge flagged">' + escapeHtml(result.allocationStatus || 'Needs_Review') + '</span>';
+        detail = '这次执行没有产生 Fully_Allocated 的结果——可能是 Gemini 抽取或 checksum 对不上，需要人工看一下，不是等一下自动就会好';
+      } else {
+        badge = '<span class="badge pending">' + escapeHtml(result.status || '未知') + '</span>';
+        detail = '';
+      }
+      li.innerHTML =
+        '<div style="width:100%">' +
+          '<div class="row" style="justify-content:space-between">' +
+            '<span class="file-name">' + escapeHtml(incomeId) + '</span>' + badge +
+          '</div>' +
+          '<div class="file-detail" style="margin-top:4px">' + detail + '</div>' +
+          '<div class="row" style="margin-top:8px">' +
+            '<button class="small secondary" onclick="startDailyAllocationConfirm(\'' + escapeJs(incomeId) + '\', \'' + escapeJs(periodStart) + '\', \'' + escapeJs(periodEnd) + '\')">重新执行（一样要先确认）</button>' +
+          '</div>' +
+        '</div>';
+      // 真正 Fully_Allocated 才刷新整个 Dashboard——这笔会从 needs_allocation
+      // 移到已经分配的状态，月度 Net Income 的数字也会变，需要重新整个拉一次
+      // 现况。Skipped/Error/Needs_Review 都没有改变任何已汇总的数字，不重刷。
+      if (result.status === 'Done' && result.allocationStatus === 'Fully_Allocated') {
+        showToast(incomeId + ' 已分配，正在刷新月度汇总…');
+        loadDashboard();
+      }
+    }
+
+    document.getElementById('manualBtn').addEventListener('click', function () {
+      var btn = this;
+      var text = document.getElementById('manualText').value;
+      if (!text.trim()) { showToast('请先贴上 Statement 文字'); return; }
+      setBusy(btn, true, '处理中…');
+      google.script.run
+        .withSuccessHandler(function (result) {
+          setBusy(btn, false);
+          var el = document.getElementById('manualResult');
+          el.innerHTML = '<div style="margin-top:10px">' + stageBadge(result.stage) + ' ' + (result.error ? escapeHtml(result.error) : (result.incomeId || '')) + '</div>';
+          renderDashboard(result.rebuild);
+        })
+        .withFailureHandler(function (err) {
+          setBusy(btn, false);
+          showToast('手动汇入失败：' + err.message);
+        })
+        .consoleManualImport(text);
+    });
+
+    // 页面载入：读上次用过的 Folder ID + 现况 Dashboard
+    google.script.run.withSuccessHandler(function (id) {
+      if (id) { document.getElementById('folderIdInput').value = id; state.lastFolderId = id; }
+    }).consoleGetLastFolderId();
+    loadDashboard();
+    renderRecovery();
+  </script>
+</body>
+</html>
