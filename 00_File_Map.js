@@ -133,6 +133,30 @@
  *                              2026-08-22，Track 1B Regression Gate，
  *                              单一入口
  *                              runDueDateCanonicalizationGate()】
+ *   61_Tests_SearchEngine.js                                           【补录，
+ *                              2026-10-13（文件头记 2026-10-06 新增），
+ *                              Testing Coverage，
+ *                              23_SearchEngine
+ *                              Deterministic Coverage，单一入口
+ *                              runSearchEngineCoverageGate()】
+ *   62_Tests_ViewEngine.js                                             【补录，
+ *                              2026-10-13（文件头记 2026-10-06 新增），
+ *                              Testing Coverage，
+ *                              24_ViewEngine
+ *                              Deterministic Coverage，单一入口
+ *                              runViewEngineCoverageGate()】
+ *   63_Tests_DashboardEngine.js                                        【补录，
+ *                              2026-10-13（文件头记 2026-10-06 新增），
+ *                              Testing Coverage，
+ *                              25_DashboardEngine
+ *                              Deterministic Coverage，单一入口
+ *                              runDashboardEngineCoverageGate()】
+ *   64_Tests_AnalyticsEngine.js                                        【补录，
+ *                              2026-10-13（文件头记 2026-10-06 新增），
+ *                              Testing Coverage，
+ *                              26_AnalyticsEngine computeStatistics
+ *                              Deterministic Coverage，单一入口
+ *                              runAnalyticsEngineCoverageGate()】
  *
  * ── 附：Track 1B 迁移工具（不在原设计包号段内，跟 11_ProjectionRebuilder
  *    同族，descriptive suffix 命名，跟既有 __SPRINT1_ADDITIONS 是同一种
