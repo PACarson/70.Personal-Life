@@ -2721,4 +2721,141 @@
  * Resolution Condition
  *   只有 Carson 对上面的待决问题做出明确的 Human Decision，才进入下一阶段；
  *   在那之前不 coding、不排期。
+ *
+ * Later Record（2026-10-16 追加；以上全部原文一字未改）
+ *   P3 已由 Carson 作出 Human Decision，记录在 ADR-2026-10-16-035（仅 P3）。
+ *   P1、P2、P4、P5、P6 的原文与"待决"状态不变，仍待 Carson 的 Human
+ *   Decision。本条自身仍是 2026-10-11 的调查记录：上面的 Status、Decision
+ *   Date、Consequences 描述的是当时的状态，不因此追溯改变，也不表示上面的
+ *   Consequences 已被实施。ADR-035 授权的只是一次有范围的文档与治理 patch
+ *   （00_Event_Flow.js 的修订，以及本条的这段引用），实现范围以 ADR-035 为准。
+ */
+
+// ============================================================
+// ADR-2026-10-16-035：Event Vocabulary Directory —— P3 Decision
+//                      （00_Event_Flow 作为预期权威目录；仅限 P3，
+//                      不决定 P1/P2/P4/P5/P6，不授权任何运行时强制）
+// ============================================================
+
+/**
+ * ADR Number      : ADR-2026-10-16-035
+ * Status          : Accepted（范围仅限 ADR-2026-10-11-034 的待决问题 P3
+ *                   ——事件词汇的 source of truth，以及跨项目事件是否在
+ *                   范围内。不决定 P1、P2、P4、P5、P6；不决定 Execution
+ *                   订阅范围；不授权任何运行时事件注册表、校验、拒绝机制
+ *                   或 EventBus 行为变更。本条只授权一次有范围的文档与
+ *                   治理 patch，见 Decision 里的 Authorized Work）
+ * Decision Date   : 2026-10-16（Carson 批准 P3 架构方向，并授权本次文档
+ *                   与治理 patch。日期取自会话环境的当前日期，不是 Carson
+ *                   另行提供的日期；编号里的日期沿用既有 ADR 的"决定日期"
+ *                   约定，序号 035 是 ADR Log 里的下一个序号）
+ * Record Date     : 2026-10-16
+ * Supersedes      : (none)
+ * Superseded By   : (none)
+ * Affected Modules: 00_Event_Flow.js（本条授权的文档修订）；本 ADR Log 中的
+ *                   ADR-2026-10-11-034（只追加对本条的引用，原文不改）。
+ *                   Production 代码、测试、EventBus、ProjectionEngine 零
+ *                   改动；其它治理文档的同步另行授权，本条不改动它们
+ * Related Records : ADR-2026-10-11-034（P3 的出处）；Project State「六十六」；
+ *                   Known Limitations「十七」；00_Project_Constitution.js
+ *                   零之五、(三)、(五)；00_Architecture.js A5；
+ *                   ADR-2026-07-24-012（本条不决定 Execution 订阅范围）；
+ *                   ADR-2026-09-02-030、ADR-2026-08-26-026（可作为治理来源
+ *                   被目录引用）；ADR-2026-10-06-033 D6(b)（本条不触碰）
+ *
+ * Context
+ *   ADR-034 把"谁是 Event Vocabulary 的 source of truth，以及跨项目事件
+ *   是否在范围内"列为待决问题 P3。对快照 70_Personal-Life-main.zip（sha256
+ *   cbb10235e490…）的只读复核显示：
+ *   - 已发布的事件类型 29 种。其中 10 种在 Constitution 零之五（5 个正式
+ *     定义，含 REMINDER_SENT）或 00_Event_Flow §一（6 个正式定义）里有
+ *     Standard 格式的定义；其余 19 种没有——13 种仅在 00_Event_Flow 文件头
+ *     被点名为"定义不变，见 v5.0 存档"，6 种没有任何声明。
+ *   - Constitution 零之五定义格式标准；(三)/(五) 把"现行具体事件目录（v5.0
+ *     起新增/改名部分）"转给 00_Event_Flow；Architecture A5 以它为新事件
+ *     类型的定义位置。ADR-012 与 00_Domain_Boundary「七」都没有列出任何
+ *     具体事件。
+ *   - Accepted ADR（030、026）记录了两个事件的命名与语义，但没有 Standard
+ *     格式的定义，也没有 Required Fields 声明。
+ *   - 文档与代码之间已有若干不一致（ADR-034 与 Project State「六十六」记录
+ *     的 M1–M4，复核还发现 Constitution 666 行的陈述与 29 种发布类型不符
+ *     等）。本条不裁决它们。
+ *   - 本条批准的权威范围（整个项目的事件词汇）比 Constitution (三) 现有的
+ *     限定语更宽；两者的协调需要另行授权的同步，本条不改动 Constitution。
+ *
+ * Decision（Carson，2026-10-16。以下是对他授权指令的忠实记录，不含
+ * assistant 自行增补的内容）
+ *
+ *   D1  00_Event_Flow.js 预期（intended）成为整个 Personal Life OS 项目事件
+ *       词汇的权威目录。
+ *   D2  目录的权威范围：事件词汇的成员资格、定义位置、定义状态。
+ *   D3  正式契约内容仍以其现有、已批准的定义位置为准。
+ *   D4  Constitution 零之五仍是正式事件定义的标准。
+ *   D5  现有的五个正式定义留在原处；目录引用它们，不复制。
+ *   D6  Accepted ADR 可以作为治理来源被引用，但 ADR 里提到的字段不因此自动
+ *       成为 Required Fields。
+ *   D7  生产代码说明的是观察到的运行时行为，不自动证明事件契约获批。
+ *   D8  已观察事件、外部引用、未解决的历史条目、已正式定义的事件必须可以
+ *       区分。
+ *   D9  Execution 订阅范围不得被这项文档工作扩大或重新定义。
+ *   D10 不授权任何运行时事件注册表、校验、拒绝机制或 EventBus 行为变更。
+ *
+ *   Authorized Work（同一份授权；有范围的文档与治理 patch）
+ *   W1  本 ADR。
+ *   W2  ADR-034：只追加一段对本条的引用，P1、P2、P4、P5、P6 的原文与状态
+ *       不变，不改写原调查的历史范围。
+ *   W3  00_Event_Flow.js 修订为项目级事件词汇目录，分为 A 已在 Constitution
+ *       有正式定义、B 已在本文件 §一有正式定义、C 已观察待正式定义、D 跨项目
+ *       引用、E 历史定义指针、F 已知不一致，六类可区分。原有六个正式条目与
+ *       §二 原文保持不变；六个已复核候选事件（NOTE_ARCHIVED、NOTE_UPDATED、
+ *       TASK_CONVERTED_TO_NOTE、TASK_NOT_SELECTED、VIEW_ORDER_UPDATED、
+ *       WORKFLOW_UPDATED）先作为观察条目收录，不含 Required Fields。
+ *   W4  §二 的 Execution 订阅表述不变；只允许追加不扩大其含义的最小说明。
+ *   W5  本阶段不修改 Constitution、Architecture、File Map、Roadmap、Known
+ *       Limitations、Project State、.claspignore、Event_Flow.mermaid 或其它
+ *       文件；下游同步另备矩阵，另行授权。
+ *
+ *   Not decided here（原授权明确保留）：P1（文档方式是被批准的规划方向；
+ *   交付与同步的细节仍需经过审阅的实施计划）、P2（历史触发标准仍未解决，
+ *   不选定通用阈值）、P4（六个事件的首批只是建议的复核范围，不是发布
+ *   正式契约的批准）、P5（变化频率与消费方数量标准推迟）、P6（既有不一致
+ *   不在本条修复）；Execution 订阅范围。
+ *
+ * Consistency Check
+ *   - ADR-2026-07-24-012：无冲突——本条不决定、也不改变 Execution 订阅范围。
+ *   - ADR-2026-09-02-030、ADR-2026-08-26-026：无冲突——它们只是被目录引用的
+ *     治理来源，本条不修改它们，它们正文里提到的 payload 字段不因此成为
+ *     Required Fields。
+ *   - ADR-2026-10-06-033 D6(b)：本条不触碰；目录里的 TASK_NOT_SELECTED 条目
+ *     保留那条未解决的治理差异。
+ *   - ADR-2026-10-11-034：P1、P2、P4、P5、P6 原文不变。
+ *   - Constitution (三)/(五) 的"v5.0 起新增/改名部分"限定语比本条的权威范围
+ *     窄：这不是 ADR 之间的冲突，但需要同步，见 Consequences。
+ *
+ * Consequences / Result
+ *   - 本条随附的 patch 只涉及三处文档：本 ADR；ADR-034 末尾的一段引用；
+ *     00_Event_Flow.js 的目录修订。Production 代码、生命周期行为、事件
+ *     payload、测试、EventBus、ProjectionEngine 与 Execution 订阅范围均
+ *     未改动。
+ *   - Verification Level：文档修改，证据为对上述快照的静态阅读；没有运行
+ *     任何测试；NOT LIVE GAS VERIFIED。patch 针对上述快照准备；记录时正式
+ *     项目目录不可访问，应用到正式项目由 Carson 完成。
+ *   - 本条不批准任何观察到的事件行为或 payload 为 contract；目录里的观察
+ *     条目、跨项目引用条目与历史指针条目都不是契约，也不是 Execution 的
+ *     订阅信号。
+ *   - 下游文档可能需要后续同步（Constitution、Architecture、File Map、
+ *     Roadmap、Known Limitations、Project State）。本条不改动它们，也不
+ *     自动产生新的 Work Item。
+ *
+ * PENDING（尚未决定——不要当作已批准）
+ *   - P1 的交付与同步细节、P2、P4、P5、P6：见 ADR-034 原文，状态不变。
+ *   - Execution 订阅范围：需要另行的架构决定，并取得 Execution OS 或 UEF
+ *     一侧的证据；本条不发明 Execution 契约。
+ *   - Constitution (三)/(五) 限定语与本条权威范围的协调；下游文档同步。
+ *   - 观察条目是否、何时可以升级为正式定义：与 P4、P5 相关，未决定。
+ *
+ * Reopen Condition
+ *   只有 Carson 发出新的、明确的 decision 才推进上面任何一个 PENDING 项；
+ *   不因目录里出现某个观察条目、或某个事件还没有正式定义，而自动补定义、
+ *   自动扩大目录的权威范围或自动引入运行时强制。
  */
