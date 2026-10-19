@@ -17,9 +17,11 @@
  * 00_Project_Constitution.gs 零之五）。本文件只列 v5.1 新增/改名的
  * 事件。
  *
- * 【2026-10-16 修订——ADR-2026-10-16-035】上面一段是 v5.1 设计包当时的
- * 范围说明，原文保留，不改。自本次修订起，本文件的定位是 Personal Life
- * OS 项目事件词汇的预期权威目录（intended authoritative directory）：
+ * 【2026-10-16 修订——ADR-2026-10-16-035（状态：Proposed / 待人类决定）】
+ * 上面一段是 v5.1 设计包当时的范围说明，原文保留，不改。本次修订拟议把
+ * 本文件定位为 Personal Life OS 项目事件词汇的预期权威目录（intended
+ * authoritative directory）；这一定位以 ADR-035 为依据，而 ADR-035 尚未被
+ * 接受，所以在 ADR-035 被人类接受之前，它还不是已采纳的治理规则。拟议的
  * 权威范围只有三项——事件词汇的成员资格、定义位置、定义状态。正式契约
  * 内容（Payload / Required Fields 等）仍以各事件现有、已批准的定义位置
  * 为准，本文件不复制它们。目录的结构见下面的「〇」。
@@ -36,12 +38,14 @@
  * 定义在哪里（定义位置）、它现在处于什么状态（定义状态）。它不回答"这个
  * 事件的契约是什么"——那是各事件现有、已批准的定义位置的事。
  *
- * 只有 A 类和 B 类是正式定义：满足 00_Project_Constitution.js 零之五的
- * Event Definition Standard，并位于权威位置。C、D、E、F 类都不是契约，没有
+ * 只有 A 类和 B 类是正式定义：它们位于各自现有、已批准的定义位置，并采用
+ * 00_Project_Constitution.js 零之五的 Event Definition Standard 格式。这只
+ * 说明它们采用了该格式（结构层面），不说明本目录已逐项验证它们的字段内容
+ * ——〇.2、〇.3 各写明了本次实际核对了什么。C、D、E、F 类都不是契约，没有
  * Required Fields。Accepted ADR 可以作为治理来源被引用，但 ADR 正文提到的
  * 字段不因此成为 Required Fields；观察到的 payload 同理。收录于本目录不代表
- * 任何事件被批准、被推荐，也不使它成为 Execution 的订阅信号（见 §二 之后
- * 的说明）。
+ * 任何事件被批准、被推荐；A–F 分类与收录本身，也不决定、增加或取消任何
+ * 事件的 Execution 订阅资格（见 §二 之后的说明）。
  *
  *   A 已在 Constitution 零之五有正式定义（指针，不复制）
  *   B 已在本文件 §一有正式定义（指针，不复制；原文一字未改）
@@ -87,7 +91,7 @@
  *   "观察到的 payload"只是发布处所见，不是 schema，也不是契约。
  *
  * ── NOTE_ARCHIVED
- *   状态          : OBSERVED — 尚无正式定义
+ *   状态          : OBSERVED — NOT A CONTRACT；尚无正式定义
  *   发布位置      : 29_NoteEngine.js:140（archiveNote，129–146）
  *   触发路径      : UNRESOLVED——上述快照里没有找到 archiveNote 的任何调用
  *                   方，生产中是否真会发出该事件 UNKNOWN
@@ -101,7 +105,7 @@
  *   证据状态      : VERIFIED（静态阅读）
  *
  * ── NOTE_UPDATED
- *   状态          : OBSERVED — 尚无正式定义
+ *   状态          : OBSERVED — NOT A CONTRACT；尚无正式定义
  *   发布位置      : 29_NoteEngine.js:206（updateNote，162–213）
  *   观察到的 payload: 键集合随调用而变——note_id、被更新的白名单字段
  *                   （UPDATABLE_FIELDS = content、category）、内容或类别变化
@@ -125,7 +129,7 @@
  *   证据状态      : VERIFIED（静态阅读）
  *
  * ── TASK_CONVERTED_TO_NOTE
- *   状态          : OBSERVED — 尚无 Standard 格式的正式定义
+ *   状态          : OBSERVED — NOT A CONTRACT；尚无 Standard 格式的正式定义
  *   发布位置      : 20_TaskEngine.js:614（markTaskConvertedToNote_，
  *                   594–621；唯一调用方 42_ConversionEngine.js:380
  *                   convertTaskToNote）
@@ -153,7 +157,7 @@
  *   证据状态      : VERIFIED（静态阅读）
  *
  * ── TASK_NOT_SELECTED
- *   状态          : OBSERVED — 尚无正式定义
+ *   状态          : OBSERVED — NOT A CONTRACT；尚无正式定义
  *   发布位置      : 20_TaskEngine.js:531（markTaskNotSelected_，517–538；
  *                   唯一调用方 28_WorkflowEngine.js:262
  *                   handleBranchResolution_，244–279）
@@ -178,7 +182,7 @@
  *   证据状态      : VERIFIED（静态阅读）
  *
  * ── VIEW_ORDER_UPDATED
- *   状态          : OBSERVED — 尚无 Standard 格式的正式定义
+ *   状态          : OBSERVED — NOT A CONTRACT；尚无 Standard 格式的正式定义
  *   发布位置      : 20_TaskEngine.js:478（updateTaskOrder，467–498）
  *   观察到的 payload: { context_key, ordered_task_ids, chat_id }（发布处
  *                   478–482 所见；设计材料描述的键相同，见下）
@@ -205,7 +209,7 @@
  *   证据状态      : VERIFIED（静态阅读）
  *
  * ── WORKFLOW_UPDATED
- *   状态          : OBSERVED — 尚无正式定义
+ *   状态          : OBSERVED — NOT A CONTRACT；尚无正式定义
  *   发布位置（两处，payload 形状不同；都只是观察，没有指定哪一种是规范
  *   形状）        :
  *                   28_WorkflowEngine.js:147（startWorkflow，143–154）
@@ -265,8 +269,9 @@
 
 /**
  * 〇.6 E 类——历史定义指针（当前无法解析）
- *   本文件文件头（12–17 行）把下列 13 个 v5.0 事件称为"定义不变，见 v5.0
- *   存档版本或 00_Project_Constitution.gs 零之五"。在上述快照里：v5.0 存档
+ *   本文件文件头（12–17 行）把下列 13 个 v5.0 事件称为"定义不变，不在本文件
+ *   重复（见 v5.0 存档版本或 00_Project_Constitution.gs 零之五）"。在上述
+ *   快照里：v5.0 存档
  *   版本不在仓库；零之五只有 A 类那 5 个事件，不含它们；也没有找到它们的
  *   Standard 格式定义。因此这 13 个事件的正式定义 UNRESOLVED。它们在代码里
  *   都已观察到发布点（VERIFIED），但本目录不为它们记录 payload、Required
@@ -299,8 +304,10 @@
  *   M5 Constitution 666 写"本项目只追加自己的 TASK_ 开头和 REMINDER_SENT
  *      事件"；上述快照里本项目发布 29 种事件类型，其中以 TASK_ 开头的有 7
  *      种，REMINDER_SENT 没有发布点。本目录不对这个差异给出历史解释。
- *   M6 本文件文件头点名的 v5.0 事件有 13 个，而 §二（原文）与 File Map 51
- *      行写"v5.0 新增 15 个"。
+ *   M6 本文件文件头点名的 v5.0 事件有 13 个，而 §二（原文）写"v5.0 新增 15
+ *      个"；File Map 51–52 行写 02_EventBus.gs"新增15个事件类型的文件头文档"
+ *      （该处没有写 v5.0，也没有说明这 15 个是哪些事件）。File Map 的 15 与
+ *      §二 的 15 是否指同一组事件：UNVERIFIED。
  *   M7 Architecture 371、375 引用本文件的"Timeline 投影规则"与
  *      Cross-Domain 示例/流程 B，本文件里没有这些章节。
  */
@@ -438,11 +445,23 @@
  */
 
 /**
- * 【2026-10-16 说明——ADR-2026-10-16-035；上面 §二 的原文一字未改】
+ * 【2026-10-16 说明——ADR-2026-10-16-035（状态：Proposed / 待人类决定）；
+ * 上面 §二 的原文一字未改】
  * 本文件新增的「〇」节（事件词汇目录）只说明各事件类型在词汇表里的状态，
- * 不对 Execution 的订阅范围作任何声明，也不重新定义它。§二 所指的集合以
- * §二 原文的列举为准（既有 5 个 + v5.0 新增 15 个 + 本次 v5.1 新增/改名
- * 6 个）；「〇」节里的 C 类（观察）、D 类（跨项目引用）条目不因收录于本
- * 目录而被并入该集合，收录也不使任何条目成为已批准的契约。Execution 该
- * 订阅哪些事件，不由本文件、也不由 ADR-2026-10-16-035 决定。
+ * 不对 Execution 的订阅范围作任何声明，也不重新定义它。具体地：
+ *   1. 「〇」节的 A–F 分类和条目的收录，本身不决定、增加或取消任何事件的
+ *      Execution 订阅资格；也不能据某个事件所在的分类，推断它具有或不具有
+ *      订阅资格。
+ *   2. §二 所指的集合以 §二 原文的列举为准（既有 5 个 + v5.0 新增 15 个 +
+ *      本次 v5.1 新增/改名 6 个）。已属该集合的事件，不因被列入 C、D、E 类
+ *      而改变其既有地位。例如 REMINDER_SENT（另见 A 类）和
+ *      REMINDER_REQUESTED（另见 E 类）同时出现在 D 类：它们在 §二 里的地位，
+ *      仍以 §二 原文与本文件头部的原有列举为准，D 类收录不改变这一点。
+ *   3. 收录于本目录，不使任何条目成为已批准的契约；C 类（观察）、D 类（跨
+ *      项目引用）、E 类（历史指针）的条目也不因收录而自动成为新的订阅信号。
+ *   4. 某个事件是否属于正式订阅范围，仍由 §二 原文所指的集合和后续的正式
+ *      架构决定控制。Execution 该订阅哪些事件，不由本文件、也不由
+ *      ADR-2026-10-16-035 决定。
+ *   5. 本次文档修订没有验证 Execution 的实际运行时订阅行为（Execution 源码
+ *      不在上述快照内）。
  */
