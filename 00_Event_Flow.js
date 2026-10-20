@@ -17,7 +17,7 @@
  * 00_Project_Constitution.gs 零之五）。本文件只列 v5.1 新增/改名的
  * 事件。
  *
- * 【2026-10-16 修订——ADR-2026-10-16-035（状态：Proposed / 待人类决定）】
+ * 【修订（记录日期来源未确认）——ADR-2026-10-16-035（状态：Proposed / 待人类决定）】
  * 上面一段是 v5.1 设计包当时的范围说明，原文保留，不改。本次修订拟议把
  * 本文件定位为 Personal Life OS 项目事件词汇的预期权威目录（intended
  * authoritative directory）；这一定位以 ADR-035 为依据，而 ADR-035 尚未被
@@ -28,7 +28,7 @@
  */
 
 // ============================================================
-// 〇、事件词汇目录（2026-10-16 新增，ADR-2026-10-16-035）
+// 〇、事件词汇目录（新增，记录日期来源未确认，ADR-2026-10-16-035）
 // ============================================================
 
 /**
@@ -41,7 +41,8 @@
  * 只有 A 类和 B 类是正式定义：它们位于各自现有、已批准的定义位置，并采用
  * 00_Project_Constitution.js 零之五的 Event Definition Standard 格式。这只
  * 说明它们采用了该格式（结构层面），不说明本目录已逐项验证它们的字段内容
- * ——〇.2、〇.3 各写明了本次实际核对了什么。C、D、E、F 类都不是契约，没有
+ * ——〇.2、〇.3 都写明了本次没有重新核对字段内容（〇.3 另写明实际核对了引用的
+ * 函数是否仍存在）。C、D、E、F 类都不是契约，没有
  * Required Fields。Accepted ADR 可以作为治理来源被引用，但 ADR 正文提到的
  * 字段不因此成为 Required Fields；观察到的 payload 同理。收录于本目录不代表
  * 任何事件被批准、被推荐；A–F 分类与收录本身，也不决定、增加或取消任何
@@ -58,7 +59,7 @@
  * 文本或设计文档的记载；UNVERIFIED / UNRESOLVED = 没有足够证据；NOT A
  * CONTRACT = 仅为观察或引用，不是已批准契约。
  *
- * 证据基准：70_Personal-Life-main.zip（sha256 cbb10235e490…，2026-10-12
+ * 证据基准：70_Personal-Life-main.zip（sha256 cbb10235e490…，12-10-2026
  * 12:54 打包）。下文的 file:line 以该快照为准，文件之后变化时行号可能失效。
  * 没有运行任何测试，没有任何实机（LIVE GAS）验证。
  */
@@ -139,7 +140,7 @@
  *                   task_id、converted_to_note_id，状态写死为 CONVERTED，不
  *                   读 payload.status）；在 TIMELINE_ENTITY_MAP 中；重放
  *                   20_TaskEngine.js:699
- *   相关 ADR      : ADR-2026-09-02-030（Accepted，2026-09-04）：C4 事件命名、
+ *   相关 ADR      : ADR-2026-09-02-030（Accepted，04-09-2026）：C4 事件命名、
  *                   C5 投影与 Timeline 登记、C6 重放分支、A2 源任务状态
  *                   CONVERTED。该 ADR 没有给出完整的 payload schema，也没有
  *                   声明 Required Fields（正文没有 payload 字段清单）
@@ -191,7 +192,7 @@
  *                   与 11_ProjectionRebuilder__UI_I6_ADDITIONS.js:56 处理
  *   Timeline      : 有意不进 TIMELINE_ENTITY_MAP（10_ProjectionEngine.js 的
  *                   map 注释；00_Drag_Ordering_ADR.js 698–701）
- *   相关 ADR / 文档: ADR-2026-08-26-026（Accepted，2026-09-11；ADR 自称
+ *   相关 ADR / 文档: ADR-2026-08-26-026（Accepted，11-09-2026；ADR 自称
  *                   LIVE VERIFIED——只是 ADR 自己的记录，REPORTED，本次
  *                   没有复核）及设计材料 00_Drag_Ordering_ADR.js（H.3 的
  *                   事件语义 424–436，J.5 647–655，J.6 698–701）。它们描述了
@@ -248,7 +249,7 @@
  *                   Standard 格式定义（VERIFIED）
  *   外部消费方    : UNVERIFIED——上述快照里没有来自 Reminder OS 的权威证据。
  *                   00_Implementation_Plan_TaskReminder_EventConsumer.js 的
- *                   状态是 Plan — Pending Review（2026-08-27），它是计划，
+ *                   状态是 Plan — Pending Review（27-08-2026），它是计划，
  *                   不是证据；本目录不声称 Reminder OS 消费该事件
  *   payload       : 本目录不记录（外部契约 UNVERIFIED）
  *
@@ -445,7 +446,7 @@
  */
 
 /**
- * 【2026-10-16 说明——ADR-2026-10-16-035（状态：Proposed / 待人类决定）；
+ * 【说明（记录日期来源未确认）——ADR-2026-10-16-035（状态：Proposed / 待人类决定）；
  * 上面 §二 的原文一字未改】
  * 本文件新增的「〇」节（事件词汇目录）只说明各事件类型在词汇表里的状态，
  * 不对 Execution 的订阅范围作任何声明，也不重新定义它。具体地：
@@ -454,9 +455,10 @@
  *      订阅资格。
  *   2. §二 所指的集合以 §二 原文的列举为准（既有 5 个 + v5.0 新增 15 个 +
  *      本次 v5.1 新增/改名 6 个）。已属该集合的事件，不因被列入 C、D、E 类
- *      而改变其既有地位。例如 REMINDER_SENT（另见 A 类）和
- *      REMINDER_REQUESTED（另见 E 类）同时出现在 D 类：它们在 §二 里的地位，
- *      仍以 §二 原文与本文件头部的原有列举为准，D 类收录不改变这一点。
+ *      而改变其既有地位。REMINDER_SENT（另见 A 类）和 REMINDER_REQUESTED
+ *      （另见 E 类）同时被列入 D 类。D 类收录不改变它们是否属于 §二 所指的
+ *      集合；本文件不判定这一点，因为 §二 原文只给出数量，没有事件名单
+ *      （见 〇.7 M6）。
  *   3. 收录于本目录，不使任何条目成为已批准的契约；C 类（观察）、D 类（跨
  *      项目引用）、E 类（历史指针）的条目也不因收录而自动成为新的订阅信号。
  *   4. 某个事件是否属于正式订阅范围，仍由 §二 原文所指的集合和后续的正式

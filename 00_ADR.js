@@ -2722,17 +2722,22 @@
  *   只有 Carson 对上面的待决问题做出明确的 Human Decision，才进入下一阶段；
  *   在那之前不 coding、不排期。
  *
- * Later Record（2026-10-16 追加；其后按 ADR-035 的 Proposed 状态重述；以上
- * 全部原文一字未改）
- *   ADR-2026-10-16-035 记录了 P3 的候选决定（仅 P3），状态 Proposed / 待人类
- *   决定；在 ADR-035 被人类接受之前，P3 仍按"待决"对待。
+ * Later Record（2026-10-16 追加；以上全部原文一字未改）
+ *   P3 已由 Carson 作出 Human Decision，记录在 ADR-2026-10-16-035（仅 P3）。
  *   P1、P2、P4、P5、P6 的原文与"待决"状态不变，仍待 Carson 的 Human
  *   Decision。本条自身仍是 2026-10-11 的调查记录：上面的 Status、Decision
  *   Date、Consequences 描述的是当时的状态，不因此追溯改变，也不表示上面的
- *   Consequences 已被实施。ADR-035 所涉的是一次有范围的文档与治理 patch
- *   （00_Event_Flow.js 的修订，以及本条的这段引用）；该 patch 的内容范围以
- *   ADR-035 为准，但 ADR-035 尚未被接受，所以这段引用不构成对 P3 的最终
- *   决定。
+ *   Consequences 已被实施。ADR-035 授权的只是一次有范围的文档与治理 patch
+ *   （00_Event_Flow.js 的修订，以及本条的这段引用），实现范围以 ADR-035 为准。
+ *
+ * 【更正——记录日期来源未确认】
+ *   上面这段 Later Record 保持原文，不改、不删。其标题里的追加日期来源未确认；
+ *   正式决定日期 16-10-2026 只确认该日期本身：它不是这段的记录日期或追加日期，
+ *   也不代表 P3 的最终架构决定。
+ *   ADR-2026-10-16-035 的状态是 Proposed / 待人类决定，尚未被接受。上面
+ *   "P3 已由 Carson 作出 Human Decision"、"ADR-035 授权的只是一次有范围的文档
+ *   与治理 patch"和"实现范围以 ADR-035 为准"这几处措辞，不得被解释为 ADR-035
+ *   已接受、已生效，也不得被解释为 P3 的最终架构已获决定。
  */
 
 // ============================================================
@@ -2753,13 +2758,14 @@
  *                   Work 是 Carson 对一次有范围的文档与治理 patch 的授权，
  *                   性质是授权制作候选内容，不等于本条已被接受，也不等于
  *                   该 patch 已获应用授权）
- * Decision Date   : 2026-10-16（Carson 明确确认的正式决定日期。该日期不
- *                   意味着本条的全部内容已被接受——本条状态仍是 Proposed /
- *                   待人类决定，见 Status。它不是记录日期、实施日期或部署
- *                   日期；编号里的日期与它相同，序号 035 是 ADR Log 里的
- *                   下一个序号）
- * Record Date     : 2026-10-16（取自记录当时的会话环境，不是 Carson 另行
- *                   确认的日期；Carson 确认的只有上面的正式决定日期）
+ * Decision Date   : 16-10-2026（Carson 明确确认的正式决定日期。本字段只确认
+ *                   该日期本身：不推断它代表 P3 的最终架构决定，也不意味着
+ *                   本条的全部内容已被接受——本条状态仍是 Proposed / 待人类
+ *                   决定，见 Status。它不是记录日期、实施日期或部署日期；
+ *                   编号里的日期（按 ADR 编号格式书写）与它是同一天，序号
+ *                   035 是 ADR Log 里的下一个序号）
+ * Record Date     : 记录日期来源未确认（不使用正式决定日期代替；先前写入的
+ *                   日期没有经 Carson 确认的来源，不能当作实际记录日期）
  * Supersedes      : (none)
  * Superseded By   : (none)
  * Affected Modules: 00_Event_Flow.js（本条所涉的候选文档修订）；本 ADR Log 中的
@@ -2779,9 +2785,10 @@
  *   cbb10235e490…）的只读复核显示：
  *   - 已发布的事件类型 29 种。其中 10 种在 Constitution 零之五（5 个正式
  *     定义，含 REMINDER_SENT）或 00_Event_Flow §一（6 个正式定义）里有
- *     Standard 格式的定义；其余 19 种没有——13 种仅在 00_Event_Flow 文件头
- *     被点名，原文为"定义不变，不在本文件重复（见 v5.0 存档版本或
- *     00_Project_Constitution.gs 零之五）"，6 种没有任何声明。
+ *     Standard 格式的定义；其余 19 种没有——13 种在 00_Event_Flow 文件头被点名
+ *     为"定义不变，不在本文件重复（见 v5.0 存档版本或
+ *     00_Project_Constitution.gs 零之五）"（这只是该文件头对它们的描述，不表示
+ *     这些事件名称只在文件头出现），6 种没有任何声明。
  *   - Constitution 零之五定义格式标准；(三)/(五) 把"现行具体事件目录（v5.0
  *     起新增/改名部分）"转给 00_Event_Flow；Architecture A5 以它为新事件
  *     类型的定义位置。ADR-012 与 00_Domain_Boundary「七」都没有列出任何
@@ -2794,7 +2801,7 @@
  *   - 本条拟议的权威范围（整个项目的事件词汇）比 Constitution (三) 现有的
  *     限定语更宽；两者的协调需要另行授权的同步，本条不改动 Constitution。
  *
- * Decision（Proposed / 待人类决定。Carson，2026-10-16。以下是对他授权指令
+ * Decision（Proposed / 待人类决定。Carson，16-10-2026。以下是对他授权指令
  * 的忠实记录，不含 assistant 自行增补的内容）
  *
  *   D1  00_Event_Flow.js 预期（intended）成为整个 Personal Life OS 项目事件
