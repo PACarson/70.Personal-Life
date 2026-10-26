@@ -59,9 +59,9 @@
  * 文本或设计文档的记载；UNVERIFIED / UNRESOLVED = 没有足够证据；NOT A
  * CONTRACT = 仅为观察或引用，不是已批准契约。
  *
- * 证据基准：70_Personal-Life-main.zip（sha256 cbb10235e490…，12-10-2026
- * 12:54 打包）。下文的 file:line 以该快照为准，文件之后变化时行号可能失效。
- * 没有运行任何测试，没有任何实机（LIVE GAS）验证。
+ * 证据基准：70_Personal-Life-main.zip（REPORTED：sha256 cbb10235e490…，
+ * 12-10-2026 12:54 打包；这两项均转述自交接记录，当前未直接核验原始 ZIP，打包时间未注明时区）。
+ * 下文的 file:line 以该快照为准，文件之后变化时行号可能失效。没有运行任何测试，没有任何实机（LIVE GAS）验证。
  */
 
 /**

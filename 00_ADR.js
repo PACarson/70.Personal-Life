@@ -2801,7 +2801,7 @@
  *   - 本条拟议的权威范围（整个项目的事件词汇）比 Constitution (三) 现有的
  *     限定语更宽；两者的协调需要另行授权的同步，本条不改动 Constitution。
  *
- * Decision（Proposed / 待人类决定。Carson，16-10-2026。以下是对他授权指令
+ * Decision（Proposed / 待人类决定。Carson。以下是对他授权指令
  * 的忠实记录，不含 assistant 自行增补的内容）
  *
  *   D1  00_Event_Flow.js 预期（intended）成为整个 Personal Life OS 项目事件
