@@ -4103,3 +4103,213 @@
  *   1099–1101、1224 行；36_Tests_Sprint3Acceptance.gs 第 278–280 行；
  *   54_Tests_TaskToNoteConversion.gs 第 192、241 行。
  */
+
+/**
+ * 六十七、ADR-035 离线候选（第三、四轮）+ Handoff v2 + Personal Life OS
+ *        恢复评估（READ-ONLY）——代码开发已按 Carson 指示停止
+ *        —— OFFLINE CANDIDATES ONLY：未应用 / 未部署 / 未覆盖正式项目
+ *        （有时间戳的只有 handoff v2：27-10-2026 22:33 UTC，和本条：
+ *        31-10-2026 08:08 UTC，均取自沙盒时钟，不是用户设备时间；其余各
+ *        轮没有记录时间戳，不推断日期）
+ *
+ * 编号说明：这是在上传的项目 zip（24-10-2026 快照，最后一条是「六十六
+ * 」）之后的下一个顺序号，没有跳号、没有覆盖任何已有条目。这份 zip 是非
+ * 正式基线；如果 Carson 的真实项目在这之后还有别的窗口追加过条目，贴回
+ * 前先核对编号，不要覆盖。
+ *
+ * Status:
+ *   ADR-2026-10-16-035 状态         : Proposed / 待人类决定（未变）
+ *   Decision Date                   : 16-10-2026（只确认日期本身；不是
+ *                                     P3 最终架构决定）
+ *   第三轮候选（5(a)、5(b)）        : COMPLETE，未应用
+ *   第四轮候选（日期还原 + EF 456） : COMPLETE，未应用
+ *   Handoff v2                      : COMPLETE（记录文件），未应用
+ *   Personal Life OS 恢复评估       : 报告已交付；发现是静态阅读证据，
+ *                                     提案未获授权
+ *   Coding                          : STOPPED（Carson：先停止代码）
+ *   Next Work Item                  : NOT SELECTED
+ *   04-10 Emergency Stop 门槛       : UNRESOLVED（审计结果未持久化；是
+ *                                     否仍适用待 Carson 决定）
+ *
+ * ── 一、本窗口已确认的决定 ────────────────────────────────────────────────
+ * 来源：Carson 在对话里给出的授权文档与指令；原文不在仓库，状态 REPORTED。
+ * 1. 第三轮：ADR 2804 的 Decision 标题移除紧邻「对授权指令的忠实记录」
+ *    的 16-10-2026（Decision Date 字段与状态不变）；Event Flow 第 62–64
+ *    行的 sha256 前缀与打包时间标注 REPORTED（转述自交接记录；当前未直
+ *    接核验原始 ZIP；打包时间未注明时区）。
+ * 2. 第四轮：Event Flow 中四处历史日期恢复为 ISO 原格式（2026-10-12
+ *    12:54、2026-09-04、2026-09-11、2026-08-27）；第 456 行「§二 原文的
+ *    列举」改为「§二 原文」；00_ADR.js 不动；不生成 diff。
+ * 3. handoff §5 状态：第 1、3 项已做成候选（第四轮），5(a)、5(b) 已做成
+ *    候选（第三轮）；第 2 项不修改文件，例外清单与按第四轮文件重新计数
+ *    的结果记入 handoff；第 4 项 W2 保持不动，ADR 第 2772 行描述性措辞
+ *    是可选、尚未决定的修改。
+ * 4. 仍未处理：ADR-035 是否 Accepted、H2、L4–L6、I1、I2，以及 handoff
+ *    其余遗留项。
+ * 5. Test.js 第 13 行的疑似凭证仍未处理：只记录风险，不读取、不复制、不
+ *    暴露凭证值，不自行修改该行（本窗口没有读取该文件）。
+ * 6. 治理边界：ADR-035 不得擅自改为 Accepted / Approved / Effective；不
+ *    得把 16-10-2026 推断为 P3 最终架构决定日期；候选文件不等于正式项目
+ *    文件；ZIP、候选目录或 handoff 的存在不证明文件已进入正式项目或
+ *    GAS；不得宣称正式项目、Git HEAD、工作树或 GAS 部署状态已确认；不得
+ *    扩大到第五轮修改；不得更改 W2、H2、L4–L6、I1、I2 或其他未授权事
+ *    项。
+ * 7. 应用与部署未获授权；本条写入之后，代码开发按 Carson 指示停止。
+ *
+ * ── 二、本窗口产出的文件（离线候选或记录文件，均未应用） ──────────────────
+ *   round3/00_ADR.js（185,031 字节）
+ *     SHA-256 5e7faaa5d5247676ac61242c3939db61c40afe56439aa6310e85ca5a49a77a86
+ *   round3/00_Event_Flow.js（30,957 字节）
+ *     SHA-256 c3134b763af0bcb9a51c8d1ac3849c1e81ba1b9ff17f934345b3b0d51d864765
+ *   round3/00_ADR.js.diff（595 字节）
+ *     SHA-256 be12920adea82783d430855723cbf06e4ce7ebea5e63e9558b7c7ad898d7ee29
+ *   round3/00_Event_Flow.js.diff（870 字节）
+ *     SHA-256 2292d38933e1043e8e1ddce13f3bb0440b4b49213d7e4f6ac6433481e2ff62b0
+ *   round4/00_ADR.js（185,031 字节）
+ *     SHA-256 5e7faaa5d5247676ac61242c3939db61c40afe56439aa6310e85ca5a49a77a86
+ *   round4/00_Event_Flow.js（30,948 字节）
+ *     SHA-256 7c66f8d9e20c0e886fad5dd1b3fbb76a344b52ff31bed45c6e9c16f68b7e4420
+ *   Handoff_Manifest_ADR035_Candidates.md v2（27,654 字节）
+ *     SHA-256 010f3c5eeffbcb6f4bf8032c882c0c6af04ebbd5712abd37e734b03fd7bd5d92
+ *   基线：本条所在文件 00_Project_State.js 的基线是 zip 成员（267,154
+ *   字节，SHA-256
+ *   e581728e454e1dd7d7ca76717b64884c90223f676a4e5cac39f04aa0ef330c32
+ *   ）；round3 / round4 的 ADR 与 Event Flow 的基线是 zip 成员
+ *   00_ADR.js / 00_Event_Flow.js（与第二轮候选哈希相同）。累计变化：ADR
+ *   仅第 2804 行；Event Flow 仅第 62–64、143、195、252、456 行。其余文
+ *   件本窗口没有产出。
+ *
+ * ── 三、Personal Life OS 恢复评估摘要（静态阅读；发现不等于决定） ─────────
+ * 基线：上传的 zip（859,483 字节，SHA-256
+ * b7bb53b0b20defcf174026c00c9c1f6728389d035b88725beb086c8856fde21c）是
+ * 非正式基线：101 个文件（含 2 个以点开头的配置文件；83 个 .js、1 个
+ * .html），没有 .git；压缩包注释里只有
+ * b13c7b587c0cc9fd26eb300030b29dfa62e106b8，像 commit id，但无仓库可核
+ * 对，不能当作 Git HEAD；README 过时；Core 项目（Telegram 入口，
+ * 04_Main）、Execution OS、Reminder OS 的源码和线上 GAS（脚本属性、表、
+ * 部署、触发器）都不在其中。包内 00_ADR.js、00_Event_Flow.js 与第二轮候
+ * 选哈希相同，只说明内容相同，不证明已批准或已进入正式项目。
+ * 已验证（静态阅读，本快照）：除 Test.js（按要求未读取）外的 82 个 .js
+ * 均通过 node --check；HTML 引用的 22 个 ui_ 函数服务端都有定义；没有重
+ * 复的全局 const / let / class；仓库内没有 doPost。
+ * P3 证据：ADR-035 仍是 Proposed，范围仅文档；EventBus.publish 的字符串
+ * 字面量事件类型 29 个、没有非字面量调用，ProjectionEngine switch 的
+ * case 29 个，只有 REMINDER_REQUESTED 有发布无 case、只有 REMINDER_SENT
+ * 有 case 无本仓库发布者（与 ADR-034 的对账一致，已由文件验证）；仓库里
+ * 没有 EventDefinitions 代码文件。仅由历史报告转述：ADR-034 的其余计
+ * 数、ADR-035 所依据的 cbb10235e490… 快照、15-10 对 P3 方向「仅用于规
+ * 划」的认可。尚未验证：V5.0 归档、Execution OS 订阅行为、Core 项目的
+ * Inventory 事件、Reminder OS 对 REMINDER_* 的产生与消费、任何真实 GAS
+ * 事件流。结论：P3 没有被人类正式记录为最终决定，不得写成「已批准」。
+ *
+ * 发现（均为静态阅读证据，没有 LIVE 验证；尚未登记为 Known Limitation）：
+ *   F1 TASK_CREATED 路径没有持久化确认。20_TaskEngine.js
+ *   createTaskDirect_（第 160 行起）在第 225 行发布 TASK_CREATED 后直接
+ *   返回内存对象；同文件的更新 / 完成 / 取消 / 转换路径在第 336、364、
+ *   416、533、575 行有 projection_ok === false 兜底（
+ *   materializeTaskRow_，第 728 行），创建没有。10_ProjectionEngine.js
+ *   dispatch（第 141 行起）在第 192–193 行只 Logger.log 吞掉 projector
+ *   异常（即 Known Limitation 9，快照里仍成立），所以 02_EventBus.js
+ *   publish（第 155 行起）的 projection_ok = false 分支（第 205 行）与
+ *   管理员告警（第 207、220 行）对 projector 异常不可达；
+ *   05_SheetUtils.js upsertRowByKey_（第 181 行起）对表里没有的列静默跳
+ *   过（第 212 行）；50_UIBridge.js ui_createTask（第 1018 行起）在第
+ *   1050 行返回内存对象，ui_index.html 成功后只重载列表。
+ *   51_Tests_UIBridge_Interactions.js 第 449 行起的创建用例只断言返回对
+ *   象，读不到 Tasks 表。后果（静态推断）：Events 已写入而 Tasks 没有对
+ *   应行时，UI 不报错，任务只是「消失」，只能靠手动
+ *   rebuildAllProjections() 修复。
+ *   F2 环境预检覆盖不足。15_Setup.js runPreflightCheck（第 498 行）只做
+ *   模块 typeof 检查，不含 00_ 系列文件、01_SecureConfig、50_UIBridge、
+ *   ui_index、脚本属性、表头 / Schema；runDiagnostics（第 370 行）检查
+ *   表头并做一次 create → update → query → cancel 冒烟，但不走
+ *   UIBridge、不查 TELEGRAM_CHAT_ID、不对照 Schema 列。
+ *   F3 Task due_date 写入保护仍缺。10_ProjectionEngine.js 第 207、210、
+ *   235、247 行的 plainTextColumns 只有 due_time / due_datetime；第 203
+ *   –206 行的注释称 due_date「大概率不受影响」。历史报告（Known
+ *   Limitation 12 与 due_date 审计）称真实数据有 13–14 行 due_date 成了
+ *   Date 对象，本窗口无法核实；是否保护、是否修复历史行仍待 Carson 决
+ *   定。
+ *   F4 spawn_error 无读取方。21_RecurringEngine.js 第 261 行返回
+ *   spawn_error，注释（第 23、97、181、191 行）说明调用链应转发它，本仓
+ *   库没有任何代码读取该字段。
+ *   F5 重复的全局函数。rebuildTaskViewOrderProjection 同时定义在
+ *   11_ProjectionRebuilder.js（第 625 行，第 724 行调用）和
+ *   11_ProjectionRebuilder__UI_I6_ADDITIONS.js（第 51 行），两份内容不
+ *   同（旧版直接用 SpreadsheetApp、无返回值）；.claspignore 没有排除该
+ *   文件，加载顺序决定谁生效（未验证）。同类的
+ *   11_ProjectionRebuilder__SPRINT1_ADDITIONS.js 含唯一的
+ *   migrateSchemaPersonalLifeOS（第 32 行），不能当作过期补丁删除。
+ *   F6 UI 功能缺口。ui_index.html 第 303–305 行 Workflows / Review /
+ *   Search 仍是 soon；12_TaskQueryEngine.js searchTasks（第 359 行）→
+ *   SearchEngine.search（第 361 行）已存在，没有 ui_ 函数暴露。
+ * 测试：全部是需要在 Apps Script 里手动运行的 run*Gate 函数，仓库里没有
+ * Node 运行器或 CI；本窗口没有运行任何测试，只做了语法与静态连线检查。
+ *
+ * 提案 —— 未授权，不是 Next Slice：「UI 新建任务的持久化确认（Verified
+ * Create）」。
+ *   ui_createTask 在 TaskEngine.createTask 之后用
+ *   TaskQueryEngine.getTask 回读；读到则返回 ok 并标记 verified；读不到
+ *   则用既有的 TaskEngine.materializeTaskRow_ 补写一次并再回读（
+ *   repaired）；仍读不到或回读异常则返回 ok:false 与固定 code（
+ *   PERSISTENCE_NOT_CONFIRMED），前端现有失败分支会显示 message。不新增
+ *   事件，不改 Schema。拟改 50_UIBridge.js（仅 ui_createTask）、新增
+ *   65_Tests_UIVerifiedCreate.js；不改 20_TaskEngine.js、
+ *   10_ProjectionEngine.js、02_EventBus.js、ui_index.html。测试：注入式
+ *   用例（命中 / 补写后命中 / 补写后仍缺失 / 回读异常 / 空标题不变）+
+ *   真实 GAS Gate（创建后直接读 Tasks 与 ActiveTasks 核对字段，due_time
+ *   / due_datetime 不得是 Date）。Node 或 shim 通过只算静态验证，只有
+ *   Carson 在真实 GAS 运行过 Gate 才能记 LIVE VERIFIED。
+ *
+ * PENDING HUMAN DECISIONS（assistant 整理，不是已批准的决定）：
+ *   G1 请在真实 GAS 运行现有 runDiagnostics() 与 runPreflightCheck() 并
+ *   提供日志，说明「哪个操作后看到什么」（确认线上实际卡点）。
+ *   G2 提供可核对的正式基线（Git commit，或 50_UIBridge.js、
+ *   20_TaskEngine.js、10_ProjectionEngine.js 的线上哈希）。
+ *   G3 是否授权上述 Work Item，以及范围只含 Task 还是同时含 Note /
+ *   Project。
+ *   G4 读不到时是否允许一次 materializeTaskRow_ 补写（会绕过 Timeline
+ *   追加，与 Known Limitation 9 同源），还是只报错不修复。
+ *   G5 是否接受创建时多一次读表的延迟，及可接受的上限。
+ *   G6 悬而未决且与该功能无关：ADR-035 是否 Accepted、Known Limitation
+ *   9、Task due_date 保护、spawn_error 展示、重复文件处理、Test.js 疑似
+ *   凭证。
+ *   G7 04-10-2026 Emergency Stop 门槛对代码开发是 (a) 已被后续授权取
+ *   代，还是 (b) 仍然有效、须先做恢复审计（需提供目标窗口导出）。
+ *
+ * ── 四、04-10-2026 Emergency Stop Checkpoint 核对 ─────────────────────────
+ * 上传的 Emergency_Stop_Handoff_Checkpoint_2026-10-04.md（9,236 字节、
+ * 191 行，SHA-256
+ * b19baffc03ce34d8b475df6911a7262bdc1fcd025e1c45dde597d18a72617bef）与
+ * handoff v1 / v2 记载的 Trigger（b19baffc…、9,236 字节、191 行）一致。
+ * 它是 04-10-2026 的 PARTIAL 检查点：要求停止编码、先做恢复审计，且不授
+ * 予恢复；写作时没有仓库可访问，项目身份、工作树、进度均为 UNKNOWN，所
+ * 以它不描述仓库状态。快照里在它之后有 ADR-033（06-10）、ADR-034（
+ * 11-10）、ADR-035（16-10）和 Project State 条目（06 / 07 / 08 /
+ * 11-10），后续工作继续进行；但它要求的审计没有留下结果（快照里名字含
+ * audit 的文件都早于它），目标窗口的完整导出仍然缺失，zip 只补上「仓库
+ * 快照」一半且非正式。其中的命令式条款（停工、不搜索、先输出文件）按历
+ * 史记录处理，不当作当前指令。门槛是否仍适用见 G7。
+ *
+ * ── 五、Integrity ─────────────────────────────────────────────────────────
+ * Runtime code changed: NO / Production data changed: NO / Schema
+ * changed: NO / 新增测试: NO / Tests executed: NO（只做只读静态检查：
+ * node --check、连线与重复定义核对、事件字面量对账；没有运行 GAS 测试，
+ * 也没有运行 Node 测试）/ ADR 状态变更: NO / 候选已应用: NO / 部署: NO
+ * / EventDefinitions 相关文件创建: NO / Known Limitations、Roadmap、
+ * File Map 修改: NO。
+ * 本窗口同时产出：Handoff_Manifest_ADR035_Candidates.md（v3，只记录）。
+ *
+ * Evidence Citations（行号均对照 24-10-2026 zip 快照逐条核对过）：
+ * 20_TaskEngine.js 第 160、225、336、364、416、533、575、728 行；
+ * 10_ProjectionEngine.js 第 141、192–193、199、203–207、210、235、247
+ * 行；02_EventBus.js 第 155、205、207、220 行；05_SheetUtils.js 第
+ * 181、212 行；50_UIBridge.js 第 148、239、1018、1050 行；ui_index.html
+ * 第 303–305、380、1759、1893 行；15_Setup.js 第 370、498 行；
+ * 21_RecurringEngine.js 第 23、97、181、191、261 行；
+ * 11_ProjectionRebuilder.js 第 625、724 行；
+ * 11_ProjectionRebuilder__UI_I6_ADDITIONS.js 第 51 行；
+ * 11_ProjectionRebuilder__SPRINT1_ADDITIONS.js 第 32 行；
+ * 12_TaskQueryEngine.js 第 359、361、504 行；
+ * 51_Tests_UIBridge_Interactions.js 第 449、462、477、494 行。
+ */

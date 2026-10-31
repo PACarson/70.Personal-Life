@@ -60,7 +60,7 @@
  * CONTRACT = 仅为观察或引用，不是已批准契约。
  *
  * 证据基准：70_Personal-Life-main.zip（REPORTED：sha256 cbb10235e490…，
- * 12-10-2026 12:54 打包；这两项均转述自交接记录，当前未直接核验原始 ZIP，打包时间未注明时区）。
+ * 2026-10-12 12:54 打包；这两项均转述自交接记录，当前未直接核验原始 ZIP，打包时间未注明时区）。
  * 下文的 file:line 以该快照为准，文件之后变化时行号可能失效。没有运行任何测试，没有任何实机（LIVE GAS）验证。
  */
 
@@ -140,7 +140,7 @@
  *                   task_id、converted_to_note_id，状态写死为 CONVERTED，不
  *                   读 payload.status）；在 TIMELINE_ENTITY_MAP 中；重放
  *                   20_TaskEngine.js:699
- *   相关 ADR      : ADR-2026-09-02-030（Accepted，04-09-2026）：C4 事件命名、
+ *   相关 ADR      : ADR-2026-09-02-030（Accepted，2026-09-04）：C4 事件命名、
  *                   C5 投影与 Timeline 登记、C6 重放分支、A2 源任务状态
  *                   CONVERTED。该 ADR 没有给出完整的 payload schema，也没有
  *                   声明 Required Fields（正文没有 payload 字段清单）
@@ -192,7 +192,7 @@
  *                   与 11_ProjectionRebuilder__UI_I6_ADDITIONS.js:56 处理
  *   Timeline      : 有意不进 TIMELINE_ENTITY_MAP（10_ProjectionEngine.js 的
  *                   map 注释；00_Drag_Ordering_ADR.js 698–701）
- *   相关 ADR / 文档: ADR-2026-08-26-026（Accepted，11-09-2026；ADR 自称
+ *   相关 ADR / 文档: ADR-2026-08-26-026（Accepted，2026-09-11；ADR 自称
  *                   LIVE VERIFIED——只是 ADR 自己的记录，REPORTED，本次
  *                   没有复核）及设计材料 00_Drag_Ordering_ADR.js（H.3 的
  *                   事件语义 424–436，J.5 647–655，J.6 698–701）。它们描述了
@@ -249,7 +249,7 @@
  *                   Standard 格式定义（VERIFIED）
  *   外部消费方    : UNVERIFIED——上述快照里没有来自 Reminder OS 的权威证据。
  *                   00_Implementation_Plan_TaskReminder_EventConsumer.js 的
- *                   状态是 Plan — Pending Review（27-08-2026），它是计划，
+ *                   状态是 Plan — Pending Review（2026-08-27），它是计划，
  *                   不是证据；本目录不声称 Reminder OS 消费该事件
  *   payload       : 本目录不记录（外部契约 UNVERIFIED）
  *
@@ -453,7 +453,7 @@
  *   1. 「〇」节的 A–F 分类和条目的收录，本身不决定、增加或取消任何事件的
  *      Execution 订阅资格；也不能据某个事件所在的分类，推断它具有或不具有
  *      订阅资格。
- *   2. §二 所指的集合以 §二 原文的列举为准（既有 5 个 + v5.0 新增 15 个 +
+ *   2. §二 所指的集合以 §二 原文为准（既有 5 个 + v5.0 新增 15 个 +
  *      本次 v5.1 新增/改名 6 个）。已属该集合的事件，不因被列入 C、D、E 类
  *      而改变其既有地位。REMINDER_SENT（另见 A 类）和 REMINDER_REQUESTED
  *      （另见 E 类）同时被列入 D 类。D 类收录不改变它们是否属于 §二 所指的
